@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  cubenexus-db:
+    image: postgres:16-alpine
+    container_name: cubenexus-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: CubeNexus
+      POSTGRES_USER: cubenexus
+      POSTGRES_PASSWORD: 123456
+    ports:
+      - "5432:5432"
+    volumes:
+      - cubenexus_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - cubenexus-network
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: cubenexus-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@cubenexus.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      - cubenexus-db
+    networks:
+      - cubenexus-network
+
+volumes:
+  cubenexus_data:
+
+networks:
+  cubenexus-network:
+    driver: bridge
