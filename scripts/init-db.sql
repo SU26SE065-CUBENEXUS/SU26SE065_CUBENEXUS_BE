@@ -2,7 +2,6 @@
 -- 1. MASTER DATA & IDENTITY
 -- ==========================================
 
--- Bảng tài khoản người dùng
 CREATE TABLE users (
     id UUID PRIMARY KEY,
     user_code VARCHAR(255) UNIQUE NOT NULL,
@@ -10,6 +9,7 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     display_name VARCHAR(100) NOT NULL,
     avatar_url TEXT,
+    user_role VARCHAR(20) NOT NULL,  -- 'admin', 'player', 'judge', 'organizer'
     is_active BOOLEAN DEFAULT true,
     is_banned BOOLEAN DEFAULT false,
     ban_reason TEXT,
@@ -17,23 +17,6 @@ CREATE TABLE users (
     updated_at TIMESTAMPTZ NOT NULL
 );
 
--- Bảng vai trò hệ thống
-CREATE TABLE roles (
-    id UUID PRIMARY KEY,
-    name VARCHAR(50) UNIQUE NOT NULL,
-    description TEXT
-);
-
--- Gán vai trò cho người dùng (n-n)
-CREATE TABLE user_roles (
-    id UUID PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id),
-    role_id UUID NOT NULL REFERENCES roles(id),
-    granted_by UUID REFERENCES users(id),
-    granted_at TIMESTAMPTZ NOT NULL
-);
-
--- Loại puzzle (3x3, 2x2, Megaminx...)
 CREATE TABLE puzzle_types (
     id UUID PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -43,42 +26,22 @@ CREATE TABLE puzzle_types (
     created_at TIMESTAMPTZ NOT NULL
 );
 
--- Luật phạt chuẩn WCA (+2, DNF, OK)
-CREATE TABLE penalty_types (
-    id UUID PRIMARY KEY,
-    code VARCHAR(10) UNIQUE NOT NULL,
-    label VARCHAR(50) NOT NULL,
-    time_addition_ms INTEGER DEFAULT 0,
-    is_disqualified BOOLEAN DEFAULT false
-);
-
--- Tham số Elo do Admin quản lý
 CREATE TABLE elo_config (
     id UUID PRIMARY KEY,
     k_factor_placement INTEGER NOT NULL DEFAULT 100,
     k_factor_standard INTEGER NOT NULL DEFAULT 20,
     placement_match_count INTEGER NOT NULL DEFAULT 5,
     default_elo INTEGER NOT NULL DEFAULT 1000,
+    seed_thresholds JSONB,
     updated_by UUID REFERENCES users(id),
     updated_at TIMESTAMPTZ NOT NULL
-);
-
--- Ngưỡng Ao5 -> Elo khởi điểm
-CREATE TABLE elo_seed_thresholds (
-    id UUID PRIMARY KEY,
-    puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
-    max_time_ms INTEGER,
-    min_time_ms INTEGER,
-    elo_value INTEGER NOT NULL,
-    sort_order INTEGER NOT NULL
 );
 
 -- ==========================================
 -- 2. OFFLINE TOURNAMENT
 -- ==========================================
 
--- Giải đấu offline
-CREATE TABLE tournaments (
+CREATE TABLE offline_tournaments (
     id UUID PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
@@ -91,16 +54,16 @@ CREATE TABLE tournaments (
     updated_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE tournament_managers (
+CREATE TABLE offline_tournament_managers (
     id UUID PRIMARY KEY,
-    tournament_id UUID NOT NULL REFERENCES tournaments(id),
+    tournament_id UUID NOT NULL REFERENCES offline_tournaments(id),
     user_id UUID NOT NULL REFERENCES users(id),
     assigned_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE events (
+CREATE TABLE offline_events (
     id UUID PRIMARY KEY,
-    tournament_id UUID NOT NULL REFERENCES tournaments(id),
+    tournament_id UUID NOT NULL REFERENCES offline_tournaments(id),
     puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
     event_format_code VARCHAR(20) NOT NULL,
     time_limit_ms INTEGER,
@@ -110,16 +73,16 @@ CREATE TABLE events (
     created_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE medley_event_puzzles (
+CREATE TABLE offline_medley_puzzles (
     id UUID PRIMARY KEY,
-    event_id UUID NOT NULL REFERENCES events(id),
+    event_id UUID NOT NULL REFERENCES offline_events(id),
     puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
     sort_order INTEGER NOT NULL
 );
 
-CREATE TABLE registrations (
+CREATE TABLE offline_registrations (
     id UUID PRIMARY KEY,
-    tournament_id UUID NOT NULL REFERENCES tournaments(id),
+    tournament_id UUID NOT NULL REFERENCES offline_tournaments(id),
     user_id UUID NOT NULL REFERENCES users(id),
     status_code VARCHAR(20) NOT NULL,
     qr_token VARCHAR(255) UNIQUE NOT NULL,
@@ -127,70 +90,68 @@ CREATE TABLE registrations (
     checked_in_at TIMESTAMPTZ
 );
 
-CREATE TABLE groups (
+CREATE TABLE offline_groups (
     id UUID PRIMARY KEY,
-    event_id UUID NOT NULL REFERENCES events(id),
+    event_id UUID NOT NULL REFERENCES offline_events(id),
     round_number INTEGER NOT NULL,
     group_name VARCHAR(50),
     status_code VARCHAR(20) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE group_competitors (
+CREATE TABLE offline_group_competitors (
     id UUID PRIMARY KEY,
-    group_id UUID NOT NULL REFERENCES groups(id),
-    registration_id UUID NOT NULL REFERENCES registrations(id),
+    group_id UUID NOT NULL REFERENCES offline_groups(id),
+    registration_id UUID NOT NULL REFERENCES offline_registrations(id),
     seed_time_ms INTEGER,
     station_number INTEGER
 );
 
-CREATE TABLE scramble_sets (
+CREATE TABLE offline_scramble_sets (
     id UUID PRIMARY KEY,
-    group_id UUID NOT NULL REFERENCES groups(id),
+    group_id UUID NOT NULL REFERENCES offline_groups(id),
     pdf_url TEXT,
     pdf_password_hash VARCHAR(255),
     generated_at TIMESTAMPTZ NOT NULL,
     generated_by UUID REFERENCES users(id)
 );
 
-CREATE TABLE scrambles (
+CREATE TABLE offline_scrambles (
     id UUID PRIMARY KEY,
-    scramble_set_id UUID NOT NULL REFERENCES scramble_sets(id),
+    scramble_set_id UUID NOT NULL REFERENCES offline_scramble_sets(id),
     puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
     solve_number INTEGER NOT NULL,
     sequence TEXT NOT NULL,
     sort_order INTEGER NOT NULL
 );
 
-CREATE TABLE results (
+CREATE TABLE offline_results (
     id UUID PRIMARY KEY,
-    group_competitor_id UUID NOT NULL REFERENCES group_competitors(id),
-    scramble_id UUID NOT NULL REFERENCES scrambles(id),
+    group_competitor_id UUID NOT NULL REFERENCES offline_group_competitors(id),
+    scramble_id UUID NOT NULL REFERENCES offline_scrambles(id),
     judged_by UUID NOT NULL REFERENCES users(id),
     solve_number INTEGER NOT NULL,
     raw_time_ms INTEGER,
     final_time_ms INTEGER,
-    penalty_type_id UUID REFERENCES penalty_types(id),
-    is_dnf BOOLEAN DEFAULT false,
+    penalty VARCHAR(10) DEFAULT 'ok',
     esignature_data TEXT,
     signed_at TIMESTAMPTZ,
     submitted_at TIMESTAMPTZ NOT NULL,
     is_locked BOOLEAN DEFAULT false
 );
 
-CREATE TABLE medley_result_details (
+CREATE TABLE offline_medley_result_details (
     id UUID PRIMARY KEY,
-    result_id UUID NOT NULL REFERENCES results(id),
-    medley_puzzle_id UUID NOT NULL REFERENCES medley_event_puzzles(id),
+    result_id UUID NOT NULL REFERENCES offline_results(id),
+    medley_puzzle_id UUID NOT NULL REFERENCES offline_medley_puzzles(id),
     raw_time_ms INTEGER,
-    penalty_type_id UUID REFERENCES penalty_types(id),
-    is_dnf BOOLEAN DEFAULT false,
+    penalty VARCHAR(10) DEFAULT 'ok',
     sort_order INTEGER NOT NULL
 );
 
-CREATE TABLE disputes (
+CREATE TABLE offline_disputes (
     id UUID PRIMARY KEY,
-    result_id UUID NOT NULL REFERENCES results(id),
+    result_id UUID NOT NULL REFERENCES offline_results(id),
     reported_by UUID NOT NULL REFERENCES users(id),
     reason TEXT NOT NULL,
     status_code VARCHAR(20) NOT NULL,
@@ -206,7 +167,7 @@ CREATE TABLE disputes (
 
 CREATE TABLE online_profiles (
     id UUID PRIMARY KEY,
-    user_id UUID UNIQUE NOT NULL REFERENCES users(id),
+    user_id UUID NOT NULL REFERENCES users(id),
     puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
     elo INTEGER NOT NULL DEFAULT 1000,
     peak_elo INTEGER,
@@ -216,10 +177,11 @@ CREATE TABLE online_profiles (
     total_wins INTEGER DEFAULT 0,
     total_losses INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL
+    updated_at TIMESTAMPTZ NOT NULL,
+    UNIQUE(user_id, puzzle_type_id)
 );
 
-CREATE TABLE matchmaking_queue (
+CREATE TABLE online_matchmaking_queue (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id),
     online_profile_id UUID NOT NULL REFERENCES online_profiles(id),
@@ -237,29 +199,22 @@ CREATE TABLE online_matches (
     winner_id UUID REFERENCES users(id),
     status_code VARCHAR(20) NOT NULL,
     room_token VARCHAR(255) UNIQUE NOT NULL,
-    qr_session_code VARCHAR(255),
     player1_time_ms INTEGER,
-    player2_time_ms INTEGER,
     player1_elo_before INTEGER,
-    player2_elo_before INTEGER,
     player1_elo_after INTEGER,
+    player1_device_info TEXT,
+    player1_connected_at TIMESTAMPTZ,
+    player2_time_ms INTEGER,
+    player2_elo_before INTEGER,
     player2_elo_after INTEGER,
+    player2_device_info TEXT,
+    player2_connected_at TIMESTAMPTZ,
     started_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE mobile_timer_sessions (
-    id UUID PRIMARY KEY,
-    match_id UUID NOT NULL REFERENCES online_matches(id),
-    user_id UUID NOT NULL REFERENCES users(id),
-    qr_session_code VARCHAR(255) NOT NULL,
-    device_info TEXT,
-    connected_at TIMESTAMPTZ,
-    is_active BOOLEAN DEFAULT false
-);
-
-CREATE TABLE elo_history (
+CREATE TABLE online_elo_history (
     id UUID PRIMARY KEY,
     online_profile_id UUID NOT NULL REFERENCES online_profiles(id),
     match_id UUID REFERENCES online_matches(id),
@@ -270,7 +225,7 @@ CREATE TABLE elo_history (
     changed_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE fraud_reports (
+CREATE TABLE online_fraud_reports (
     id UUID PRIMARY KEY,
     match_id UUID NOT NULL REFERENCES online_matches(id),
     reported_by UUID NOT NULL REFERENCES users(id),
@@ -286,10 +241,10 @@ CREATE TABLE fraud_reports (
 );
 
 -- ==========================================
--- 4. ASYNC TOURNAMENT
+-- 4. VIDEO CHALLENGES (giải đấu bất đồng bộ - user tự giải ở nhà, quay video nộp)
 -- ==========================================
 
-CREATE TABLE async_tournaments (
+CREATE TABLE video_challenges (
     id UUID PRIMARY KEY,
     puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
     title VARCHAR(255) NOT NULL,
@@ -297,18 +252,18 @@ CREATE TABLE async_tournaments (
     scramble_sequence TEXT NOT NULL,
     start_at TIMESTAMPTZ NOT NULL,
     end_at TIMESTAMPTZ NOT NULL,
-    status_code VARCHAR(20) NOT NULL,
+    status_code VARCHAR(20) NOT NULL,  -- 'upcoming','active','ended'
     created_by UUID NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE async_submissions (
+CREATE TABLE video_challenge_submissions (
     id UUID PRIMARY KEY,
-    async_tournament_id UUID NOT NULL REFERENCES async_tournaments(id),
+    challenge_id UUID NOT NULL REFERENCES video_challenges(id),
     user_id UUID NOT NULL REFERENCES users(id),
     video_url TEXT NOT NULL,
     claimed_time_ms INTEGER NOT NULL,
-    status_code VARCHAR(20) NOT NULL,
+    status_code VARCHAR(20) NOT NULL,  -- 'pending','approved','rejected'
     reviewed_by UUID REFERENCES users(id),
     admin_note TEXT,
     submitted_at TIMESTAMPTZ NOT NULL,
@@ -319,21 +274,13 @@ CREATE TABLE async_submissions (
 -- 5. PRACTICE
 -- ==========================================
 
-CREATE TABLE practice_sessions (
+CREATE TABLE practice_solves (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id),
     puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
-    started_at TIMESTAMPTZ NOT NULL,
-    ended_at TIMESTAMPTZ
-);
-
-CREATE TABLE practice_solves (
-    id UUID PRIMARY KEY,
-    session_id UUID NOT NULL REFERENCES practice_sessions(id),
     scramble_sequence TEXT NOT NULL,
     time_ms INTEGER NOT NULL,
-    penalty_type_id UUID REFERENCES penalty_types(id),
-    is_dnf BOOLEAN DEFAULT false,
+    penalty VARCHAR(10) DEFAULT 'ok',
     solved_at TIMESTAMPTZ NOT NULL
 );
 
@@ -353,7 +300,6 @@ CREATE TABLE notifications (
     read_at TIMESTAMPTZ
 );
 
-
 -- ==========================================
 -- 7. REFRESH TOKENS
 -- ==========================================
@@ -367,3 +313,19 @@ CREATE TABLE refresh_tokens (
     revoked_at TIMESTAMPTZ,
     replaced_by VARCHAR(255)
 );
+
+-- ==========================================
+-- INDEXES
+-- ==========================================
+
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX idx_online_profiles_user_puzzle ON online_profiles(user_id, puzzle_type_id);
+CREATE INDEX idx_online_matches_players ON online_matches(player1_id, player2_id);
+CREATE INDEX idx_online_elo_history_profile ON online_elo_history(online_profile_id);
+CREATE INDEX idx_online_matchmaking_status ON online_matchmaking_queue(status_code, puzzle_type_id);
+CREATE INDEX idx_offline_registrations_tournament ON offline_registrations(tournament_id);
+CREATE INDEX idx_offline_results_competitor ON offline_results(group_competitor_id);
+CREATE INDEX idx_practice_solves_user_puzzle ON practice_solves(user_id, puzzle_type_id);
+CREATE INDEX idx_notifications_user_unread ON notifications(user_id, is_read);
+CREATE INDEX idx_video_challenge_submissions_challenge ON video_challenge_submissions(challenge_id);
