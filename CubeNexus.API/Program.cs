@@ -1,7 +1,10 @@
 using System.Text;
-using CubeNexus.Application.Interfaces;
+using CubeNexus.Application.Interfaces.Repositories;
+using CubeNexus.Application.Interfaces.Services;
+using CubeNexus.Infrastructure;
 using CubeNexus.Infrastructure.Identity;
 using CubeNexus.Infrastructure.Persistence;
+using CubeNexus.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -73,8 +76,15 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// Services
+// Unit of Work (gom tất cả repositories, dùng chung 1 DbContext)
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+// Services (business logic – inject IUnitOfWork, không phụ thuộc DbContext trực tiếp)
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IEloSeedingService, EloSeedingService>();
+builder.Services.AddScoped<IOnlineArenaService, OnlineArenaService>();
+builder.Services.AddScoped<IPuzzleService, PuzzleService>();
+builder.Services.AddScoped<IPracticeService, PracticeService>();
 
 var app = builder.Build();
 

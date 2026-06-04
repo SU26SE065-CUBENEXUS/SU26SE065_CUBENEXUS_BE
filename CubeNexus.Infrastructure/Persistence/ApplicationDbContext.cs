@@ -12,8 +12,6 @@ public class ApplicationDbContext : DbContext
 
     // 1. Master Data & Identity
     public DbSet<User> Users => Set<User>();
-    public DbSet<Role> Roles => Set<Role>();
-    public DbSet<UserRole> UserRoles => Set<UserRole>();
     public DbSet<PuzzleType> PuzzleTypes => Set<PuzzleType>();
     public DbSet<PenaltyType> PenaltyTypes => Set<PenaltyType>();
     public DbSet<EloConfig> EloConfigs => Set<EloConfig>();
@@ -25,6 +23,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<Event> Events => Set<Event>();
     public DbSet<MedleyEventPuzzle> MedleyEventPuzzles => Set<MedleyEventPuzzle>();
     public DbSet<Registration> Registrations => Set<Registration>();
+    public DbSet<OfflineRegistrationEvent> OfflineRegistrationEvents => Set<OfflineRegistrationEvent>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupCompetitor> GroupCompetitors => Set<GroupCompetitor>();
     public DbSet<ScrambleSet> ScrambleSets => Set<ScrambleSet>();
@@ -48,6 +47,7 @@ public class ApplicationDbContext : DbContext
     // 5. Practice
     public DbSet<PracticeSession> PracticeSessions => Set<PracticeSession>();
     public DbSet<PracticeSolve> PracticeSolves => Set<PracticeSolve>();
+    public DbSet<PracticeAo5Snapshot> PracticeAo5Snapshots => Set<PracticeAo5Snapshot>();
 
     // 6. Notifications
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -61,8 +61,6 @@ public class ApplicationDbContext : DbContext
 
         // Map entity to table names
         modelBuilder.Entity<User>().ToTable("users");
-        modelBuilder.Entity<Role>().ToTable("roles");
-        modelBuilder.Entity<UserRole>().ToTable("user_roles");
         modelBuilder.Entity<PuzzleType>().ToTable("puzzle_types");
         modelBuilder.Entity<PenaltyType>().ToTable("penalty_types");
         modelBuilder.Entity<EloConfig>().ToTable("elo_config");
@@ -72,6 +70,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<Event>().ToTable("events");
         modelBuilder.Entity<MedleyEventPuzzle>().ToTable("medley_event_puzzles");
         modelBuilder.Entity<Registration>().ToTable("registrations");
+        modelBuilder.Entity<OfflineRegistrationEvent>().ToTable("offline_registration_events");
         modelBuilder.Entity<Group>().ToTable("groups");
         modelBuilder.Entity<GroupCompetitor>().ToTable("group_competitors");
         modelBuilder.Entity<ScrambleSet>().ToTable("scramble_sets");
@@ -89,17 +88,11 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<AsyncSubmission>().ToTable("async_submissions");
         modelBuilder.Entity<PracticeSession>().ToTable("practice_sessions");
         modelBuilder.Entity<PracticeSolve>().ToTable("practice_solves");
+        modelBuilder.Entity<PracticeAo5Snapshot>().ToTable("practice_ao5_snapshots");
         modelBuilder.Entity<Notification>().ToTable("notifications");
         modelBuilder.Entity<RefreshToken>().ToTable("refresh_tokens");
 
         // Configure relationships with multiple FK to User
-        modelBuilder.Entity<UserRole>(entity =>
-        {
-            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
-            entity.HasOne(e => e.Role).WithMany().HasForeignKey(e => e.RoleId);
-            entity.HasOne(e => e.GrantedByUser).WithMany().HasForeignKey(e => e.GrantedBy);
-        });
-
         modelBuilder.Entity<Tournament>(entity =>
         {
             entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedBy);
@@ -115,6 +108,18 @@ public class ApplicationDbContext : DbContext
         {
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
             entity.HasOne(e => e.Tournament).WithMany().HasForeignKey(e => e.TournamentId);
+        });
+
+        modelBuilder.Entity<OfflineRegistrationEvent>(entity =>
+        {
+            entity.HasOne(e => e.Registration).WithMany().HasForeignKey(e => e.RegistrationId);
+            entity.HasOne(e => e.Event).WithMany().HasForeignKey(e => e.EventId);
+        });
+
+        modelBuilder.Entity<GroupCompetitor>(entity =>
+        {
+            entity.HasOne(e => e.Group).WithMany().HasForeignKey(e => e.GroupId);
+            entity.HasOne(e => e.OfflineRegistrationEvent).WithMany().HasForeignKey(e => e.RegistrationEventId);
         });
 
         modelBuilder.Entity<ScrambleSet>(entity =>
@@ -177,6 +182,14 @@ public class ApplicationDbContext : DbContext
         {
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
             entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId);
+            entity.HasOne(e => e.PracticeAo5Snapshot).WithMany().HasForeignKey(e => e.PracticeAo5SnapshotId);
+        });
+
+        modelBuilder.Entity<PracticeAo5Snapshot>(entity =>
+        {
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+            entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId);
+            entity.HasOne(e => e.SeedThreshold).WithMany().HasForeignKey(e => e.SeedThresholdId);
         });
 
         modelBuilder.Entity<MatchmakingQueue>(entity =>

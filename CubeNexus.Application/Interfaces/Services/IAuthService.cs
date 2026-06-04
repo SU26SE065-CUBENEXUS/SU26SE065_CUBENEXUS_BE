@@ -1,6 +1,6 @@
 using CubeNexus.Application.DTOs.Auth;
 
-namespace CubeNexus.Application.Interfaces;
+namespace CubeNexus.Application.Interfaces.Services;
 
 public interface IAuthService
 {

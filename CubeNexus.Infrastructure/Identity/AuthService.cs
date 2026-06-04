@@ -3,7 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using CubeNexus.Application.DTOs.Auth;
-using CubeNexus.Application.Interfaces;
+using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Domain.Entities;
 using CubeNexus.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -41,6 +41,7 @@ public class AuthService : IAuthService
             PasswordHash = HashPassword(request.Password),
             DisplayName = request.DisplayName,
             AvatarUrl = request.AvatarUrl,
+            UserRole = "COMPETITOR",
             IsActive = true,
             IsBanned = false,
             CreatedAt = DateTime.UtcNow,
@@ -101,7 +102,7 @@ public class AuthService : IAuthService
         await _context.SaveChangesAsync();
 
         var user = refreshToken.User;
-        var accessToken = GenerateAccessToken(user.Id, user.Email, user.DisplayName);
+        var accessToken = GenerateAccessToken(user.Id, user.Email, user.DisplayName, user.UserRole.ToUpperInvariant());
 
         return new LoginResponseDto
         {
@@ -115,7 +116,7 @@ public class AuthService : IAuthService
 
     private async Task<LoginResponseDto> GenerateTokenResponseAsync(User user)
     {
-        var accessToken = GenerateAccessToken(user.Id, user.Email, user.DisplayName);
+        var accessToken = GenerateAccessToken(user.Id, user.Email, user.DisplayName, user.UserRole.ToUpperInvariant());
         var refreshToken = GenerateRefreshToken(user.Id);
 
         await _context.RefreshTokens.AddAsync(refreshToken);
@@ -131,7 +132,7 @@ public class AuthService : IAuthService
         };
     }
 
-    private string GenerateAccessToken(Guid userId, string email, string displayName)
+    private string GenerateAccessToken(Guid userId, string email, string displayName, string userRole)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -141,6 +142,7 @@ public class AuthService : IAuthService
             new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
             new Claim(JwtRegisteredClaimNames.Email, email),
             new Claim("display_name", displayName),
+            new Claim(ClaimTypes.Role, userRole.ToUpperInvariant()),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 

@@ -1,5 +1,5 @@
 using CubeNexus.Application.DTOs.Auth;
-using CubeNexus.Application.Interfaces;
+using CubeNexus.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CubeNexus.API.Controllers;

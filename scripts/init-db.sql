@@ -10,27 +10,12 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     display_name VARCHAR(100) NOT NULL,
     avatar_url TEXT,
+    user_role VARCHAR(30) NOT NULL DEFAULT 'COMPETITOR', -- ADMIN, MANAGER, JUDGE, COMPETITOR
     is_active BOOLEAN DEFAULT true,
     is_banned BOOLEAN DEFAULT false,
     ban_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
-);
-
--- Bảng vai trò hệ thống
-CREATE TABLE roles (
-    id UUID PRIMARY KEY,
-    name VARCHAR(50) UNIQUE NOT NULL,
-    description TEXT
-);
-
--- Gán vai trò cho người dùng (n-n)
-CREATE TABLE user_roles (
-    id UUID PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id),
-    role_id UUID NOT NULL REFERENCES roles(id),
-    granted_by UUID REFERENCES users(id),
-    granted_at TIMESTAMPTZ NOT NULL
 );
 
 -- Loại puzzle (3x3, 2x2, Megaminx...)
@@ -52,24 +37,42 @@ CREATE TABLE penalty_types (
     is_disqualified BOOLEAN DEFAULT false
 );
 
--- Tham số Elo do Admin quản lý
+-- ==========================================
+-- Tham số Elo & Seeding do Admin quản lý
+-- ==========================================
+
+-- Tham số Elo toàn cục do Admin cấu hình
 CREATE TABLE elo_config (
     id UUID PRIMARY KEY,
+    -- Hệ số K trong giai đoạn placement (cao, ví dụ 100)
     k_factor_placement INTEGER NOT NULL DEFAULT 100,
+    -- Hệ số K sau khi hoàn thành placement (ổn định, ví dụ 20-30)
     k_factor_standard INTEGER NOT NULL DEFAULT 20,
+    -- Số trận placement bắt buộc (mặc định 5)
     placement_match_count INTEGER NOT NULL DEFAULT 5,
+    -- Elo mặc định nếu không có dữ liệu seeding
     default_elo INTEGER NOT NULL DEFAULT 1000,
+    -- Số lượt giải Practice tối thiểu để tính Ao5 seeding (mặc định 5)
+    min_practice_solves INTEGER NOT NULL DEFAULT 5,
     updated_by UUID REFERENCES users(id),
     updated_at TIMESTAMPTZ NOT NULL
 );
 
--- Ngưỡng Ao5 -> Elo khởi điểm
+-- Ngưỡng Ao5 -> Elo khởi điểm (theo từng puzzle type)
+-- Mỗi dòng định nghĩa một khoảng thời gian [min_time_ms, max_time_ms)
+-- Ví dụ: Ao5 < 15s -> 1500 Elo; Ao5 20s-30s -> 1300 Elo
 CREATE TABLE elo_seed_thresholds (
     id UUID PRIMARY KEY,
     puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
-    max_time_ms INTEGER,
+    -- Nhãn mô tả ngưỡng, ví dụ: "Dưới 15 giây", "60 giây trở lên"
+    label VARCHAR(100),
+    -- Thời gian Ao5 tối thiểu (ms), NULL = không giới hạn dưới
     min_time_ms INTEGER,
+    -- Thời gian Ao5 tối đa (ms), NULL = không giới hạn trên (ngưỡng cuối cùng)
+    max_time_ms INTEGER,
+    -- Điểm Elo seeding tương ứng
     elo_value INTEGER NOT NULL,
+    -- Thứ tự ưu tiên kiểm tra (từ nhỏ đến lớn)
     sort_order INTEGER NOT NULL
 );
 
@@ -127,6 +130,16 @@ CREATE TABLE registrations (
     checked_in_at TIMESTAMPTZ
 );
 
+CREATE TABLE offline_registration_events (
+    id UUID PRIMARY KEY,
+    registration_id UUID NOT NULL REFERENCES registrations(id),
+    event_id UUID NOT NULL REFERENCES events(id),
+    status_code VARCHAR(20) NOT NULL DEFAULT 'REGISTERED',
+    seed_time_ms INTEGER,
+    updated_at TIMESTAMPTZ NOT NULL,
+    UNIQUE(registration_id, event_id)
+);
+
 CREATE TABLE groups (
     id UUID PRIMARY KEY,
     event_id UUID NOT NULL REFERENCES events(id),
@@ -139,9 +152,10 @@ CREATE TABLE groups (
 CREATE TABLE group_competitors (
     id UUID PRIMARY KEY,
     group_id UUID NOT NULL REFERENCES groups(id),
-    registration_id UUID NOT NULL REFERENCES registrations(id),
+    registration_event_id UUID NOT NULL REFERENCES offline_registration_events(id),
     seed_time_ms INTEGER,
-    station_number INTEGER
+    station_number INTEGER,
+    UNIQUE(group_id, registration_event_id)
 );
 
 CREATE TABLE scramble_sets (
@@ -204,17 +218,70 @@ CREATE TABLE disputes (
 -- 3. ONLINE ARENA
 -- ==========================================
 
+-- ==========================================
+-- Giai đoạn 1: PRACTICE Seeding
+-- Lưu snapshot Ao5 đủ điều kiện dùng làm seeding cho Online Arena
+-- Được tạo khi người chơi hoàn thành đủ min_practice_solves lượt giải
+-- ==========================================
+CREATE TABLE practice_ao5_snapshots (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
+    -- Giá trị Ao5 tính được (ms), đã loại bỏ best/worst theo chuẩn WCA
+    ao5_time_ms INTEGER NOT NULL,
+    -- Elo seeding được gán dựa trên ngưỡng elo_seed_thresholds
+    assigned_elo INTEGER NOT NULL,
+    -- Ngưỡng áp dụng
+    seed_threshold_id UUID REFERENCES elo_seed_thresholds(id),
+    -- Thời điểm snapshot được tạo
+    calculated_at TIMESTAMPTZ NOT NULL,
+    -- Snapshot này đã được dùng để khởi tạo online_profile chưa
+    is_used_for_seeding BOOLEAN DEFAULT false
+);
+
+-- Hồ sơ Online Arena (mỗi user - puzzle_type có 1 profile)
+-- ==========================================
+-- Giai đoạn 1 → 2 → 3 được theo dõi qua các trường trong bảng này
+-- ==========================================
 CREATE TABLE online_profiles (
     id UUID PRIMARY KEY,
     user_id UUID UNIQUE NOT NULL REFERENCES users(id),
     puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
+
+    -- Điểm Elo hiện tại
     elo INTEGER NOT NULL DEFAULT 1000,
+    -- Điểm Elo cao nhất từng đạt được
     peak_elo INTEGER,
-    placement_matches_done INTEGER DEFAULT 0,
-    is_placement_complete BOOLEAN DEFAULT false,
+
+    -- === SEEDING (Giai đoạn 1) ===
+    -- Elo seeding ban đầu được gán từ Practice Ao5 hoặc giá trị mặc định
+    seed_elo INTEGER,
+    -- Nguồn seeding: 'PRACTICE', 'DEFAULT'
     seed_source_code VARCHAR(20),
+    -- Giá trị Ao5 Practice dùng để seeding (ms)
+    practice_ao5_ms INTEGER,
+    -- Tham chiếu snapshot Ao5 đã dùng để seeding
+    practice_ao5_snapshot_id UUID REFERENCES practice_ao5_snapshots(id),
+
+    -- === PLACEMENT PHASE (Giai đoạn 2) ===
+    -- Số trận placement đã hoàn thành (tối đa = elo_config.placement_match_count)
+    placement_matches_done INTEGER DEFAULT 0,
+    -- TRUE khi đã hoàn thành đủ số trận placement
+    is_placement_complete BOOLEAN DEFAULT false,
+    -- Thời điểm hoàn thành placement (Elo chính thức hiển thị trên bảng xếp hạng)
+    placement_completed_at TIMESTAMPTZ,
+
+    -- === K-FACTOR (Giai đoạn 2 → 3) ===
+    -- Hệ số K hiện tại của người chơi này
+    -- Giai đoạn 2: = elo_config.k_factor_placement (cao, ví dụ 100)
+    -- Giai đoạn 3: = elo_config.k_factor_standard (ổn định, ví dụ 20-30)
+    k_factor_current INTEGER NOT NULL DEFAULT 100,
+
+    -- === THỐNG KÊ ===
     total_wins INTEGER DEFAULT 0,
     total_losses INTEGER DEFAULT 0,
+    total_draws INTEGER DEFAULT 0,
+
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
@@ -259,13 +326,24 @@ CREATE TABLE mobile_timer_sessions (
     is_active BOOLEAN DEFAULT false
 );
 
+-- Lịch sử thay đổi Elo (ghi lại mỗi lần Elo thay đổi)
 CREATE TABLE elo_history (
     id UUID PRIMARY KEY,
     online_profile_id UUID NOT NULL REFERENCES online_profiles(id),
+    -- Trận đấu gây ra thay đổi (NULL nếu là seeding ban đầu)
     match_id UUID REFERENCES online_matches(id),
     elo_before INTEGER NOT NULL,
     elo_after INTEGER NOT NULL,
     delta INTEGER NOT NULL,
+    -- Hệ số K đã dùng để tính toán lần thay đổi này
+    k_factor_used INTEGER,
+    -- Kết quả thực tế S: 1.0 (thắng), 0.0 (thua), 0.5 (hòa)
+    actual_score NUMERIC(3,1),
+    -- Kết quả kỳ vọng E theo công thức Elo
+    expected_score NUMERIC(6,4),
+    -- TRUE nếu đây là trận trong giai đoạn Placement Phase
+    is_placement_match BOOLEAN DEFAULT false,
+    -- Mã lý do thay đổi: 'PLACEMENT_MATCH', 'STANDARD_MATCH', 'SEEDING_INIT', 'ADMIN_ADJUST'
     reason_code VARCHAR(50),
     changed_at TIMESTAMPTZ NOT NULL
 );
