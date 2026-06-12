@@ -12,4 +12,5 @@ public class Registration
 
     public Tournament Tournament { get; set; } = null!;
     public User User { get; set; } = null!;
+    public ICollection<OfflineRegistrationEvent> OfflineRegistrationEvents { get; set; } = new List<OfflineRegistrationEvent>();
 }

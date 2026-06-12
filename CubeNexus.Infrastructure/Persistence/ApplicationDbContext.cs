@@ -31,6 +31,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<Result> Results => Set<Result>();
     public DbSet<MedleyResultDetail> MedleyResultDetails => Set<MedleyResultDetail>();
     public DbSet<Dispute> Disputes => Set<Dispute>();
+    public DbSet<ResultAuditLog> ResultAuditLogs => Set<ResultAuditLog>();
 
     // 3. Online Arena
     public DbSet<OnlineProfile> OnlineProfiles => Set<OnlineProfile>();
@@ -78,6 +79,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<Result>().ToTable("results");
         modelBuilder.Entity<MedleyResultDetail>().ToTable("medley_result_details");
         modelBuilder.Entity<Dispute>().ToTable("disputes");
+        modelBuilder.Entity<ResultAuditLog>().ToTable("result_audit_logs");
         modelBuilder.Entity<OnlineProfile>().ToTable("online_profiles");
         modelBuilder.Entity<MatchmakingQueue>().ToTable("matchmaking_queue");
         modelBuilder.Entity<OnlineMatch>().ToTable("online_matches");
@@ -112,7 +114,7 @@ public class ApplicationDbContext : DbContext
 
         modelBuilder.Entity<OfflineRegistrationEvent>(entity =>
         {
-            entity.HasOne(e => e.Registration).WithMany().HasForeignKey(e => e.RegistrationId);
+            entity.HasOne(e => e.Registration).WithMany(r => r.OfflineRegistrationEvents).HasForeignKey(e => e.RegistrationId);
             entity.HasOne(e => e.Event).WithMany().HasForeignKey(e => e.EventId);
         });
 
@@ -120,6 +122,7 @@ public class ApplicationDbContext : DbContext
         {
             entity.HasOne(e => e.Group).WithMany().HasForeignKey(e => e.GroupId);
             entity.HasOne(e => e.OfflineRegistrationEvent).WithMany().HasForeignKey(e => e.RegistrationEventId);
+            entity.Property(e => e.StatusCode).HasConversion<string>();
         });
 
         modelBuilder.Entity<ScrambleSet>(entity =>
@@ -134,6 +137,22 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.GroupCompetitor).WithMany().HasForeignKey(e => e.GroupCompetitorId);
             entity.HasOne(e => e.Scramble).WithMany().HasForeignKey(e => e.ScrambleId);
             entity.HasOne(e => e.PenaltyType).WithMany().HasForeignKey(e => e.PenaltyTypeId);
+        });
+
+        modelBuilder.Entity<MedleyResultDetail>(entity =>
+        {
+            entity.HasOne(e => e.Result).WithMany().HasForeignKey(e => e.ResultId);
+            entity.HasOne(e => e.MedleyPuzzle).WithMany().HasForeignKey(e => e.MedleyPuzzleId);
+            entity.HasOne(e => e.Scramble).WithMany().HasForeignKey(e => e.ScrambleId);
+            entity.HasOne(e => e.PenaltyType).WithMany().HasForeignKey(e => e.PenaltyTypeId);
+        });
+
+        modelBuilder.Entity<ResultAuditLog>(entity =>
+        {
+            entity.HasOne(e => e.Result).WithMany().HasForeignKey(e => e.ResultId);
+            entity.HasOne(e => e.ChangedByUser).WithMany().HasForeignKey(e => e.ChangedBy);
+            entity.HasOne(e => e.OldPenaltyType).WithMany().HasForeignKey(e => e.OldPenaltyTypeId);
+            entity.HasOne(e => e.NewPenaltyType).WithMany().HasForeignKey(e => e.NewPenaltyTypeId);
         });
 
         modelBuilder.Entity<Dispute>(entity =>
@@ -236,6 +255,14 @@ public class ApplicationDbContext : DbContext
                 property.SetColumnName(snakeCaseName);
             }
         }
+
+        modelBuilder.Entity<RefreshToken>()
+            .Property(r => r.Token)
+            .HasColumnName("token_hash");
+
+        modelBuilder.Entity<RefreshToken>()
+            .Property(r => r.ReplacedBy)
+            .HasColumnName("replaced_by_token_hash");
     }
 
     private static string ConvertToSnakeCase(string name)

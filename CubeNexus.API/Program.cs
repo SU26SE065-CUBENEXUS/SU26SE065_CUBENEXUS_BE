@@ -85,19 +85,47 @@ builder.Services.AddScoped<IEloSeedingService, EloSeedingService>();
 builder.Services.AddScoped<IOnlineArenaService, OnlineArenaService>();
 builder.Services.AddScoped<IPuzzleService, PuzzleService>();
 builder.Services.AddScoped<IPracticeService, PracticeService>();
+builder.Services.AddScoped<ITournamentService, TournamentService>();
+builder.Services.AddScoped<ITournamentRegistrationService, TournamentRegistrationService>();
+builder.Services.AddScoped<ITournamentOperationService, TournamentOperationService>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICheckInRegistrationByQrUseCase, CubeNexus.Application.UseCases.TournamentOperation.CheckInRegistrationByQrUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IStartRoundUseCase, CubeNexus.Application.UseCases.TournamentOperation.StartRoundUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ILockRoundResultsUseCase, CubeNexus.Application.UseCases.TournamentOperation.LockRoundResultsUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteRoundUseCase, CubeNexus.Application.UseCases.TournamentOperation.CompleteRoundUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteEventUseCase, CubeNexus.Application.UseCases.TournamentOperation.CompleteEventUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteTournamentUseCase, CubeNexus.Application.UseCases.TournamentOperation.CompleteTournamentUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IAdvanceRoundUseCase, CubeNexus.Application.UseCases.TournamentOperation.AdvanceRoundUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationUseCase, CubeNexus.Application.UseCases.TournamentOperation.VerifyJudgeStationUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase, CubeNexus.Application.UseCases.TournamentOperation.CorrectResultUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IRealtimeNotifier, CubeNexus.API.Services.RealtimeNotifier>();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowVite", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+    });
+});
+
+builder.Services.AddSignalR();
 
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
+    app.Environment.EnvironmentName = "Development"; // Just a placeholder
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+app.UseCors("AllowVite");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<CubeNexus.API.Hubs.TournamentHub>("/hubs/tournament");
 
 app.Run();

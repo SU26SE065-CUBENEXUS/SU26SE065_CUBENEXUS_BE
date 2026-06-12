@@ -4,7 +4,7 @@ public class Result
 {
     public Guid Id { get; set; }
     public Guid GroupCompetitorId { get; set; }
-    public Guid ScrambleId { get; set; }
+    public Guid? ScrambleId { get; set; }
     public Guid JudgedBy { get; set; }
     public int SolveNumber { get; set; }
     public int? RawTimeMs { get; set; }
@@ -17,7 +17,7 @@ public class Result
     public bool IsLocked { get; set; } = false;
 
     public GroupCompetitor GroupCompetitor { get; set; } = null!;
-    public Scramble Scramble { get; set; } = null!;
+    public Scramble? Scramble { get; set; }
     public User JudgedByUser { get; set; } = null!;
     public PenaltyType? PenaltyType { get; set; }
 }

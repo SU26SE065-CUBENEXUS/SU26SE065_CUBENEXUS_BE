@@ -25,7 +25,6 @@ public class PuzzleController : ControllerBase
 
     /// <summary>
     /// Lấy danh sách loại Rubik.
-    /// Admin có thể truyền ?includeInactive=true để xem cả các loại đang tắt.
     /// </summary>
     [HttpGet]
     [AllowAnonymous]
@@ -34,6 +33,16 @@ public class PuzzleController : ControllerBase
         var result = await _puzzleService.GetAllAsync();
         return Ok(result);
     }
+
+    [HttpGet("admin")]
+    [Authorize(Roles = "ADMIN")]
+    public async Task<IActionResult> GetAllForAdmin([FromQuery] bool includeInactive = true)
+    {
+        var result = await _puzzleService.GetAllAsync();
+        return Ok(result);
+    }
+
+
 
     /// <summary>Lấy thông tin chi tiết 1 loại Rubik theo ID</summary>
     [HttpGet("{id:guid}")]

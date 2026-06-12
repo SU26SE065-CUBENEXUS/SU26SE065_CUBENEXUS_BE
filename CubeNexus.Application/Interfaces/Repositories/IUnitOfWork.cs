@@ -12,9 +12,15 @@ namespace CubeNexus.Application.Interfaces.Repositories;
 /// </summary>
 public interface IUnitOfWork : IDisposable
 {
+    // ── Repositories cho Offline Tournament ───────────────────
+    ITournamentRepository Tournaments { get; }
+    IRegistrationRepository Registrations { get; }
+    IRepository<OfflineRegistrationEvent> OfflineRegistrationEvents { get; }
+
     // ── Repositories cho Puzzle & Practice ────────────────────
     IPuzzleTypeRepository PuzzleTypes { get; }
     IPracticeRepository   Practice    { get; }
+    IRepository<PenaltyType> PenaltyTypes { get; }
 
     // ── Repositories cho Elo Arena ─────────────────────────────
     IOnlineProfileRepository OnlineProfiles { get; }
@@ -25,6 +31,18 @@ public interface IUnitOfWork : IDisposable
     IRepository<EloHistory>      EloHistories      { get; }
     IRepository<OnlineMatch>     OnlineMatches     { get; }
     IRepository<EloSeedThreshold> EloSeedThresholds { get; }
+    IRepository<Result>          Results           { get; }
+    IRepository<GroupCompetitor> GroupCompetitors  { get; }
+    IRepository<Group>           Groups            { get; }
+    IRepository<Event>           Events            { get; }
+    IRepository<PracticeAo5Snapshot> PracticeAo5Snapshots { get; }
+    IRepository<User>            Users             { get; }
+    IRepository<ScrambleSet>     ScrambleSets      { get; }
+    IRepository<Scramble>        Scrambles         { get; }
+    IRepository<MedleyResultDetail> MedleyResultDetails { get; }
+    IRepository<MedleyEventPuzzle> MedleyEventPuzzles { get; }
+    IRepository<Dispute>         Disputes          { get; }
+    IRepository<ResultAuditLog>  ResultAuditLogs   { get; }
 
     // ── Persist ────────────────────────────────────────────────
     /// <summary>

@@ -1,0 +1,66 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using CubeNexus.Domain.Entities;
+
+namespace CubeNexus.Domain.Services;
+
+public class GroupAssignmentDomainService
+{
+    public List<GroupCompetitorAssignment> AssignGroups(
+        Guid eventId,
+        int roundNumber,
+        List<OfflineRegistrationEvent> registeredEvents,
+        int competitorsPerGroup,
+        int stationCount)
+    {
+        if (competitorsPerGroup <= 0)
+            throw new ArgumentException("Competitors per group must be greater than zero.", nameof(competitorsPerGroup));
+        if (stationCount <= 0)
+            throw new ArgumentException("Station count must be greater than zero.", nameof(stationCount));
+
+        // Sort seed_time_ms ASC NULLS LAST
+        var sorted = registeredEvents
+            .OrderBy(e => e.SeedTimeMs.HasValue ? 0 : 1)
+            .ThenBy(e => e.SeedTimeMs)
+            .ToList();
+
+        var assignments = new List<GroupCompetitorAssignment>();
+        int competitorIndex = 0;
+        int groupNumber = 1;
+
+        while (competitorIndex < sorted.Count)
+        {
+            var groupCompetitors = sorted.Skip(competitorIndex).Take(competitorsPerGroup).ToList();
+            string groupName = $"Group {groupNumber}";
+
+            for (int i = 0; i < groupCompetitors.Count; i++)
+            {
+                var regEvent = groupCompetitors[i];
+                // Station number is round-robin: 1 -> stationCount
+                int stationNumber = (i % stationCount) + 1;
+
+                assignments.Add(new GroupCompetitorAssignment
+                {
+                    RegistrationEvent = regEvent,
+                    GroupName = groupName,
+                    StationNumber = stationNumber,
+                    GroupNumber = groupNumber
+                });
+            }
+
+            competitorIndex += competitorsPerGroup;
+            groupNumber++;
+        }
+
+        return assignments;
+    }
+}
+
+public class GroupCompetitorAssignment
+{
+    public OfflineRegistrationEvent RegistrationEvent { get; set; } = null!;
+    public string GroupName { get; set; } = string.Empty;
+    public int StationNumber { get; set; }
+    public int GroupNumber { get; set; }
+}
