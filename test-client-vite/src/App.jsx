@@ -6,11 +6,11 @@ function App() {
   const [serverUrl, setServerUrl] = useState('http://localhost:5212');
   const [eventId, setEventId] = useState('11111111-1111-1111-1111-111111111111');
   const [roundNumber, setRoundNumber] = useState(1);
-  
+
   // Connection status
   const [connStatus, setConnStatus] = useState('disconnected'); // 'disconnected', 'connecting', 'connected'
   const hubConnectionRef = useRef(null);
-  
+
   // Board state
   const [boardState, setBoardState] = useState({
     eventName: '-',
@@ -86,7 +86,7 @@ function App() {
       const res = await fetch(`${url}/api/live-board/events/${evId}/rounds/${roundNo}`);
       if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
       const data = await res.json();
-      
+
       addLog('success', '[REST API] Live Board state loaded', data);
       setBoardState(data);
     } catch (err) {
@@ -113,7 +113,7 @@ function App() {
     // Listeners
     conn.on('RoundStarted', (payload) => {
       addLog('success', 'Signal: RoundStarted', payload);
-      
+
       setBoardState(prev => {
         // Mark no-show competitors
         const updatedCompetitors = prev.competitors.map(c => {
@@ -133,7 +133,7 @@ function App() {
 
     conn.on('ResultSubmitted', (payload) => {
       addLog('success', 'Signal: ResultSubmitted', payload);
-      
+
       const compId = payload.groupCompetitorId;
       const solveNum = payload.result.solveNumber;
 
@@ -152,8 +152,8 @@ function App() {
 
     conn.on('ResultCorrected', (payload) => {
       addLog('success', 'Signal: ResultCorrected', payload);
-      
-      const compId = payload.groupCompetitorId;
+
+      const compId = payload.groupCompetitorId; git
       const solveNum = payload.result.solveNumber;
 
       // Trigger animation highlights
@@ -183,7 +183,7 @@ function App() {
     conn.onreconnected(() => {
       addLog('success', '[SignalR] Reconnected. Re-joining room & synchronizing...', null);
       setConnStatus('connected');
-      
+
       conn.invoke('JoinEventRound', evId, parseInt(roundNo))
         .then(() => addLog('info', `[SignalR] Re-joined Room event:${evId}:round:${roundNo}`, null))
         .catch(err => addLog('error', `[SignalR Room Error] ${err.message}`, null));
@@ -265,41 +265,41 @@ function App() {
       {/* SIDEBAR: CONTROLS */}
       <aside class="glass-card">
         <h2>🔌 Configuration</h2>
-        
+
         <div className="form-group">
           <label>Backend Server API URL</label>
-          <input 
-            type="text" 
-            value={serverUrl} 
-            onChange={(e) => setServerUrl(e.target.value)} 
+          <input
+            type="text"
+            value={serverUrl}
+            onChange={(e) => setServerUrl(e.target.value)}
             placeholder="http://localhost:5212"
           />
         </div>
 
         <div className="form-group">
           <label>Event ID (GUID)</label>
-          <input 
-            type="text" 
-            value={eventId} 
-            onChange={(e) => setEventId(e.target.value)} 
+          <input
+            type="text"
+            value={eventId}
+            onChange={(e) => setEventId(e.target.value)}
             placeholder="Event GUID"
           />
         </div>
 
         <div className="form-group">
           <label>Round Number</label>
-          <input 
-            type="number" 
-            value={roundNumber} 
-            onChange={(e) => setRoundNumber(parseInt(e.target.value) || 1)} 
+          <input
+            type="number"
+            value={roundNumber}
+            onChange={(e) => setRoundNumber(parseInt(e.target.value) || 1)}
             min="1"
           />
         </div>
 
         <button onClick={handleConnect} className="btn">Connect & Load State</button>
-        <button 
-          onClick={handleLeave} 
-          className="btn btn-secondary" 
+        <button
+          onClick={handleLeave}
+          className="btn btn-secondary"
           disabled={connStatus !== 'connected'}
         >
           Leave Room
@@ -398,7 +398,7 @@ function App() {
                   const isRowFlashed = flashedRow === comp.groupCompetitorId;
 
                   return (
-                    <tr 
+                    <tr
                       key={comp.groupCompetitorId}
                       className={isRowFlashed ? 'flash-updated-row' : ''}
                     >
@@ -416,7 +416,7 @@ function App() {
                         const solveNum = i + 1;
                         const res = solveMap[solveNum];
                         const isCellFlashed = flashedCell === `${comp.groupCompetitorId}-${solveNum}`;
-                        
+
                         let cellClass = 'solve-cell';
                         if (res) cellClass += ' has-val';
                         if (res?.isDnf) cellClass += ' dnf';
@@ -459,8 +459,8 @@ function App() {
               </div>
               {log.payload && (
                 <pre className="log-json">
-                  {typeof log.payload === 'string' 
-                    ? log.payload 
+                  {typeof log.payload === 'string'
+                    ? log.payload
                     : JSON.stringify(log.payload, null, 2)}
                 </pre>
               )}
