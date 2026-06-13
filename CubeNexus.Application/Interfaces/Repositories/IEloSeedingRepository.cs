@@ -17,6 +17,13 @@ public interface IEloSeedingRepository
         Guid puzzleTypeId,
         CancellationToken ct = default);
 
+    /// <summary>Lấy các lượt giải gần nhất (gồm DNF), kèm penalty.</summary>
+    Task<List<PracticeSolve>> GetRecentPracticeSolvesAsync(
+        Guid userId,
+        Guid puzzleTypeId,
+        int take,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Lấy snapshot Ao5 chưa dùng (is_used_for_seeding = false), mới nhất.
     /// Dùng khi khởi tạo Online Profile.

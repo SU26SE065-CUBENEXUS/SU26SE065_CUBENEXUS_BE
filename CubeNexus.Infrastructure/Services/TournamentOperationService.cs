@@ -16,13 +16,18 @@ public class TournamentOperationService : ITournamentOperationService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly IRealtimeNotifier _realtimeNotifier;
+    private readonly IScrambleGeneratorService _scrambleGenerator;
     private readonly GroupAssignmentDomainService _groupAssignmentService;
     private readonly PenaltyCalculationDomainService _penaltyCalculationService;
 
-    public TournamentOperationService(IUnitOfWork unitOfWork, IRealtimeNotifier realtimeNotifier)
+    public TournamentOperationService(
+        IUnitOfWork unitOfWork,
+        IRealtimeNotifier realtimeNotifier,
+        IScrambleGeneratorService scrambleGenerator)
     {
         _unitOfWork = unitOfWork;
         _realtimeNotifier = realtimeNotifier;
+        _scrambleGenerator = scrambleGenerator;
         _groupAssignmentService = new GroupAssignmentDomainService();
         _penaltyCalculationService = new PenaltyCalculationDomainService();
     }
@@ -223,7 +228,7 @@ public class TournamentOperationService : ITournamentOperationService
                         ScrambleSetId = ss.Id,
                         PuzzleTypeId = ev.PuzzleTypeId,
                         SolveNumber = solveNum,
-                        Sequence = GenerateMockScramble(pt.Code, pt.ScrambleLength),
+                        Sequence = _scrambleGenerator.GenerateScramble(pt.Code, pt.ScrambleLength),
                         SortOrder = solveNum
                     });
                 }
@@ -247,7 +252,7 @@ public class TournamentOperationService : ITournamentOperationService
                             ScrambleSetId = ss.Id,
                             PuzzleTypeId = mp.PuzzleTypeId,
                             SolveNumber = solveNum,
-                            Sequence = GenerateMockScramble(pt.Code, pt.ScrambleLength),
+                            Sequence = _scrambleGenerator.GenerateScramble(pt.Code, pt.ScrambleLength),
                             SortOrder = (solveNum - 1) * medleyPuzzles.Count + (i + 1)
                         });
                     }
@@ -674,25 +679,4 @@ public class TournamentOperationService : ITournamentOperationService
         };
     }
 
-    private string GenerateMockScramble(string puzzleCode, int? scrambleLength)
-    {
-        int length = scrambleLength ?? 20;
-        string[] moves = new[] { "R", "L", "U", "D", "F", "B" };
-        string[] modifiers = new[] { "", "'", "2" };
-        var rand = new Random();
-        var sequenceParts = new List<string>();
-        string lastFace = "";
-        for (int i = 0; i < length; i++)
-        {
-            string face;
-            do
-            {
-                face = moves[rand.Next(moves.Length)];
-            } while (face == lastFace);
-            lastFace = face;
-            string mod = modifiers[rand.Next(modifiers.Length)];
-            sequenceParts.Add(face + mod);
-        }
-        return string.Join(" ", sequenceParts);
-    }
 }

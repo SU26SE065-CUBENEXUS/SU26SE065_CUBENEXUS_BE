@@ -84,6 +84,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IEloSeedingService, EloSeedingService>();
 builder.Services.AddScoped<IOnlineArenaService, OnlineArenaService>();
 builder.Services.AddScoped<IPuzzleService, PuzzleService>();
+builder.Services.AddScoped<IScrambleGeneratorService, ScrambleGeneratorService>();
 builder.Services.AddScoped<IPracticeService, PracticeService>();
 builder.Services.AddScoped<ITournamentService, TournamentService>();
 builder.Services.AddScoped<ITournamentRegistrationService, TournamentRegistrationService>();

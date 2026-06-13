@@ -838,9 +838,34 @@ CREATE INDEX IF NOT EXISTS idx_practice_sessions_started_at
 ON practice_sessions(started_at DESC);
 
 
+CREATE TABLE IF NOT EXISTS practice_attempts (
+    id UUID PRIMARY KEY,
+    session_id UUID NOT NULL REFERENCES practice_sessions(id),
+    scramble_sequence TEXT NOT NULL,
+    state VARCHAR(30) NOT NULL,
+    hands_on_at TIMESTAMPTZ,
+    ready_at TIMESTAMPTZ,
+    started_at TIMESTAMPTZ,
+    stopped_at TIMESTAMPTZ,
+    time_ms INTEGER,
+    penalty_type_id UUID REFERENCES penalty_types(id),
+    is_dnf BOOLEAN NOT NULL DEFAULT false,
+    abort_reason VARCHAR(50),
+    created_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_practice_attempts_session
+ON practice_attempts(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_practice_attempts_session_state
+ON practice_attempts(session_id, state);
+
+
 CREATE TABLE IF NOT EXISTS practice_solves (
     id UUID PRIMARY KEY,
     session_id UUID NOT NULL REFERENCES practice_sessions(id),
+    attempt_id UUID REFERENCES practice_attempts(id),
     scramble_sequence TEXT NOT NULL,
     time_ms INTEGER NOT NULL,
     penalty_type_id UUID REFERENCES penalty_types(id),
@@ -848,11 +873,14 @@ CREATE TABLE IF NOT EXISTS practice_solves (
     solved_at TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT ck_practice_solves_time
-        CHECK (time_ms > 0)
+        CHECK (is_dnf = true OR time_ms > 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_practice_solves_session
 ON practice_solves(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_practice_solves_attempt
+ON practice_solves(attempt_id);
 
 CREATE INDEX IF NOT EXISTS idx_practice_solves_solved_at
 ON practice_solves(solved_at DESC);

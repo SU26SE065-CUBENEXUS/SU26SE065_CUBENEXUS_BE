@@ -2,6 +2,7 @@ using CubeNexus.Application.DTOs.Arena;
 using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Domain.Entities;
+using CubeNexus.Domain.Services;
 
 namespace CubeNexus.Infrastructure.Services;
 
@@ -44,8 +45,10 @@ public class EloSeedingService : IEloSeedingService
 
         if (isEligible)
         {
-            var latest5Times = solves.Take(5).Select(s => s.TimeMs).ToList();
-            latestAo5Ms = CalculateAo5(latest5Times);
+            var recent5 = await _uow.EloSeeding.GetRecentPracticeSolvesAsync(
+                userId, puzzleTypeId, 5, ct);
+            latestAo5Ms = PracticeAo5Calculator.CalculateAo5(
+                recent5.OrderBy(s => s.SolvedAt).ToList());
 
             if (latestAo5Ms.HasValue)
             {
@@ -121,8 +124,13 @@ public class EloSeedingService : IEloSeedingService
         if (solves.Count < config.MinPracticeSolves)
             return null;
 
-        var latest5Times = solves.Take(5).Select(s => s.TimeMs).ToList();
-        int? ao5Ms = CalculateAo5(latest5Times);
+        var recent5 = await _uow.EloSeeding.GetRecentPracticeSolvesAsync(
+            userId, puzzleTypeId, 5, ct);
+        if (recent5.Count < 5)
+            return null;
+
+        int? ao5Ms = PracticeAo5Calculator.CalculateAo5(
+            recent5.OrderBy(s => s.SolvedAt).ToList());
         if (!ao5Ms.HasValue) return null;
 
         var threshold = await _uow.EloSeeding
@@ -244,17 +252,6 @@ public class EloSeedingService : IEloSeedingService
     // =========================================================
     // Private Helpers (Pure business logic – không phụ thuộc DB)
     // =========================================================
-
-    /// <summary>
-    /// Tính Ao5 theo chuẩn WCA: loại best + worst, average 3 lượt giữa.
-    /// </summary>
-    private static int? CalculateAo5(List<int> times)
-    {
-        if (times.Count != 5) return null;
-        var sorted = times.OrderBy(t => t).ToList();
-        var middle3 = sorted.Skip(1).Take(3);
-        return (int)Math.Round(middle3.Average());
-    }
 
     private static string FormatMs(int ms) => $"{ms / 1000.0:F2}s";
 }

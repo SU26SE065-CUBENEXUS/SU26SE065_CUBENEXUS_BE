@@ -13,6 +13,16 @@ public interface IPracticeRepository
 
     Task AddSessionAsync(PracticeSession session);
 
+    Task<PracticeSession?> GetActiveSessionAsync(Guid userId, Guid puzzleTypeId);
+
+    // ── Attempt ──────────────────────────────────────────────────
+
+    Task AddAttemptAsync(PracticeAttempt attempt);
+
+    Task<PracticeAttempt?> GetAttemptByIdAsync(Guid attemptId);
+
+    Task<PracticeAttempt?> GetActiveAttemptAsync(Guid sessionId);
+
     // ── Solve ────────────────────────────────────────────────────
 
     Task AddSolveAsync(PracticeSolve solve);
@@ -22,6 +32,8 @@ public interface IPracticeRepository
 
     /// <summary>Lấy toàn bộ solves của session (sắp xếp SolvedAt asc)</summary>
     Task<IReadOnlyList<PracticeSolve>> GetAllSolvesAsync(Guid sessionId);
+
+    Task<PenaltyType?> GetPenaltyTypeByCodeAsync(string code);
 
     // ── History ──────────────────────────────────────────────────
 

@@ -4,6 +4,7 @@ public class PracticeSolve
 {
     public Guid Id { get; set; }
     public Guid SessionId { get; set; }
+    public Guid? AttemptId { get; set; }
     public string ScrambleSequence { get; set; } = string.Empty;
     public int TimeMs { get; set; }
     public Guid? PenaltyTypeId { get; set; }
@@ -11,5 +12,6 @@ public class PracticeSolve
     public DateTime SolvedAt { get; set; }
 
     public PracticeSession Session { get; set; } = null!;
+    public PracticeAttempt? Attempt { get; set; }
     public PenaltyType? PenaltyType { get; set; }
 }

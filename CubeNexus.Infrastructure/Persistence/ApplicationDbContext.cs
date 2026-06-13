@@ -47,6 +47,7 @@ public class ApplicationDbContext : DbContext
 
     // 5. Practice
     public DbSet<PracticeSession> PracticeSessions => Set<PracticeSession>();
+    public DbSet<PracticeAttempt> PracticeAttempts => Set<PracticeAttempt>();
     public DbSet<PracticeSolve> PracticeSolves => Set<PracticeSolve>();
     public DbSet<PracticeAo5Snapshot> PracticeAo5Snapshots => Set<PracticeAo5Snapshot>();
 
@@ -89,6 +90,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<AsyncTournament>().ToTable("async_tournaments");
         modelBuilder.Entity<AsyncSubmission>().ToTable("async_submissions");
         modelBuilder.Entity<PracticeSession>().ToTable("practice_sessions");
+        modelBuilder.Entity<PracticeAttempt>().ToTable("practice_attempts");
         modelBuilder.Entity<PracticeSolve>().ToTable("practice_solves");
         modelBuilder.Entity<PracticeAo5Snapshot>().ToTable("practice_ao5_snapshots");
         modelBuilder.Entity<Notification>().ToTable("notifications");
@@ -233,6 +235,21 @@ public class ApplicationDbContext : DbContext
         {
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
             entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId);
+        });
+
+        modelBuilder.Entity<PracticeAttempt>(entity =>
+        {
+            entity.Property(e => e.State).HasConversion<string>();
+            entity.HasOne(e => e.Session).WithMany().HasForeignKey(e => e.SessionId);
+            entity.HasOne(e => e.PenaltyType).WithMany().HasForeignKey(e => e.PenaltyTypeId);
+            entity.HasOne(e => e.Solve)
+                .WithOne(s => s.Attempt)
+                .HasForeignKey<PracticeSolve>(s => s.AttemptId);
+        });
+
+        modelBuilder.Entity<PracticeSolve>(entity =>
+        {
+            entity.HasOne(e => e.PenaltyType).WithMany().HasForeignKey(e => e.PenaltyTypeId);
         });
 
         modelBuilder.Entity<Notification>(entity =>

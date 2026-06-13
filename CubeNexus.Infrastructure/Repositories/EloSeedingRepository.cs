@@ -29,11 +29,28 @@ public class EloSeedingRepository : IEloSeedingRepository
     {
         return await _db.PracticeSolves
             .Include(s => s.Session)
+            .Include(s => s.PenaltyType)
             .Where(s => s.Session.UserId == userId
                      && s.Session.PuzzleTypeId == puzzleTypeId
                      && !s.IsDnf
                      && s.TimeMs > 0)
             .OrderByDescending(s => s.SolvedAt)
+            .ToListAsync(ct);
+    }
+
+    public async Task<List<PracticeSolve>> GetRecentPracticeSolvesAsync(
+        Guid userId,
+        Guid puzzleTypeId,
+        int take,
+        CancellationToken ct = default)
+    {
+        return await _db.PracticeSolves
+            .Include(s => s.Session)
+            .Include(s => s.PenaltyType)
+            .Where(s => s.Session.UserId == userId
+                     && s.Session.PuzzleTypeId == puzzleTypeId)
+            .OrderByDescending(s => s.SolvedAt)
+            .Take(take)
             .ToListAsync(ct);
     }
 

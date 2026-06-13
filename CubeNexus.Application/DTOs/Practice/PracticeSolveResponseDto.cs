@@ -4,6 +4,7 @@ public class PracticeSolveResponseDto
 {
     public Guid Id { get; set; }
     public Guid SessionId { get; set; }
+    public Guid? AttemptId { get; set; }
     public string ScrambleSequence { get; set; } = string.Empty;
 
     /// <summary>Thời gian gốc (ms), chưa cộng penalty</summary>

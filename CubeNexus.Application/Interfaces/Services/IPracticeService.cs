@@ -4,18 +4,35 @@ namespace CubeNexus.Application.Interfaces.Services;
 
 public interface IPracticeService
 {
-    /// <summary>Competitor: bắt đầu session tập luyện mới</summary>
     Task<PracticeSessionResponseDto> StartSessionAsync(Guid userId, StartPracticeSessionDto dto);
 
-    /// <summary>Competitor: nộp 1 lần giải, nhận về kết quả + rolling Ao5</summary>
+    [Obsolete("Use WCA attempt flow instead.")]
     Task<PracticeSolveResponseDto> SubmitSolveAsync(Guid userId, SubmitSolveDto dto);
 
-    /// <summary>Competitor: kết thúc session, lấy thống kê tổng</summary>
     Task<PracticeSessionSummaryDto> EndSessionAsync(Guid userId, Guid sessionId);
 
-    /// <summary>Competitor: xem lịch sử session</summary>
-    Task<IReadOnlyList<PracticeSessionResponseDto>> GetMySessionsAsync(Guid userId, Guid? puzzleTypeId = null, int page = 1, int pageSize = 20);
+    Task<IReadOnlyList<PracticeSessionResponseDto>> GetMySessionsAsync(
+        Guid userId, Guid? puzzleTypeId = null, int page = 1, int pageSize = 20);
 
-    /// <summary>Competitor: xem chi tiết 1 session (tất cả lần giải)</summary>
     Task<PracticeSessionSummaryDto> GetSessionDetailAsync(Guid userId, Guid sessionId);
+
+    // ── WCA Stackmat attempt flow ───────────────────────────────────────────
+
+    Task<PracticeAttemptResponseDto> CreateAttemptAsync(Guid userId, Guid sessionId);
+
+    Task<PracticeAttemptResponseDto?> GetCurrentAttemptAsync(Guid userId, Guid sessionId);
+
+    Task<PracticeAttemptResponseDto> GetAttemptAsync(Guid userId, Guid attemptId);
+
+    Task<PracticeAttemptResponseDto> HandsOnAsync(Guid userId, Guid attemptId);
+
+    Task<PracticeAttemptResponseDto> ReadyAsync(Guid userId, Guid attemptId);
+
+    Task<PracticeAttemptResponseDto> HandsOffAsync(Guid userId, Guid attemptId);
+
+    Task<PracticeAttemptResponseDto> FinalizeAttemptAsync(
+        Guid userId, Guid attemptId, FinalizeAttemptDto dto);
+
+    Task<PracticeAttemptResponseDto> AbortAttemptAsync(
+        Guid userId, Guid attemptId, AbortAttemptDto? dto);
 }

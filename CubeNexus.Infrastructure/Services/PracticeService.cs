@@ -1,42 +1,52 @@
 using CubeNexus.Application.DTOs.Practice;
+using CubeNexus.Application.Exceptions;
 using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Domain.Entities;
+using CubeNexus.Domain.Enums;
+using CubeNexus.Domain.Services;
 
 namespace CubeNexus.Infrastructure.Services;
 
 /// <summary>
-/// Xử lý luồng tập luyện của Competitor:
-///   1. Bắt đầu session → ghi nhận puzzle type
-///   2. Submit từng solve → tính Ao5 rolling
-///   3. Kết thúc session → tổng kết stats
+/// Luồng tập luyện WCA Stackmat:
+///   session → attempt (scramble) → hands-on → ready → hands-off → solving → hands-on stop → finalize
 /// </summary>
 public class PracticeService : IPracticeService
 {
-    private readonly IUnitOfWork _uow;
+    private const int MaxSolveTimeMs = 600_000;
 
-    // Các mã penalty hợp lệ (không phân biệt hoa/thường khi nhận vào)
     private static readonly HashSet<string> ValidPenalties =
         new(StringComparer.OrdinalIgnoreCase) { "OK", "PLUS_2", "DNF" };
 
-    public PracticeService(IUnitOfWork uow)
+    private readonly IUnitOfWork _uow;
+    private readonly IScrambleGeneratorService _scrambleGenerator;
+
+    public PracticeService(IUnitOfWork uow, IScrambleGeneratorService scrambleGenerator)
     {
         _uow = uow;
+        _scrambleGenerator = scrambleGenerator;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 1. Bắt đầu session
+    // Session
     // ─────────────────────────────────────────────────────────────────────────
 
     public async Task<PracticeSessionResponseDto> StartSessionAsync(
         Guid userId, StartPracticeSessionDto dto)
     {
-        // Kiểm tra puzzle type tồn tại và đang active
         var puzzleType = await _uow.PuzzleTypes.GetByIdAsync(dto.PuzzleTypeId)
             ?? throw new KeyNotFoundException("Không tìm thấy loại rubik này.");
 
         if (!puzzleType.IsActive)
             throw new InvalidOperationException("Loại rubik này hiện không hoạt động.");
+
+        var existing = await _uow.Practice.GetActiveSessionAsync(userId, dto.PuzzleTypeId);
+        if (existing != null)
+            throw new CustomException(
+                "SESSION_ALREADY_ACTIVE",
+                "Bạn đã có session đang mở cho loại rubik này. Hãy kết thúc session cũ trước.",
+                400);
 
         var session = new PracticeSession
         {
@@ -50,90 +60,27 @@ public class PracticeService : IPracticeService
         await _uow.Practice.AddSessionAsync(session);
         await _uow.SaveChangesAsync();
 
-        return new PracticeSessionResponseDto
-        {
-            Id              = session.Id,
-            UserId          = session.UserId,
-            PuzzleTypeId    = session.PuzzleTypeId,
-            PuzzleTypeName  = puzzleType.Name,
-            PuzzleTypeCode  = puzzleType.Code,
-            StartedAt       = session.StartedAt,
-            EndedAt         = session.EndedAt,
-            TotalSolves     = 0
-        };
+        return MapSession(session, puzzleType.Name, puzzleType.Code, 0);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 2. Submit một lần giải
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public async Task<PracticeSolveResponseDto> SubmitSolveAsync(
-        Guid userId, SubmitSolveDto dto)
-    {
-        // Validate session
-        var session = await _uow.Practice.GetSessionByIdAsync(dto.SessionId)
-            ?? throw new KeyNotFoundException("Không tìm thấy session.");
-
-        if (session.UserId != userId)
-            throw new UnauthorizedAccessException("Session không thuộc về bạn.");
-
-        if (session.EndedAt.HasValue)
-            throw new InvalidOperationException("Session đã kết thúc, không thể ghi thêm solve.");
-
-        // Validate & normalize penalty
-        var penaltyCode = NormalizePenalty(dto.Penalty);
-
-        // Tính thời gian hiển thị
-        var displayTimeMs = CalculateDisplayTime(dto.TimeMs, penaltyCode);
-
-        var solve = new PracticeSolve
-        {
-            Id               = Guid.NewGuid(),
-            SessionId        = dto.SessionId,
-            ScrambleSequence = dto.ScrambleSequence,
-            TimeMs           = dto.TimeMs,
-            PenaltyTypeId    = null,      // Không còn dùng FK sang penalty_types
-            IsDnf            = penaltyCode == "DNF",
-            SolvedAt         = DateTime.UtcNow
-        };
-
-        await _uow.Practice.AddSolveAsync(solve);
-        await _uow.SaveChangesAsync();
-
-        // Tính Ao5 rolling từ 5 solve gần nhất
-        var recentSolves = await _uow.Practice.GetLatestSolvesAsync(dto.SessionId, 5);
-        int? ao5 = null;
-
-        if (recentSolves.Count == 5)
-        {
-            ao5 = CalculateAo5(recentSolves);
-        }
-
-        return new PracticeSolveResponseDto
-        {
-            Id               = solve.Id,
-            SessionId        = solve.SessionId,
-            ScrambleSequence = solve.ScrambleSequence,
-            TimeMs           = solve.TimeMs,
-            PenaltyCode      = penaltyCode == "OK" ? null : penaltyCode,
-            DisplayTimeMs    = displayTimeMs,
-            SolvedAt         = solve.SolvedAt,
-            CurrentAo5Ms     = ao5
-        };
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 3. Kết thúc session
-    // ─────────────────────────────────────────────────────────────────────────
+    [Obsolete("Use WCA attempt flow instead.")]
+    public Task<PracticeSolveResponseDto> SubmitSolveAsync(Guid userId, SubmitSolveDto dto)
+        => throw new CustomException(
+            "SOLVE_ENDPOINT_DEPRECATED",
+            "POST /api/practice/solves đã ngừng hỗ trợ. Hãy dùng luồng attempt WCA Stackmat.",
+            410);
 
     public async Task<PracticeSessionSummaryDto> EndSessionAsync(
         Guid userId, Guid sessionId)
     {
-        var session = await _uow.Practice.GetSessionByIdAsync(sessionId)
-            ?? throw new KeyNotFoundException("Không tìm thấy session.");
+        var session = await GetOwnedSessionAsync(userId, sessionId);
 
-        if (session.UserId != userId)
-            throw new UnauthorizedAccessException("Session không thuộc về bạn.");
+        var activeAttempt = await _uow.Practice.GetActiveAttemptAsync(sessionId);
+        if (activeAttempt != null)
+            throw new CustomException(
+                "ATTEMPT_IN_PROGRESS",
+                "Session còn attempt chưa hoàn thành. Hãy finalize hoặc abort trước khi kết thúc session.",
+                400);
 
         if (!session.EndedAt.HasValue)
         {
@@ -144,10 +91,6 @@ public class PracticeService : IPracticeService
         return await BuildSummaryAsync(session);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 4. Lịch sử session
-    // ─────────────────────────────────────────────────────────────────────────
-
     public async Task<IReadOnlyList<PracticeSessionResponseDto>> GetMySessionsAsync(
         Guid userId, Guid? puzzleTypeId = null, int page = 1, int pageSize = 20)
     {
@@ -156,32 +99,211 @@ public class PracticeService : IPracticeService
             userId, puzzleTypeId, skip, pageSize);
 
         var result = new List<PracticeSessionResponseDto>();
-
         foreach (var s in sessions)
         {
             var totalSolves = await _uow.Practice.CountSolvesAsync(s.Id);
-            result.Add(new PracticeSessionResponseDto
-            {
-                Id             = s.Id,
-                UserId         = s.UserId,
-                PuzzleTypeId   = s.PuzzleTypeId,
-                PuzzleTypeName = s.PuzzleType.Name,
-                PuzzleTypeCode = s.PuzzleType.Code,
-                StartedAt      = s.StartedAt,
-                EndedAt        = s.EndedAt,
-                TotalSolves    = totalSolves
-            });
+            result.Add(MapSession(s, s.PuzzleType.Name, s.PuzzleType.Code, totalSolves));
         }
 
         return result;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 5. Chi tiết session
-    // ─────────────────────────────────────────────────────────────────────────
-
     public async Task<PracticeSessionSummaryDto> GetSessionDetailAsync(
         Guid userId, Guid sessionId)
+    {
+        var session = await GetOwnedSessionAsync(userId, sessionId);
+        return await BuildSummaryAsync(session);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Attempt flow
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public async Task<PracticeAttemptResponseDto> CreateAttemptAsync(Guid userId, Guid sessionId)
+    {
+        var session = await GetOwnedOpenSessionAsync(userId, sessionId);
+
+        var active = await _uow.Practice.GetActiveAttemptAsync(sessionId);
+        if (active != null)
+            throw new CustomException(
+                "ATTEMPT_ALREADY_ACTIVE",
+                "Session đã có attempt đang diễn ra. Hãy hoàn thành hoặc abort attempt hiện tại.",
+                400);
+
+        var scramble = _scrambleGenerator.GenerateScramble(
+            session.PuzzleType.Code,
+            session.PuzzleType.ScrambleLength);
+
+        var attempt = new PracticeAttempt
+        {
+            Id               = Guid.NewGuid(),
+            SessionId        = sessionId,
+            ScrambleSequence = scramble,
+            State            = PracticeAttemptState.Scrambled,
+            CreatedAt        = DateTime.UtcNow
+        };
+
+        await _uow.Practice.AddAttemptAsync(attempt);
+        await _uow.SaveChangesAsync();
+
+        return MapAttempt(attempt);
+    }
+
+    public async Task<PracticeAttemptResponseDto?> GetCurrentAttemptAsync(
+        Guid userId, Guid sessionId)
+    {
+        await GetOwnedSessionAsync(userId, sessionId);
+        var attempt = await _uow.Practice.GetActiveAttemptAsync(sessionId);
+        return attempt == null ? null : MapAttempt(attempt);
+    }
+
+    public async Task<PracticeAttemptResponseDto> GetAttemptAsync(Guid userId, Guid attemptId)
+    {
+        var attempt = await GetOwnedAttemptAsync(userId, attemptId);
+        return MapAttempt(attempt);
+    }
+
+    public async Task<PracticeAttemptResponseDto> HandsOnAsync(Guid userId, Guid attemptId)
+    {
+        var attempt = await GetOwnedAttemptAsync(userId, attemptId);
+        await GetOwnedOpenSessionAsync(userId, attempt.SessionId);
+
+        switch (attempt.State)
+        {
+            case PracticeAttemptState.Scrambled:
+                attempt.State = PracticeAttemptState.HoldingHands;
+                attempt.HandsOnAt = DateTime.UtcNow;
+                break;
+
+            case PracticeAttemptState.Solving:
+                attempt.State = PracticeAttemptState.Stopped;
+                attempt.StoppedAt = DateTime.UtcNow;
+                break;
+
+            default:
+                throw InvalidTransition(attempt.State, "hands-on");
+        }
+
+        await _uow.SaveChangesAsync();
+        return MapAttempt(attempt);
+    }
+
+    public async Task<PracticeAttemptResponseDto> ReadyAsync(Guid userId, Guid attemptId)
+    {
+        var attempt = await GetOwnedAttemptAsync(userId, attemptId);
+        await GetOwnedOpenSessionAsync(userId, attempt.SessionId);
+
+        if (attempt.State != PracticeAttemptState.HoldingHands)
+            throw InvalidTransition(attempt.State, "ready");
+
+        attempt.State = PracticeAttemptState.Ready;
+        attempt.ReadyAt = DateTime.UtcNow;
+        await _uow.SaveChangesAsync();
+
+        return MapAttempt(attempt);
+    }
+
+    public async Task<PracticeAttemptResponseDto> HandsOffAsync(Guid userId, Guid attemptId)
+    {
+        var attempt = await GetOwnedAttemptAsync(userId, attemptId);
+        await GetOwnedOpenSessionAsync(userId, attempt.SessionId);
+
+        if (attempt.State != PracticeAttemptState.Ready)
+        {
+            if (attempt.State == PracticeAttemptState.HoldingHands)
+                throw new CustomException(
+                    "HANDS_OFF_TOO_EARLY",
+                    "Chưa sẵn sàng (đèn xanh). Hãy giữ tay đủ lâu rồi gọi ready trước khi nhấc tay.",
+                    400);
+
+            throw InvalidTransition(attempt.State, "hands-off");
+        }
+
+        attempt.State = PracticeAttemptState.Solving;
+        attempt.StartedAt = DateTime.UtcNow;
+        await _uow.SaveChangesAsync();
+
+        return MapAttempt(attempt);
+    }
+
+    public async Task<PracticeAttemptResponseDto> FinalizeAttemptAsync(
+        Guid userId, Guid attemptId, FinalizeAttemptDto dto)
+    {
+        var attempt = await GetOwnedAttemptAsync(userId, attemptId);
+        var session = await GetOwnedOpenSessionAsync(userId, attempt.SessionId);
+
+        if (attempt.State != PracticeAttemptState.Stopped)
+            throw InvalidTransition(attempt.State, "finalize");
+
+        var penaltyCode = NormalizePenalty(dto.Penalty);
+        var penaltyType = await ResolvePenaltyTypeAsync(penaltyCode);
+        var isDnf = penaltyCode == "DNF";
+
+        if (!isDnf)
+        {
+            if (dto.TimeMs <= 0 || dto.TimeMs > MaxSolveTimeMs)
+                throw new CustomException(
+                    "INVALID_TIME",
+                    $"Thời gian không hợp lệ. Phải từ 1 đến {MaxSolveTimeMs} ms.",
+                    400);
+        }
+
+        var rawTimeMs = isDnf ? 0 : dto.TimeMs;
+        var displayTimeMs = PracticeAo5Calculator.GetDisplayTimeMs(rawTimeMs, isDnf, penaltyType);
+
+        var solve = new PracticeSolve
+        {
+            Id               = Guid.NewGuid(),
+            SessionId        = attempt.SessionId,
+            AttemptId        = attempt.Id,
+            ScrambleSequence = attempt.ScrambleSequence,
+            TimeMs           = rawTimeMs,
+            PenaltyTypeId    = penaltyType?.Id,
+            IsDnf            = isDnf,
+            SolvedAt         = DateTime.UtcNow
+        };
+
+        attempt.State = PracticeAttemptState.Completed;
+        attempt.TimeMs = rawTimeMs;
+        attempt.PenaltyTypeId = penaltyType?.Id;
+        attempt.IsDnf = isDnf;
+        attempt.CompletedAt = DateTime.UtcNow;
+        attempt.PenaltyType = penaltyType;
+        attempt.Solve = solve;
+
+        await _uow.Practice.AddSolveAsync(solve);
+        await _uow.SaveChangesAsync();
+
+        int? ao5 = null;
+        var recentSolves = await _uow.Practice.GetLatestSolvesAsync(attempt.SessionId, 5);
+        if (recentSolves.Count == 5)
+            ao5 = PracticeAo5Calculator.CalculateAo5(recentSolves.OrderBy(s => s.SolvedAt).ToList());
+
+        return MapAttempt(attempt, solve.Id, displayTimeMs, ao5);
+    }
+
+    public async Task<PracticeAttemptResponseDto> AbortAttemptAsync(
+        Guid userId, Guid attemptId, AbortAttemptDto? dto)
+    {
+        var attempt = await GetOwnedAttemptAsync(userId, attemptId);
+        await GetOwnedOpenSessionAsync(userId, attempt.SessionId);
+
+        if (attempt.State is PracticeAttemptState.Completed or PracticeAttemptState.Aborted)
+            throw InvalidTransition(attempt.State, "abort");
+
+        attempt.State = PracticeAttemptState.Aborted;
+        attempt.AbortReason = dto?.Reason;
+        attempt.CompletedAt = DateTime.UtcNow;
+        await _uow.SaveChangesAsync();
+
+        return MapAttempt(attempt);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Private helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private async Task<PracticeSession> GetOwnedSessionAsync(Guid userId, Guid sessionId)
     {
         var session = await _uow.Practice.GetSessionByIdAsync(sessionId)
             ?? throw new KeyNotFoundException("Không tìm thấy session.");
@@ -189,59 +311,97 @@ public class PracticeService : IPracticeService
         if (session.UserId != userId)
             throw new UnauthorizedAccessException("Session không thuộc về bạn.");
 
-        return await BuildSummaryAsync(session);
+        return session;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Private helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    private async Task<PracticeSession> GetOwnedOpenSessionAsync(Guid userId, Guid sessionId)
+    {
+        var session = await GetOwnedSessionAsync(userId, sessionId);
+
+        if (session.EndedAt.HasValue)
+            throw new CustomException("SESSION_ENDED", "Session đã kết thúc.", 400);
+
+        return session;
+    }
+
+    private async Task<PracticeAttempt> GetOwnedAttemptAsync(Guid userId, Guid attemptId)
+    {
+        var attempt = await _uow.Practice.GetAttemptByIdAsync(attemptId)
+            ?? throw new KeyNotFoundException("Không tìm thấy attempt.");
+
+        var session = await _uow.Practice.GetSessionByIdAsync(attempt.SessionId)
+            ?? throw new KeyNotFoundException("Không tìm thấy session.");
+
+        if (session.UserId != userId)
+            throw new UnauthorizedAccessException("Attempt không thuộc về bạn.");
+
+        return attempt;
+    }
+
+    private static CustomException InvalidTransition(PracticeAttemptState state, string action)
+        => new(
+            "INVALID_STATE_TRANSITION",
+            $"Không thể thực hiện '{action}' khi attempt đang ở trạng thái '{state}'.",
+            400);
+
+    private async Task<PenaltyType?> ResolvePenaltyTypeAsync(string penaltyCode)
+    {
+        if (penaltyCode == "OK")
+            return null;
+
+        return await _uow.Practice.GetPenaltyTypeByCodeAsync(penaltyCode)
+            ?? throw new CustomException(
+                "INVALID_PENALTY",
+                $"Penalty '{penaltyCode}' không tồn tại trong hệ thống.",
+                400);
+    }
 
     private async Task<PracticeSessionSummaryDto> BuildSummaryAsync(PracticeSession session)
     {
         var solves = await _uow.Practice.GetAllSolvesAsync(session.Id);
 
-        // Map solves với rolling Ao5
         var solveDtos = new List<PracticeSolveResponseDto>();
         for (int i = 0; i < solves.Count; i++)
         {
             var s = solves[i];
-            var penaltyCode = s.IsDnf ? "DNF" : null; // simplified (stored as bool)
+            var display = PracticeAo5Calculator.GetDisplayTimeMs(s);
 
             int? ao5 = null;
             if (i >= 4)
             {
                 var window = solves.Skip(i - 4).Take(5).ToList();
-                ao5 = CalculateAo5(window);
+                ao5 = PracticeAo5Calculator.CalculateAo5(window);
             }
 
             solveDtos.Add(new PracticeSolveResponseDto
             {
                 Id               = s.Id,
                 SessionId        = s.SessionId,
+                AttemptId        = s.AttemptId,
                 ScrambleSequence = s.ScrambleSequence,
                 TimeMs           = s.TimeMs,
-                PenaltyCode      = penaltyCode,
-                DisplayTimeMs    = s.IsDnf ? -1 : s.TimeMs,
+                PenaltyCode      = s.PenaltyType?.Code,
+                DisplayTimeMs    = PracticeAo5Calculator.ToUiDisplayTimeMs(display),
                 SolvedAt         = s.SolvedAt,
                 CurrentAo5Ms     = ao5
             });
         }
 
-        // Stats (exclude DNF)
         var validSolves = solves.Where(s => !s.IsDnf).ToList();
         int? meanMs = validSolves.Count > 0
-            ? (int)validSolves.Average(s => s.TimeMs)
+            ? (int)validSolves.Average(s =>
+                PracticeAo5Calculator.ToUiDisplayTimeMs(PracticeAo5Calculator.GetDisplayTimeMs(s)))
             : null;
         int? bestMs = validSolves.Count > 0
-            ? validSolves.Min(s => s.TimeMs)
+            ? validSolves.Min(s =>
+                PracticeAo5Calculator.ToUiDisplayTimeMs(PracticeAo5Calculator.GetDisplayTimeMs(s)))
             : null;
 
-        // Best Ao5 across all windows
         int? bestAo5 = null;
         for (int i = 4; i < solves.Count; i++)
         {
             var window = solves.Skip(i - 4).Take(5).ToList();
-            var ao5 = CalculateAo5(window);
+            var ao5 = PracticeAo5Calculator.CalculateAo5(window);
             if (ao5.HasValue && (!bestAo5.HasValue || ao5.Value < bestAo5.Value))
                 bestAo5 = ao5;
         }
@@ -261,50 +421,77 @@ public class PracticeService : IPracticeService
         };
     }
 
-    /// <summary>
-    /// Tính Ao5 theo chuẩn WCA:
-    /// - Loại 1 solve tốt nhất và 1 solve tệ nhất
-    /// - DNF = thời gian vô cực; nếu có 2+ DNF thì Ao5 = null (DNF)
-    /// - Trung bình 3 solve còn lại
-    /// </summary>
-    private static int? CalculateAo5(IReadOnlyList<PracticeSolve> window)
+    private static PracticeSessionResponseDto MapSession(
+        PracticeSession session, string puzzleName, string puzzleCode, int totalSolves)
+        => new()
+        {
+            Id             = session.Id,
+            UserId         = session.UserId,
+            PuzzleTypeId   = session.PuzzleTypeId,
+            PuzzleTypeName = puzzleName,
+            PuzzleTypeCode = puzzleCode,
+            StartedAt      = session.StartedAt,
+            EndedAt        = session.EndedAt,
+            TotalSolves    = totalSolves
+        };
+
+    private static PracticeAttemptResponseDto MapAttempt(
+        PracticeAttempt attempt,
+        Guid? solveId = null,
+        int? displayTimeMs = null,
+        int? currentAo5Ms = null)
     {
-        if (window.Count != 5) return null;
+        var display = displayTimeMs
+            ?? (attempt.PenaltyType != null || attempt.IsDnf
+                ? PracticeAo5Calculator.GetDisplayTimeMs(
+                    attempt.TimeMs ?? 0, attempt.IsDnf, attempt.PenaltyType)
+                : (int?)null);
 
-        // Thời gian hiển thị: DNF = int.MaxValue
-        var times = window.Select(s => s.IsDnf ? int.MaxValue : s.TimeMs).ToList();
-
-        var dnfCount = times.Count(t => t == int.MaxValue);
-        if (dnfCount >= 2) return null; // Ao5 = DNF
-
-        times.Sort();
-        // Bỏ best (index 0) và worst (index 4)
-        var middle3 = times.Skip(1).Take(3).ToList();
-
-        return (int)middle3.Average();
+        return new PracticeAttemptResponseDto
+        {
+            Id               = attempt.Id,
+            SessionId        = attempt.SessionId,
+            State            = attempt.State.ToString(),
+            ScrambleSequence = attempt.ScrambleSequence,
+            HandsOnAt        = attempt.HandsOnAt,
+            ReadyAt          = attempt.ReadyAt,
+            StartedAt        = attempt.StartedAt,
+            StoppedAt        = attempt.StoppedAt,
+            AllowedActions   = GetAllowedActions(attempt.State),
+            SolveId          = solveId ?? attempt.Solve?.Id,
+            TimeMs           = attempt.TimeMs,
+            PenaltyCode      = attempt.PenaltyType?.Code,
+            DisplayTimeMs    = display.HasValue
+                ? PracticeAo5Calculator.ToUiDisplayTimeMs(display.Value)
+                : null,
+            CurrentAo5Ms     = currentAo5Ms,
+            AbortReason      = attempt.AbortReason
+        };
     }
 
-    /// <summary>Normalize penalty về UPPERCASE; mặc định "OK" nếu null/rỗng</summary>
+    private static IReadOnlyList<string> GetAllowedActions(PracticeAttemptState state)
+        => state switch
+        {
+            PracticeAttemptState.Scrambled     => ["hands-on", "abort"],
+            PracticeAttemptState.HoldingHands  => ["ready", "abort"],
+            PracticeAttemptState.Ready         => ["hands-off", "abort"],
+            PracticeAttemptState.Solving       => ["hands-on", "abort"],
+            PracticeAttemptState.Stopped       => ["finalize", "abort"],
+            _                                  => []
+        };
+
     private static string NormalizePenalty(string? penalty)
     {
         if (string.IsNullOrWhiteSpace(penalty))
             return "OK";
 
         var upper = penalty.Trim().ToUpperInvariant();
-
         if (!ValidPenalties.Contains(upper))
-            throw new ArgumentException(
-                $"Penalty không hợp lệ: '{penalty}'. Chỉ chấp nhận: OK, PLUS_2, DNF.");
+            throw new CustomException(
+                "INVALID_PENALTY",
+                $"Penalty không hợp lệ: '{penalty}'. Chỉ chấp nhận: OK, PLUS_2, DNF.",
+                400);
 
         return upper;
     }
-
-    /// <summary>Tính thời gian hiển thị dựa trên penalty. -1 nếu DNF.</summary>
-    private static int CalculateDisplayTime(int timeMs, string penaltyCode)
-        => penaltyCode switch
-        {
-            "PLUS_2" => timeMs + 2000,
-            "DNF"    => -1,
-            _        => timeMs
-        };
 }
