@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS users (
     is_active BOOLEAN NOT NULL DEFAULT true,
     is_banned BOOLEAN NOT NULL DEFAULT false,
     ban_reason TEXT,
+    email_confirmed BOOLEAN NOT NULL DEFAULT false,
+    email_confirmed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
 
@@ -931,6 +933,31 @@ ON refresh_tokens(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_revoked
 ON refresh_tokens(revoked_at);
+
+CREATE TABLE IF NOT EXISTS user_tokens (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    token_type VARCHAR(30) NOT NULL,
+    token_hash VARCHAR(128) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_user_tokens_type
+        CHECK (token_type IN ('EMAIL_CONFIRMATION', 'PASSWORD_RESET')),
+
+    CONSTRAINT ck_user_tokens_expiry
+        CHECK (expires_at > created_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_tokens_user_type
+ON user_tokens(user_id, token_type);
+
+CREATE INDEX IF NOT EXISTS idx_user_tokens_hash
+ON user_tokens(token_hash);
+
+CREATE INDEX IF NOT EXISTS idx_user_tokens_expires
+ON user_tokens(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_offline_registration_events_event_seed
 ON offline_registration_events(event_id, seed_time_ms);

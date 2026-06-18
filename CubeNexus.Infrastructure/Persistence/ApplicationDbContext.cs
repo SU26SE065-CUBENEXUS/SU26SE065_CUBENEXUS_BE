@@ -57,6 +57,9 @@ public class ApplicationDbContext : DbContext
     // 7. Refresh Tokens
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+    // 8. User Tokens (email confirmation, password reset)
+    public DbSet<UserToken> UserTokens => Set<UserToken>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -95,6 +98,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<PracticeAo5Snapshot>().ToTable("practice_ao5_snapshots");
         modelBuilder.Entity<Notification>().ToTable("notifications");
         modelBuilder.Entity<RefreshToken>().ToTable("refresh_tokens");
+        modelBuilder.Entity<UserToken>().ToTable("user_tokens");
 
         // Configure relationships with multiple FK to User
         modelBuilder.Entity<Tournament>(entity =>
@@ -258,6 +262,11 @@ public class ApplicationDbContext : DbContext
         });
 
         modelBuilder.Entity<RefreshToken>(entity =>
+        {
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        });
+
+        modelBuilder.Entity<UserToken>(entity =>
         {
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
         });

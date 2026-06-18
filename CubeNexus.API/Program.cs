@@ -2,6 +2,7 @@ using System.Text;
 using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Infrastructure;
+using CubeNexus.Infrastructure.Email;
 using CubeNexus.Infrastructure.Identity;
 using CubeNexus.Infrastructure.Persistence;
 using CubeNexus.Infrastructure.Services;
@@ -53,6 +54,10 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 // JWT Settings
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
+
+// Email Settings
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
+builder.Services.AddScoped<IEmailService, MailKitEmailService>();
 
 // Authentication
 var jwtSettings = builder.Configuration.GetSection("JwtSettings").Get<JwtSettings>()!;
