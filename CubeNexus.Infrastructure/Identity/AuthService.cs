@@ -161,6 +161,32 @@ public partial class AuthService : IAuthService
         };
     }
 
+    public async Task<MessageResponseDto> VerifyOtpAsync(VerifyOtpRequestDto request)
+    {
+        var email = AuthTokenNormalizer.NormalizeEmail(request.Email);
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.Email == email);
+
+        if (user == null)
+            throw new InvalidOperationException("Mã OTP không hợp lệ hoặc đã hết hạn.");
+
+        var otp = AuthTokenNormalizer.NormalizeOtp(request.Otp);
+        if (!OtpPattern().IsMatch(otp))
+            throw new InvalidOperationException("Mã OTP không hợp lệ hoặc đã hết hạn.");
+
+        var otpHash = HashToken(otp);
+        var userToken = await _context.UserTokens
+            .FirstOrDefaultAsync(t =>
+                t.UserId == user.Id &&
+                t.TokenType == UserTokenType.PasswordReset &&
+                t.TokenHash == otpHash);
+
+        if (userToken == null || !userToken.IsActive)
+            throw new InvalidOperationException("Mã OTP không hợp lệ hoặc đã hết hạn.");
+
+        return new MessageResponseDto { Message = "Mã OTP hợp lệ." };
+    }
+
     public async Task<MessageResponseDto> ResetPasswordAsync(ResetPasswordRequestDto request)
     {
         var email = AuthTokenNormalizer.NormalizeEmail(request.Email);

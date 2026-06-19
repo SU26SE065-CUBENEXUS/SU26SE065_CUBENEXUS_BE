@@ -73,6 +73,20 @@ public class AuthController : ControllerBase
         }
     }
 
+    [HttpPost("verify-otp")]
+    public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpRequestDto request)
+    {
+        try
+        {
+            var result = await _authService.VerifyOtpAsync(request);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequestDto request)
     {
