@@ -9,9 +9,8 @@ public class EmailSettings
     public string Password { get; set; } = string.Empty;
     public string FromEmail { get; set; } = string.Empty;
     public string FromName { get; set; } = "CubeNexus";
-    public string FrontendBaseUrl { get; set; } = "http://localhost:5173";
-    public string EmailConfirmationPath { get; set; } = "/confirm-email";
-    public string PasswordResetPath { get; set; } = "/reset-password";
-    public int EmailConfirmationExpirationHours { get; set; } = 24;
-    public int PasswordResetExpirationHours { get; set; } = 1;
+    public int OtpExpirationMinutes { get; set; } = 10;
+
+    public bool IsSmtpConfigured =>
+        !string.IsNullOrWhiteSpace(Username) && !string.IsNullOrWhiteSpace(Password);
 }

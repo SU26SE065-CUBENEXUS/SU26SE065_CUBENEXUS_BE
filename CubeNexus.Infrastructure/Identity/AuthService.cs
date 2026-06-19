@@ -2,22 +2,26 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using CubeNexus.Application.DTOs.Auth;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Domain.Entities;
 using CubeNexus.Domain.Enums;
 using CubeNexus.Infrastructure.Email;
+using CubeNexus.Infrastructure.Identity;
 using CubeNexus.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace CubeNexus.Infrastructure.Identity;
 
-public class AuthService : IAuthService
+public partial class AuthService : IAuthService
 {
     private readonly ApplicationDbContext _context;
     private readonly IEmailService _emailService;
+    private readonly IHostEnvironment _environment;
     private readonly IOnlineProfileInitService _profileInitService;
     private readonly JwtSettings _jwtSettings;
     private readonly EmailSettings _emailSettings;
@@ -25,12 +29,14 @@ public class AuthService : IAuthService
     public AuthService(
         ApplicationDbContext context,
         IEmailService emailService,
+        IHostEnvironment environment,
         IOnlineProfileInitService profileInitService,
         IOptions<JwtSettings> jwtSettings,
         IOptions<EmailSettings> emailSettings)
     {
         _context = context;
         _emailService = emailService;
+        _environment = environment;
         _profileInitService = profileInitService;
         _jwtSettings = jwtSettings.Value;
         _emailSettings = emailSettings.Value;
@@ -45,6 +51,7 @@ public class AuthService : IAuthService
             throw new InvalidOperationException("Email đã được sử dụng.");
 
         var userCode = await GenerateUniqueUserCodeAsync();
+        var now = DateTime.UtcNow;
 
         var user = new User
         {
@@ -57,18 +64,15 @@ public class AuthService : IAuthService
             UserRole = "COMPETITOR",
             IsActive = true,
             IsBanned = false,
-            EmailConfirmed = false,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            EmailConfirmed = true,
+            EmailConfirmedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
         };
 
         await _context.Users.AddAsync(user);
-
-        var confirmationToken = await CreateUserTokenAsync(user.Id, UserTokenType.EmailConfirmation);
         await _profileInitService.EnsureStandardProfileAsync(user.Id);
         await _context.SaveChangesAsync();
-
-        await _emailService.SendEmailConfirmationAsync(user.Email, user.DisplayName, confirmationToken);
 
         return new RegisterResponseDto
         {
@@ -95,9 +99,6 @@ public class AuthService : IAuthService
         if (user.IsBanned)
             throw new UnauthorizedAccessException("Tài khoản đã bị cấm.");
 
-        if (!user.EmailConfirmed)
-            throw new UnauthorizedAccessException("Vui lòng xác nhận email trước khi đăng nhập.");
-
         return await GenerateTokenResponseAsync(user);
     }
 
@@ -114,8 +115,6 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("Refresh token đã hết hạn hoặc bị thu hồi.");
 
         var user = refreshToken.User;
-        if (!user.EmailConfirmed)
-            throw new UnauthorizedAccessException("Vui lòng xác nhận email trước khi đăng nhập.");
 
         refreshToken.RevokedAt = DateTime.UtcNow;
 
@@ -137,72 +136,28 @@ public class AuthService : IAuthService
         };
     }
 
-    public async Task<MessageResponseDto> ConfirmEmailAsync(ConfirmEmailRequestDto request)
+    public async Task<ForgotPasswordResponseDto> ForgotPasswordAsync(ForgotPasswordRequestDto request)
     {
         var email = AuthTokenNormalizer.NormalizeEmail(request.Email);
         var user = await _context.Users
             .FirstOrDefaultAsync(u => u.Email == email);
 
-        if (user == null)
-            throw new InvalidOperationException("Token xác nhận không hợp lệ hoặc đã hết hạn.");
+        if (user == null || !user.IsActive || user.IsBanned)
+            throw new InvalidOperationException("Email không tìm thấy, vui lòng nhập lại email");
 
-        if (user.EmailConfirmed)
-            return new MessageResponseDto { Message = "Email đã được xác nhận trước đó." };
-
-        var token = AuthTokenNormalizer.NormalizeToken(request.Token);
-        var tokenHash = HashToken(token);
-        var userToken = await _context.UserTokens
-            .FirstOrDefaultAsync(t =>
-                t.UserId == user.Id &&
-                t.TokenType == UserTokenType.EmailConfirmation &&
-                t.TokenHash == tokenHash);
-
-        if (userToken == null || !userToken.IsActive)
-            throw new InvalidOperationException("Token xác nhận không hợp lệ hoặc đã hết hạn.");
-
-        userToken.UsedAt = DateTime.UtcNow;
-        user.EmailConfirmed = true;
-        user.EmailConfirmedAt = DateTime.UtcNow;
-        user.UpdatedAt = DateTime.UtcNow;
-
+        var otp = await CreatePasswordResetOtpAsync(user.Id);
         await _context.SaveChangesAsync();
 
-        return new MessageResponseDto { Message = "Xác nhận email thành công." };
-    }
+        await _emailService.SendPasswordResetOtpAsync(
+            user.Email,
+            user.DisplayName,
+            otp,
+            _emailSettings.OtpExpirationMinutes);
 
-    public async Task<MessageResponseDto> ResendConfirmationAsync(ResendConfirmationRequestDto request)
-    {
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Email == request.Email);
-
-        if (user != null && !user.EmailConfirmed)
+        return new ForgotPasswordResponseDto
         {
-            var confirmationToken = await CreateUserTokenAsync(user.Id, UserTokenType.EmailConfirmation);
-            await _context.SaveChangesAsync();
-            await _emailService.SendEmailConfirmationAsync(user.Email, user.DisplayName, confirmationToken);
-        }
-
-        return new MessageResponseDto
-        {
-            Message = "Nếu email tồn tại và chưa được xác nhận, chúng tôi đã gửi lại email xác nhận."
-        };
-    }
-
-    public async Task<MessageResponseDto> ForgotPasswordAsync(ForgotPasswordRequestDto request)
-    {
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Email == request.Email);
-
-        if (user != null && user.IsActive && !user.IsBanned)
-        {
-            var resetToken = await CreateUserTokenAsync(user.Id, UserTokenType.PasswordReset);
-            await _context.SaveChangesAsync();
-            await _emailService.SendPasswordResetAsync(user.Email, user.DisplayName, resetToken);
-        }
-
-        return new MessageResponseDto
-        {
-            Message = "Nếu email tồn tại, chúng tôi đã gửi hướng dẫn đặt lại mật khẩu."
+            Message = "Chúng tôi đã gửi mã OTP đến email của bạn.",
+            DevOtp = _environment.IsDevelopment() ? otp : null
         };
     }
 
@@ -213,18 +168,21 @@ public class AuthService : IAuthService
             .FirstOrDefaultAsync(u => u.Email == email);
 
         if (user == null)
-            throw new InvalidOperationException("Token đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.");
+            throw new InvalidOperationException("Mã OTP không hợp lệ hoặc đã hết hạn.");
 
-        var token = AuthTokenNormalizer.NormalizeToken(request.Token);
-        var tokenHash = HashToken(token);
+        var otp = AuthTokenNormalizer.NormalizeOtp(request.Otp);
+        if (!OtpPattern().IsMatch(otp))
+            throw new InvalidOperationException("Mã OTP không hợp lệ hoặc đã hết hạn.");
+
+        var otpHash = HashToken(otp);
         var userToken = await _context.UserTokens
             .FirstOrDefaultAsync(t =>
                 t.UserId == user.Id &&
                 t.TokenType == UserTokenType.PasswordReset &&
-                t.TokenHash == tokenHash);
+                t.TokenHash == otpHash);
 
         if (userToken == null || !userToken.IsActive)
-            throw new InvalidOperationException("Token đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.");
+            throw new InvalidOperationException("Mã OTP không hợp lệ hoặc đã hết hạn.");
 
         if (request.NewPassword != request.ConfirmNewPassword)
             throw new InvalidOperationException("Mật khẩu xác nhận không khớp.");
@@ -255,38 +213,32 @@ public class AuthService : IAuthService
         await RevokeActiveRefreshTokensAsync(user.Id);
         await _context.SaveChangesAsync();
 
-        await _emailService.SendPasswordChangedNotificationAsync(user.Email, user.DisplayName);
-
         return new MessageResponseDto { Message = "Đổi mật khẩu thành công." };
     }
 
-    private async Task<string> CreateUserTokenAsync(Guid userId, string tokenType)
+    private async Task<string> CreatePasswordResetOtpAsync(Guid userId)
     {
         var now = DateTime.UtcNow;
         var activeTokens = await _context.UserTokens
-            .Where(t => t.UserId == userId && t.TokenType == tokenType && t.UsedAt == null && t.ExpiresAt > now)
+            .Where(t => t.UserId == userId && t.TokenType == UserTokenType.PasswordReset && t.UsedAt == null && t.ExpiresAt > now)
             .ToListAsync();
 
         foreach (var activeToken in activeTokens)
             activeToken.UsedAt = now;
 
-        var plainToken = GenerateSecureToken();
-        var expiresAt = tokenType == UserTokenType.EmailConfirmation
-            ? now.AddHours(_emailSettings.EmailConfirmationExpirationHours)
-            : now.AddHours(_emailSettings.PasswordResetExpirationHours);
-
+        var otp = GenerateOtp();
         var userToken = new UserToken
         {
             Id = Guid.NewGuid(),
             UserId = userId,
-            TokenType = tokenType,
-            TokenHash = HashToken(plainToken),
-            ExpiresAt = expiresAt,
+            TokenType = UserTokenType.PasswordReset,
+            TokenHash = HashToken(otp),
+            ExpiresAt = now.AddMinutes(_emailSettings.OtpExpirationMinutes),
             CreatedAt = now
         };
 
         await _context.UserTokens.AddAsync(userToken);
-        return plainToken;
+        return otp;
     }
 
     private async Task RevokeActiveRefreshTokensAsync(Guid userId)
@@ -371,9 +323,9 @@ public class AuthService : IAuthService
         return userCode;
     }
 
-    private static string GenerateSecureToken()
+    private static string GenerateOtp()
     {
-        return Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        return RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
     }
 
     private static string HashToken(string token)
@@ -407,4 +359,7 @@ public class AuthService : IAuthService
 
         return $"{iterations}.{Convert.ToBase64String(salt)}.{Convert.ToBase64String(hash)}";
     }
+
+    [GeneratedRegex(@"^\d{6}$")]
+    private static partial Regex OtpPattern();
 }

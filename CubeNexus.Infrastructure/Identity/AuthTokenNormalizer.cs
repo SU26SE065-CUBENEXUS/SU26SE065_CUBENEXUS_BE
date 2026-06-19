@@ -2,18 +2,12 @@ namespace CubeNexus.Infrastructure.Identity;
 
 public static class AuthTokenNormalizer
 {
-    public static string NormalizeToken(string token)
+    public static string NormalizeOtp(string otp)
     {
-        if (string.IsNullOrWhiteSpace(token))
+        if (string.IsNullOrWhiteSpace(otp))
             return string.Empty;
 
-        var normalized = token.Trim();
-
-        if (normalized.Contains('%', StringComparison.Ordinal))
-            normalized = Uri.UnescapeDataString(normalized);
-
-        // Base64 trong query string đôi khi bị đổi '+' thành khoảng trắng
-        return normalized.Replace(' ', '+');
+        return otp.Trim();
     }
 
     public static string NormalizeEmail(string email)
