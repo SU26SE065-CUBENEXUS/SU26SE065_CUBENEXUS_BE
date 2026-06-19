@@ -157,7 +157,8 @@ public partial class AuthService : IAuthService
         return new ForgotPasswordResponseDto
         {
             Message = "Chúng tôi đã gửi mã OTP đến email của bạn.",
-            DevOtp = _environment.IsDevelopment() ? otp : null
+            DevOtp = _environment.IsDevelopment() ? otp : null,
+            EmailSent = _environment.IsDevelopment() ? _emailSettings.IsSmtpConfigured : null
         };
     }
 
