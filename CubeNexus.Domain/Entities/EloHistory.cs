@@ -25,9 +25,12 @@ public class EloHistory
     public bool IsPlacementMatch { get; set; } = false;
 
     /// <summary>
-    /// Mã lý do: 'SEEDING_INIT', 'PLACEMENT_MATCH', 'STANDARD_MATCH', 'ADMIN_ADJUST'.
+    /// Mã lý do: 'DEFAULT_INIT', 'PLACEMENT_MATCH', 'STANDARD_MATCH', 'ADMIN_ADJUST'.
     /// </summary>
     public string? ReasonCode { get; set; }
+
+    /// <summary>Loại Elo bị ảnh hưởng: 'STANDARD' hoặc 'MEDLEY'.</summary>
+    public string EloModeCode { get; set; } = "STANDARD";
 
     public DateTime ChangedAt { get; set; }
 

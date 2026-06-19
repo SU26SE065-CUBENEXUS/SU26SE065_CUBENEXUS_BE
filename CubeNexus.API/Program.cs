@@ -86,7 +86,7 @@ builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
 // Services (business logic – inject IUnitOfWork, không phụ thuộc DbContext trực tiếp)
 builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<IEloSeedingService, EloSeedingService>();
+builder.Services.AddScoped<IOnlineProfileInitService, OnlineProfileInitService>();
 builder.Services.AddScoped<IOnlineArenaService, OnlineArenaService>();
 builder.Services.AddScoped<IPuzzleService, PuzzleService>();
 builder.Services.AddScoped<IScrambleGeneratorService, ScrambleGeneratorService>();

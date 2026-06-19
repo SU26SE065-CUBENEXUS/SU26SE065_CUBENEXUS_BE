@@ -5,40 +5,28 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CubeNexus.Infrastructure.Repositories;
 
-/// <summary>
-/// Repository cho Online Arena Profile với các query phức tạp.
-/// Kế thừa Repository&lt;OnlineProfile&gt; để có sẵn CRUD cơ bản.
-/// </summary>
 public class OnlineProfileRepository : Repository<OnlineProfile>, IOnlineProfileRepository
 {
     public OnlineProfileRepository(ApplicationDbContext db) : base(db) { }
 
-    /// <inheritdoc/>
-    public async Task<OnlineProfile?> GetByUserAndPuzzleTypeAsync(
+    public async Task<OnlineProfile?> GetByUserIdAsync(
         Guid userId,
-        Guid puzzleTypeId,
         CancellationToken ct = default)
     {
         return await _db.OnlineProfiles
             .Include(p => p.User)
-            .Include(p => p.PuzzleType)
-            .FirstOrDefaultAsync(
-                p => p.UserId == userId && p.PuzzleTypeId == puzzleTypeId,
-                ct);
+            .FirstOrDefaultAsync(p => p.UserId == userId, ct);
     }
 
-    /// <inheritdoc/>
     public async Task<(List<OnlineProfile> Items, int TotalCount)> GetLeaderboardAsync(
-        Guid puzzleTypeId,
         int page,
         int pageSize,
         CancellationToken ct = default)
     {
         var query = _db.OnlineProfiles
             .Include(p => p.User)
-            .Where(p => p.PuzzleTypeId == puzzleTypeId
-                     && p.IsPlacementComplete)   // Chỉ hiển thị players đã placed
-            .OrderByDescending(p => p.Elo);      // Elo cao nhất trước
+            .Where(p => p.IsPlacementCompleteStandard)
+            .OrderByDescending(p => p.EloStandard);
 
         int totalCount = await query.CountAsync(ct);
 

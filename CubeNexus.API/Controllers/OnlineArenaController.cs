@@ -18,45 +18,37 @@ public class OnlineArenaController : ControllerBase
 
     [HttpGet("profile")]
     [Authorize(Roles = "COMPETITOR")]
-    public async Task<IActionResult> GetMyProfile([FromQuery] Guid puzzleTypeId)
+    public async Task<IActionResult> GetMyProfile()
     {
         var userId = GetCurrentUserId();
         if (userId == null)
             return Unauthorized(new { message = "Token không chứa userId hợp lệ." });
 
-        var profile = await _arenaService.GetPlayerProfileAsync(userId.Value, puzzleTypeId);
+        var profile = await _arenaService.GetPlayerProfileAsync(userId.Value);
 
         if (profile == null)
-        {
-            return NotFound(new
-            {
-                message = "Chưa có Online Profile. Hãy gọi /api/elo-seeding/initialize-profile để khởi tạo.",
-                nextStep = "Hoàn thành ≥5 lượt giải Practice → calculate-ao5 → initialize-profile"
-            });
-        }
+            return NotFound(new { message = "Chưa có Online Profile." });
 
         return Ok(profile);
     }
 
     [HttpGet("eligibility")]
     [Authorize(Roles = "COMPETITOR")]
-    public async Task<IActionResult> GetMyEligibility([FromQuery] Guid puzzleTypeId)
+    public async Task<IActionResult> GetMyEligibility()
     {
         var userId = GetCurrentUserId();
         if (userId == null)
             return Unauthorized(new { message = "Token không chứa userId hợp lệ." });
 
-        var result = await _arenaService.GetPlayerEligibilityAsync(userId.Value, puzzleTypeId);
+        var result = await _arenaService.GetPlayerEligibilityAsync(userId.Value);
         return Ok(result);
     }
 
     [HttpGet("profile/{userId:guid}")]
     [AllowAnonymous]
-    public async Task<IActionResult> GetPlayerProfile(
-        Guid userId,
-        [FromQuery] Guid puzzleTypeId)
+    public async Task<IActionResult> GetPlayerProfile(Guid userId)
     {
-        var profile = await _arenaService.GetPlayerProfileAsync(userId, puzzleTypeId);
+        var profile = await _arenaService.GetPlayerProfileAsync(userId);
 
         if (profile == null)
             return NotFound(new { message = "Không tìm thấy Online Profile của người chơi này." });
@@ -67,11 +59,10 @@ public class OnlineArenaController : ControllerBase
     [HttpGet("leaderboard")]
     [AllowAnonymous]
     public async Task<IActionResult> GetLeaderboard(
-        [FromQuery] Guid puzzleTypeId,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
-        var result = await _arenaService.GetLeaderboardAsync(puzzleTypeId, page, pageSize);
+        var result = await _arenaService.GetLeaderboardAsync(page, pageSize);
         return Ok(result);
     }
 

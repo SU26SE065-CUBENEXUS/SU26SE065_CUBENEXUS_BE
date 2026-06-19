@@ -18,17 +18,20 @@ public class AuthService : IAuthService
 {
     private readonly ApplicationDbContext _context;
     private readonly IEmailService _emailService;
+    private readonly IOnlineProfileInitService _profileInitService;
     private readonly JwtSettings _jwtSettings;
     private readonly EmailSettings _emailSettings;
 
     public AuthService(
         ApplicationDbContext context,
         IEmailService emailService,
+        IOnlineProfileInitService profileInitService,
         IOptions<JwtSettings> jwtSettings,
         IOptions<EmailSettings> emailSettings)
     {
         _context = context;
         _emailService = emailService;
+        _profileInitService = profileInitService;
         _jwtSettings = jwtSettings.Value;
         _emailSettings = emailSettings.Value;
     }
@@ -62,6 +65,7 @@ public class AuthService : IAuthService
         await _context.Users.AddAsync(user);
 
         var confirmationToken = await CreateUserTokenAsync(user.Id, UserTokenType.EmailConfirmation);
+        await _profileInitService.EnsureStandardProfileAsync(user.Id);
         await _context.SaveChangesAsync();
 
         await _emailService.SendEmailConfirmationAsync(user.Email, user.DisplayName, confirmationToken);
