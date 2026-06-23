@@ -26,16 +26,13 @@ public class UnitOfWork : IUnitOfWork, IAppUnitOfWork
     private IPracticeRepository?            _practice;
     private IRepository<PenaltyType>?       _penaltyTypes;
     private IOnlineProfileRepository?       _onlineProfiles;
-    private IEloSeedingRepository?          _eloSeeding;
     private IEloConfigRepository?           _eloConfigs;
     private IRepository<EloHistory>?        _eloHistories;
     private IRepository<OnlineMatch>?       _onlineMatches;
-    private IRepository<EloSeedThreshold>?  _eloSeedThresholds;
     private IRepository<Result>?            _results;
     private IRepository<GroupCompetitor>?   _groupCompetitors;
     private IRepository<Group>?             _groups;
     private IRepository<Event>?             _events;
-    private IRepository<PracticeAo5Snapshot>? _practiceAo5Snapshots;
     private IRepository<User>?              _users;
     private IRepository<ScrambleSet>?       _scrambleSets;
     private IRepository<Scramble>?          _scrambles;
@@ -70,9 +67,6 @@ public class UnitOfWork : IUnitOfWork, IAppUnitOfWork
     public IOnlineProfileRepository OnlineProfiles
         => _onlineProfiles ??= new OnlineProfileRepository(_db);
 
-    public IEloSeedingRepository EloSeeding
-        => _eloSeeding ??= new EloSeedingRepository(_db);
-
     public IEloConfigRepository EloConfigs
         => _eloConfigs ??= new EloConfigRepository(_db);
 
@@ -81,9 +75,6 @@ public class UnitOfWork : IUnitOfWork, IAppUnitOfWork
 
     public IRepository<OnlineMatch> OnlineMatches
         => _onlineMatches ??= new Repository<OnlineMatch>(_db);
-
-    public IRepository<EloSeedThreshold> EloSeedThresholds
-        => _eloSeedThresholds ??= new Repository<EloSeedThreshold>(_db);
 
     public IRepository<Result> Results
         => _results ??= new Repository<Result>(_db);
@@ -96,9 +87,6 @@ public class UnitOfWork : IUnitOfWork, IAppUnitOfWork
 
     public IRepository<Event> Events
         => _events ??= new Repository<Event>(_db);
-
-    public IRepository<PracticeAo5Snapshot> PracticeAo5Snapshots
-        => _practiceAo5Snapshots ??= new Repository<PracticeAo5Snapshot>(_db);
 
     public IRepository<User> Users
         => _users ??= new Repository<User>(_db);

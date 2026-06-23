@@ -12,6 +12,8 @@ public class User
     public bool IsActive { get; set; } = true;
     public bool IsBanned { get; set; } = false;
     public string? BanReason { get; set; }
+    public bool EmailConfirmed { get; set; } = false;
+    public DateTime? EmailConfirmedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

@@ -41,6 +41,10 @@ public interface IPracticeRepository
     Task<IReadOnlyList<PracticeSession>> GetSessionsByUserAsync(
         Guid userId, Guid? puzzleTypeId, int skip, int take);
 
+    /// <summary>Lấy N lượt giải practice gần nhất của user theo puzzle type.</summary>
+    Task<IReadOnlyList<PracticeSolve>> GetRecentSolvesForUserAsync(
+        Guid userId, Guid puzzleTypeId, int take, CancellationToken ct = default);
+
     /// <summary>Đếm số solve trong session</summary>
     Task<int> CountSolvesAsync(Guid sessionId);
 }

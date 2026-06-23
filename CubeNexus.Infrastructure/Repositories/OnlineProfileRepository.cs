@@ -34,7 +34,15 @@ public class OnlineProfileRepository : Repository<OnlineProfile>,
     void CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository.Update(OnlineProfile profile) => base.Update(profile);
 
     // --- CubeNexus.Application.Interfaces.Repositories.IOnlineProfileRepository ---
-    /// <inheritdoc/>
+    public async Task<OnlineProfile?> GetByUserIdAsync(
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        return await _db.OnlineProfiles
+            .Include(p => p.User)
+            .FirstOrDefaultAsync(p => p.UserId == userId, ct);
+    }
+
     public async Task<OnlineProfile?> GetByUserAndPuzzleTypeAsync(
         Guid userId,
         Guid puzzleTypeId,
@@ -48,7 +56,6 @@ public class OnlineProfileRepository : Repository<OnlineProfile>,
                 ct);
     }
 
-    /// <inheritdoc/>
     public async Task<(List<OnlineProfile> Items, int TotalCount)> GetLeaderboardAsync(
         Guid puzzleTypeId,
         int page,

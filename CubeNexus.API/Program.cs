@@ -3,6 +3,7 @@ using System.Threading.RateLimiting;
 using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Infrastructure;
+using CubeNexus.Infrastructure.Email;
 using CubeNexus.Infrastructure.Identity;
 using CubeNexus.Infrastructure.Options;
 using CubeNexus.Infrastructure.Persistence;
@@ -56,6 +57,10 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 // JWT Settings
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 
+// Email Settings
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
+builder.Services.AddScoped<IEmailService, MailKitEmailService>();
+
 // Authentication
 var jwtSettings = builder.Configuration.GetSection("JwtSettings").Get<JwtSettings>()!;
 builder.Services.AddAuthentication(options =>
@@ -103,7 +108,7 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.IUnitOfWork>(
 
 // Services (business logic – inject IUnitOfWork, không phụ thuộc DbContext trực tiếp)
 builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<IEloSeedingService, EloSeedingService>();
+builder.Services.AddScoped<IOnlineProfileInitService, OnlineProfileInitService>();
 builder.Services.AddScoped<IOnlineArenaService, OnlineArenaService>();
 builder.Services.AddScoped<IPuzzleService, PuzzleService>();
 builder.Services.AddScoped<IScrambleGeneratorService, ScrambleGeneratorService>();

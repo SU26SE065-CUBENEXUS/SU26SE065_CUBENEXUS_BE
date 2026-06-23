@@ -55,8 +55,6 @@ public class OnlineProfile
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
-    // Navigation properties
     public User User { get; set; } = null!;
     public PuzzleType PuzzleType { get; set; } = null!;
-    public PracticeAo5Snapshot? PracticeAo5Snapshot { get; set; }
 }

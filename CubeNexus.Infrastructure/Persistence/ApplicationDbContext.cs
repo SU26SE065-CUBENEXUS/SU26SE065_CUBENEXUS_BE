@@ -15,7 +15,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<PuzzleType> PuzzleTypes => Set<PuzzleType>();
     public DbSet<PenaltyType> PenaltyTypes => Set<PenaltyType>();
     public DbSet<EloConfig> EloConfigs => Set<EloConfig>();
-    public DbSet<EloSeedThreshold> EloSeedThresholds => Set<EloSeedThreshold>();
 
     // 2. Offline Tournament
     public DbSet<Tournament> Tournaments => Set<Tournament>();
@@ -52,13 +51,15 @@ public class ApplicationDbContext : DbContext
     public DbSet<PracticeSession> PracticeSessions => Set<PracticeSession>();
     public DbSet<PracticeAttempt> PracticeAttempts => Set<PracticeAttempt>();
     public DbSet<PracticeSolve> PracticeSolves => Set<PracticeSolve>();
-    public DbSet<PracticeAo5Snapshot> PracticeAo5Snapshots => Set<PracticeAo5Snapshot>();
 
     // 6. Notifications
     public DbSet<Notification> Notifications => Set<Notification>();
 
     // 7. Refresh Tokens
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
+    // 8. User Tokens (email confirmation, password reset)
+    public DbSet<UserToken> UserTokens => Set<UserToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -69,7 +70,6 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<PuzzleType>().ToTable("puzzle_types");
         modelBuilder.Entity<PenaltyType>().ToTable("penalty_types");
         modelBuilder.Entity<EloConfig>().ToTable("elo_config");
-        modelBuilder.Entity<EloSeedThreshold>().ToTable("elo_seed_thresholds");
         modelBuilder.Entity<Tournament>().ToTable("tournaments");
         modelBuilder.Entity<TournamentManager>().ToTable("tournament_managers");
         modelBuilder.Entity<Event>().ToTable("events");
@@ -98,9 +98,9 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<PracticeSession>().ToTable("practice_sessions");
         modelBuilder.Entity<PracticeAttempt>().ToTable("practice_attempts");
         modelBuilder.Entity<PracticeSolve>().ToTable("practice_solves");
-        modelBuilder.Entity<PracticeAo5Snapshot>().ToTable("practice_ao5_snapshots");
         modelBuilder.Entity<Notification>().ToTable("notifications");
         modelBuilder.Entity<RefreshToken>().ToTable("refresh_tokens");
+        modelBuilder.Entity<UserToken>().ToTable("user_tokens");
 
         // Configure relationships with multiple FK to User
         modelBuilder.Entity<Tournament>(entity =>
@@ -231,15 +231,6 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<OnlineProfile>(entity =>
         {
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
-            entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId);
-            entity.HasOne(e => e.PracticeAo5Snapshot).WithMany().HasForeignKey(e => e.PracticeAo5SnapshotId);
-        });
-
-        modelBuilder.Entity<PracticeAo5Snapshot>(entity =>
-        {
-            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
-            entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId);
-            entity.HasOne(e => e.SeedThreshold).WithMany().HasForeignKey(e => e.SeedThresholdId);
         });
 
         modelBuilder.Entity<MatchmakingQueue>(entity =>
@@ -287,6 +278,11 @@ public class ApplicationDbContext : DbContext
         });
 
         modelBuilder.Entity<RefreshToken>(entity =>
+        {
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        });
+
+        modelBuilder.Entity<UserToken>(entity =>
         {
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
         });

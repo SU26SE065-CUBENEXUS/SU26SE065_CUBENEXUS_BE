@@ -3,6 +3,7 @@ using CubeNexus.Application.DTOs.Registration;
 using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Domain.Entities;
+using CubeNexus.Domain.Services;
 
 namespace CubeNexus.Infrastructure.Services;
 
@@ -83,24 +84,20 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             }
             else
             {
-                // 2. Fallback to PRACTICE_AO5
-                var snapshots = await _unitOfWork.PracticeAo5Snapshots.FindAsync(
-                    s => s.UserId == userId && s.PuzzleTypeId == puzzleTypeId,
-                    ct
-                );
-                var latestPracticeSnapshot = snapshots.OrderByDescending(s => s.CalculatedAt).FirstOrDefault();
-                if (latestPracticeSnapshot != null)
+                var recentSolves = await _unitOfWork.Practice.GetRecentSolvesForUserAsync(
+                    userId, puzzleTypeId, 5, ct);
+
+                if (recentSolves.Count == 5)
                 {
-                    seedTime = latestPracticeSnapshot.Ao5TimeMs;
-                    seedSource = "PRACTICE_AO5";
-                    seedGeneratedAt = DateTime.UtcNow;
-                }
-                else
-                {
-                    // 3. Fallback to DEFAULT
-                    seedTime = null;
-                    seedSource = null;
-                    seedGeneratedAt = null;
+                    var ao5 = PracticeAo5Calculator.CalculateAo5(
+                        recentSolves.OrderBy(s => s.SolvedAt).ToList());
+
+                    if (ao5.HasValue)
+                    {
+                        seedTime = ao5.Value;
+                        seedSource = "PRACTICE_AO5";
+                        seedGeneratedAt = DateTime.UtcNow;
+                    }
                 }
             }
 

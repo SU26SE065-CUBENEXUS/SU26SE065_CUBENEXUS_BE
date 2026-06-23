@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS users (
     is_active BOOLEAN NOT NULL DEFAULT true,
     is_banned BOOLEAN NOT NULL DEFAULT false,
     ban_reason TEXT,
+    email_confirmed BOOLEAN NOT NULL DEFAULT true,
+    email_confirmed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
 
@@ -78,7 +80,6 @@ CREATE TABLE IF NOT EXISTS elo_config (
     k_factor_standard INTEGER NOT NULL DEFAULT 20,
     placement_match_count INTEGER NOT NULL DEFAULT 5,
     default_elo INTEGER NOT NULL DEFAULT 1000,
-    min_practice_solves INTEGER NOT NULL DEFAULT 5,
     updated_by UUID REFERENCES users(id),
     updated_at TIMESTAMPTZ NOT NULL,
 
@@ -88,39 +89,8 @@ CREATE TABLE IF NOT EXISTS elo_config (
             AND k_factor_standard > 0
             AND placement_match_count > 0
             AND default_elo >= 0
-            AND min_practice_solves >= 5
         )
 );
-
-
-CREATE TABLE IF NOT EXISTS elo_seed_thresholds (
-    id UUID PRIMARY KEY,
-    puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
-    label VARCHAR(100),
-    min_time_ms INTEGER,
-    max_time_ms INTEGER,
-    elo_value INTEGER NOT NULL,
-    sort_order INTEGER NOT NULL,
-
-    CONSTRAINT uq_elo_seed_thresholds_puzzle_order
-        UNIQUE (puzzle_type_id, sort_order),
-
-    CONSTRAINT ck_elo_seed_thresholds_range
-        CHECK (
-            elo_value >= 0
-            AND sort_order > 0
-            AND (min_time_ms IS NULL OR min_time_ms >= 0)
-            AND (max_time_ms IS NULL OR max_time_ms > 0)
-            AND (
-                min_time_ms IS NULL
-                OR max_time_ms IS NULL
-                OR min_time_ms < max_time_ms
-            )
-        )
-);
-
-CREATE INDEX IF NOT EXISTS idx_elo_seed_thresholds_puzzle
-ON elo_seed_thresholds(puzzle_type_id);
 
 
 -- =========================================================
@@ -494,89 +464,57 @@ ON disputes(reported_by);
 -- 3. ONLINE ARENA
 -- =========================================================
 
-CREATE TABLE IF NOT EXISTS practice_ao5_snapshots (
-    id UUID PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id),
-    puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
-    ao5_time_ms INTEGER NOT NULL,
-    assigned_elo INTEGER NOT NULL,
-    seed_threshold_id UUID REFERENCES elo_seed_thresholds(id),
-    calculated_at TIMESTAMPTZ NOT NULL,
-    is_used_for_seeding BOOLEAN NOT NULL DEFAULT false,
-
-    CONSTRAINT ck_practice_ao5_snapshots_values
-        CHECK (
-            ao5_time_ms > 0
-            AND assigned_elo >= 0
-        )
-);
-
-CREATE INDEX IF NOT EXISTS idx_practice_ao5_user_puzzle
-ON practice_ao5_snapshots(user_id, puzzle_type_id);
-
-
 CREATE TABLE IF NOT EXISTS online_profiles (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id),
-    puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
 
-    elo INTEGER NOT NULL DEFAULT 1000,
-    peak_elo INTEGER NOT NULL DEFAULT 1000,
+    elo_standard INTEGER NOT NULL DEFAULT 1000,
+    peak_elo_standard INTEGER NOT NULL DEFAULT 1000,
+    placement_matches_done_standard INTEGER NOT NULL DEFAULT 0,
+    is_placement_complete_standard BOOLEAN NOT NULL DEFAULT false,
+    placement_completed_at_standard TIMESTAMPTZ,
+    k_factor_current_standard INTEGER NOT NULL DEFAULT 100,
+    total_wins_standard INTEGER NOT NULL DEFAULT 0,
+    total_losses_standard INTEGER NOT NULL DEFAULT 0,
+    total_draws_standard INTEGER NOT NULL DEFAULT 0,
 
-    seed_elo INTEGER,
-    seed_source_code VARCHAR(20),
-    practice_ao5_ms INTEGER,
-    practice_ao5_snapshot_id UUID REFERENCES practice_ao5_snapshots(id),
-
-    placement_matches_done INTEGER NOT NULL DEFAULT 0,
-    is_placement_complete BOOLEAN NOT NULL DEFAULT false,
-    placement_completed_at TIMESTAMPTZ,
-
-    k_factor_current INTEGER NOT NULL DEFAULT 100,
-
-    total_wins INTEGER NOT NULL DEFAULT 0,
-    total_losses INTEGER NOT NULL DEFAULT 0,
-    total_draws INTEGER NOT NULL DEFAULT 0,
+    elo_medley INTEGER,
+    peak_elo_medley INTEGER,
+    placement_matches_done_medley INTEGER NOT NULL DEFAULT 0,
+    is_placement_complete_medley BOOLEAN NOT NULL DEFAULT false,
+    placement_completed_at_medley TIMESTAMPTZ,
+    k_factor_current_medley INTEGER,
+    total_wins_medley INTEGER NOT NULL DEFAULT 0,
+    total_losses_medley INTEGER NOT NULL DEFAULT 0,
+    total_draws_medley INTEGER NOT NULL DEFAULT 0,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT uq_online_profiles_user_puzzle
-        UNIQUE (user_id, puzzle_type_id),
+    CONSTRAINT uq_online_profiles_user UNIQUE (user_id),
 
-    CONSTRAINT ck_online_profiles_elo
-        CHECK (elo >= 0),
+    CONSTRAINT ck_online_profiles_elo_standard
+        CHECK (elo_standard >= 0 AND peak_elo_standard >= 0),
 
-    CONSTRAINT ck_online_profiles_peak_elo
-        CHECK (peak_elo >= 0),
-
-    CONSTRAINT ck_online_profiles_seed_source
+    CONSTRAINT ck_online_profiles_stats_standard
         CHECK (
-            seed_source_code IS NULL
-            OR seed_source_code IN ('PRACTICE', 'DEFAULT')
-        ),
-
-    CONSTRAINT ck_online_profiles_stats
-        CHECK (
-            placement_matches_done >= 0
-            AND k_factor_current > 0
-            AND total_wins >= 0
-            AND total_losses >= 0
-            AND total_draws >= 0
+            placement_matches_done_standard >= 0
+            AND k_factor_current_standard > 0
+            AND total_wins_standard >= 0
+            AND total_losses_standard >= 0
+            AND total_draws_standard >= 0
         )
 );
 
 CREATE INDEX IF NOT EXISTS idx_online_profiles_user_id
 ON online_profiles(user_id);
 
-CREATE INDEX IF NOT EXISTS idx_online_profiles_puzzle_type_id
-ON online_profiles(puzzle_type_id);
-
 CREATE INDEX IF NOT EXISTS idx_online_profiles_leaderboard
-ON online_profiles(puzzle_type_id, elo DESC);
+ON online_profiles(elo_standard DESC)
+WHERE is_placement_complete_standard = true;
 
 CREATE INDEX IF NOT EXISTS idx_online_profiles_matchmaking
-ON online_profiles(puzzle_type_id, is_placement_complete, elo);
+ON online_profiles(is_placement_complete_standard, elo_standard);
 
 
 CREATE TABLE IF NOT EXISTS matchmaking_queue (
@@ -820,6 +758,7 @@ CREATE TABLE IF NOT EXISTS elo_history (
     expected_score NUMERIC(6,4),
     is_placement_match BOOLEAN NOT NULL DEFAULT false,
     reason_code VARCHAR(50),
+    elo_mode_code VARCHAR(20) NOT NULL DEFAULT 'STANDARD',
     changed_at TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT ck_elo_history_values
@@ -1058,6 +997,31 @@ ON refresh_tokens(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_revoked
 ON refresh_tokens(revoked_at);
+
+CREATE TABLE IF NOT EXISTS user_tokens (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    token_type VARCHAR(30) NOT NULL,
+    token_hash VARCHAR(128) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_user_tokens_type
+        CHECK (token_type IN ('EMAIL_CONFIRMATION', 'PASSWORD_RESET')),
+
+    CONSTRAINT ck_user_tokens_expiry
+        CHECK (expires_at > created_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_tokens_user_type
+ON user_tokens(user_id, token_type);
+
+CREATE INDEX IF NOT EXISTS idx_user_tokens_hash
+ON user_tokens(token_hash);
+
+CREATE INDEX IF NOT EXISTS idx_user_tokens_expires
+ON user_tokens(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_offline_registration_events_event_seed
 ON offline_registration_events(event_id, seed_time_ms);

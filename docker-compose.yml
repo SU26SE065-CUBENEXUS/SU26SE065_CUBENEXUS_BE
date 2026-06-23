@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: cubenexus
       POSTGRES_PASSWORD: 123456
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - cubenexus_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql

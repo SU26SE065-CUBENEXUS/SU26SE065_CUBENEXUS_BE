@@ -111,4 +111,15 @@ public class PracticeRepository : IPracticeRepository
 
     public async Task<int> CountSolvesAsync(Guid sessionId)
         => await _db.PracticeSolves.CountAsync(s => s.SessionId == sessionId);
+
+    public async Task<IReadOnlyList<PracticeSolve>> GetRecentSolvesForUserAsync(
+        Guid userId, Guid puzzleTypeId, int take, CancellationToken ct = default)
+        => await _db.PracticeSolves
+            .Include(s => s.Session)
+            .Include(s => s.PenaltyType)
+            .Where(s => s.Session.UserId == userId
+                     && s.Session.PuzzleTypeId == puzzleTypeId)
+            .OrderByDescending(s => s.SolvedAt)
+            .Take(take)
+            .ToListAsync(ct);
 }
