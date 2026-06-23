@@ -1,0 +1,8 @@
+{
+  "modelFile": "best.onnx",
+  "source": "C:\\cubenexus-ai-service\\runs\\detect\\train-10\\weights\\best.pt",
+  "inputSize": 640,
+  "classes": ["white", "yellow", "red", "orange", "blue", "green"],
+  "preprocessing": "letterbox RGB, float32 NCHW, divide by 255",
+  "postprocessing": "YOLOv8 output decode, confidence threshold 0.35, NMS 0.45"
+}

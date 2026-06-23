@@ -37,6 +37,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<OnlineProfile> OnlineProfiles => Set<OnlineProfile>();
     public DbSet<MatchmakingQueue> MatchmakingQueues => Set<MatchmakingQueue>();
     public DbSet<OnlineMatch> OnlineMatches => Set<OnlineMatch>();
+    public DbSet<OnlineMatchAiCheck> OnlineMatchAiChecks => Set<OnlineMatchAiCheck>();
+    public DbSet<OnlineMatchVideoEvidence> OnlineMatchVideoEvidences => Set<OnlineMatchVideoEvidence>();
+    public DbSet<OnlineMatchAuditLog> OnlineMatchAuditLogs => Set<OnlineMatchAuditLog>();
     public DbSet<MobileTimerSession> MobileTimerSessions => Set<MobileTimerSession>();
     public DbSet<EloHistory> EloHistories => Set<EloHistory>();
     public DbSet<FraudReport> FraudReports => Set<FraudReport>();
@@ -84,6 +87,9 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<OnlineProfile>().ToTable("online_profiles");
         modelBuilder.Entity<MatchmakingQueue>().ToTable("matchmaking_queue");
         modelBuilder.Entity<OnlineMatch>().ToTable("online_matches");
+        modelBuilder.Entity<OnlineMatchAiCheck>().ToTable("online_match_ai_checks");
+        modelBuilder.Entity<OnlineMatchVideoEvidence>().ToTable("online_match_video_evidence");
+        modelBuilder.Entity<OnlineMatchAuditLog>().ToTable("online_match_audit_logs");
         modelBuilder.Entity<MobileTimerSession>().ToTable("mobile_timer_sessions");
         modelBuilder.Entity<EloHistory>().ToTable("elo_history");
         modelBuilder.Entity<FraudReport>().ToTable("fraud_reports");
@@ -170,6 +176,28 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.Player2).WithMany().HasForeignKey(e => e.Player2Id);
             entity.HasOne(e => e.Winner).WithMany().HasForeignKey(e => e.WinnerId);
             entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId);
+            // Player profile FK — cần map rõ ràng vì EF không tự suy ra từ tên
+            entity.HasOne(e => e.Player1Profile).WithMany().HasForeignKey(e => e.Player1ProfileId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Player2Profile).WithMany().HasForeignKey(e => e.Player2ProfileId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OnlineMatchAiCheck>(entity =>
+        {
+            entity.HasOne(e => e.Match).WithMany(m => m.AiChecks).HasForeignKey(e => e.MatchId);
+            entity.HasOne(e => e.Player).WithMany().HasForeignKey(e => e.PlayerId);
+            entity.HasOne(e => e.VideoEvidence).WithMany().HasForeignKey(e => e.VideoEvidenceId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<OnlineMatchVideoEvidence>(entity =>
+        {
+            entity.HasOne(e => e.Match).WithMany(m => m.VideoEvidences).HasForeignKey(e => e.MatchId);
+            entity.HasOne(e => e.Player).WithMany().HasForeignKey(e => e.PlayerId);
+        });
+
+        modelBuilder.Entity<OnlineMatchAuditLog>(entity =>
+        {
+            entity.HasOne(e => e.Match).WithMany(m => m.AuditLogs).HasForeignKey(e => e.MatchId);
+            entity.HasOne(e => e.Player).WithMany().HasForeignKey(e => e.PlayerId);
         });
 
         modelBuilder.Entity<MobileTimerSession>(entity =>
@@ -180,9 +208,10 @@ public class ApplicationDbContext : DbContext
 
         modelBuilder.Entity<FraudReport>(entity =>
         {
-            entity.HasOne(e => e.ReportedByUser).WithMany().HasForeignKey(e => e.ReportedBy);
-            entity.HasOne(e => e.AccusedUser).WithMany().HasForeignKey(e => e.AccusedUserId);
+            entity.HasOne(e => e.ReportedByUser).WithMany().HasForeignKey(e => e.ReporterUserId);
+            entity.HasOne(e => e.AccusedUser).WithMany().HasForeignKey(e => e.ReportedUserId);
             entity.HasOne(e => e.ReviewedByUser).WithMany().HasForeignKey(e => e.ReviewedBy);
+            entity.HasOne(e => e.ResolvedByAdmin).WithMany().HasForeignKey(e => e.ResolvedByAdminId);
             entity.HasOne(e => e.Match).WithMany().HasForeignKey(e => e.MatchId);
         });
 

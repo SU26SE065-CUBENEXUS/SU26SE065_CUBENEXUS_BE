@@ -11,7 +11,7 @@ public class OnlineProfile
     public int Elo { get; set; } = 1000;
 
     /// <summary>Điểm Elo cao nhất từng đạt được.</summary>
-    public int? PeakElo { get; set; }
+    public int PeakElo { get; set; } = 1000;
 
     // === SEEDING (Giai đoạn 1) ===
     /// <summary>

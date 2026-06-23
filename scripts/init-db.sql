@@ -624,12 +624,56 @@ CREATE TABLE IF NOT EXISTS online_matches (
     player2_elo_before INTEGER,
     player1_elo_after INTEGER,
     player2_elo_after INTEGER,
+    outcome VARCHAR(30) NOT NULL DEFAULT 'INCONCLUSIVE',
+    review_reason_json TEXT,
+    video_evidence_upload_deadline_at TIMESTAMPTZ,
+    player1_recording_started_at TIMESTAMPTZ,
+    player2_recording_started_at TIMESTAMPTZ,
+    time_limit_ms INTEGER NOT NULL DEFAULT 480000,
+    
+    -- Trạng thái sẵn sàng (Readiness Fields)
+    player1_camera_ready BOOLEAN NOT NULL DEFAULT false,
+    player2_camera_ready BOOLEAN NOT NULL DEFAULT false,
+    player1_timer_ready BOOLEAN NOT NULL DEFAULT false,
+    player2_timer_ready BOOLEAN NOT NULL DEFAULT false,
+    player1_ready BOOLEAN NOT NULL DEFAULT false,
+    player2_ready BOOLEAN NOT NULL DEFAULT false,
+    player1_web_rtc_connected BOOLEAN NOT NULL DEFAULT false,
+    player2_web_rtc_connected BOOLEAN NOT NULL DEFAULT false,
+    player1_recording_started BOOLEAN NOT NULL DEFAULT false,
+    player2_recording_started BOOLEAN NOT NULL DEFAULT false,
+    player1_ai_pre_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    player2_ai_pre_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    player1_scramble_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    player2_scramble_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    player1_finish_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    player2_finish_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    player1_scramble_sequence TEXT,
+    player2_scramble_sequence TEXT,
+    player1_expected_state_json TEXT,
+    player2_expected_state_json TEXT,
+    player1_observed_state_json TEXT,
+    player2_observed_state_json TEXT,
+    player1_scanner_state_json TEXT,
+    player2_scanner_state_json TEXT,
+
+    -- Trạng thái kết quả (Result Fields)
+    player1_is_dnf BOOLEAN NOT NULL DEFAULT false,
+    player2_is_dnf BOOLEAN NOT NULL DEFAULT false,
+    player1_result_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    player2_result_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+
+    -- Mốc thời gian quan trọng (Realtime Timestamps)
+    scramble_revealed_at TIMESTAMPTZ,
+    player1_finished_at TIMESTAMPTZ,
+    player2_finished_at TIMESTAMPTZ,
+
     started_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT ck_online_matches_status
-        CHECK (status_code IN ('ONGOING', 'COMPLETED', 'CANCELLED', 'DRAW')),
+        CHECK (status_code IN ('CREATED', 'READY', 'ONGOING', 'PENDING_EVIDENCE', 'NEEDS_REVIEW', 'COMPLETED', 'CANCELLED', 'DRAW')),
 
     CONSTRAINT ck_online_matches_players
         CHECK (player1_id <> player2_id),
@@ -648,7 +692,17 @@ CREATE TABLE IF NOT EXISTS online_matches (
         CHECK (
             (player1_time_ms IS NULL OR player1_time_ms > 0)
             AND (player2_time_ms IS NULL OR player2_time_ms > 0)
-        )
+            AND time_limit_ms > 0
+        ),
+
+    CONSTRAINT ck_player1_result_status
+        CHECK (player1_result_status IN ('PENDING', 'VALID', 'DNF', 'DISCONNECTED', 'REPORTED')),
+
+    CONSTRAINT ck_player2_result_status
+        CHECK (player2_result_status IN ('PENDING', 'VALID', 'DNF', 'DISCONNECTED', 'REPORTED')),
+
+    CONSTRAINT ck_online_matches_outcome
+        CHECK (outcome IN ('INCONCLUSIVE', 'PLAYER1_WIN', 'PLAYER2_WIN', 'DRAW', 'CANCELLED'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_online_matches_player1
@@ -668,6 +722,71 @@ ON online_matches(player1_profile_id);
 
 CREATE INDEX IF NOT EXISTS idx_online_matches_player2_profile
 ON online_matches(player2_profile_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_online_matches_qr_session_code
+ON online_matches(qr_session_code)
+WHERE qr_session_code IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS online_match_video_evidence (
+    id UUID PRIMARY KEY,
+    match_id UUID NOT NULL REFERENCES online_matches(id) ON DELETE CASCADE,
+    player_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    object_key TEXT,
+    content_type TEXT,
+    file_size_bytes BIGINT,
+    duration_seconds DOUBLE PRECISION,
+    recording_status VARCHAR(30) NOT NULL DEFAULT 'Pending',
+    recorded_at TIMESTAMPTZ,
+    file_url TEXT NOT NULL,
+    thumbnail_url TEXT,
+    duration_ms BIGINT,
+    recording_started_at TIMESTAMPTZ,
+    recording_ended_at TIMESTAMPTZ,
+    uploaded_at TIMESTAMPTZ,
+    status VARCHAR(30) NOT NULL,
+    checksum TEXT,
+    source_type VARCHAR(30) NOT NULL DEFAULT 'LOCAL_CAMERA',
+    mime_type TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_online_match_video_evidence_match
+ON online_match_video_evidence(match_id);
+
+CREATE INDEX IF NOT EXISTS idx_online_match_video_evidence_player
+ON online_match_video_evidence(player_id);
+
+CREATE TABLE IF NOT EXISTS online_match_ai_checks (
+    id UUID PRIMARY KEY,
+    match_id UUID NOT NULL REFERENCES online_matches(id) ON DELETE CASCADE,
+    player_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    check_type VARCHAR(30) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    confidence DOUBLE PRECISION,
+    evidence_image_url TEXT,
+    video_evidence_id UUID REFERENCES online_match_video_evidence(id) ON DELETE SET NULL,
+    model_version TEXT,
+    result_json TEXT,
+    failure_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_online_match_ai_checks_match
+ON online_match_ai_checks(match_id);
+
+CREATE INDEX IF NOT EXISTS idx_online_match_ai_checks_player
+ON online_match_ai_checks(player_id);
+
+CREATE TABLE IF NOT EXISTS online_match_audit_logs (
+    id UUID PRIMARY KEY,
+    match_id UUID NOT NULL REFERENCES online_matches(id) ON DELETE CASCADE,
+    player_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    event_type VARCHAR(50) NOT NULL,
+    payload_json TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_online_match_audit_logs_match
+ON online_match_audit_logs(match_id);
 
 CREATE TABLE IF NOT EXISTS mobile_timer_sessions (
     id UUID PRIMARY KEY,
@@ -731,17 +850,25 @@ CREATE TABLE IF NOT EXISTS fraud_reports (
     match_id UUID NOT NULL REFERENCES online_matches(id),
     reported_by UUID NOT NULL REFERENCES users(id),
     accused_user_id UUID NOT NULL REFERENCES users(id),
+    reporter_user_id UUID REFERENCES users(id),
+    reported_user_id UUID REFERENCES users(id),
     description TEXT,
     evidence_url TEXT,
     status_code VARCHAR(20) NOT NULL,
+    reason_code VARCHAR(50),
+    review_scope VARCHAR(30) NOT NULL DEFAULT 'WHOLE_MATCH',
+    decision VARCHAR(30),
+    penalty_action VARCHAR(30),
     reviewed_by UUID REFERENCES users(id),
+    resolved_by_admin_id UUID REFERENCES users(id),
     verdict_code VARCHAR(20),
     admin_note TEXT,
     created_at TIMESTAMPTZ NOT NULL,
     reviewed_at TIMESTAMPTZ,
+    resolved_at TIMESTAMPTZ,
 
     CONSTRAINT ck_fraud_reports_status
-        CHECK (status_code IN ('PENDING', 'REVIEWED', 'DISMISSED')),
+        CHECK (status_code IN ('OPEN', 'REVIEWING', 'PENDING', 'REVIEWED', 'DISMISSED', 'RESOLVED', 'REJECTED')),
 
     CONSTRAINT ck_fraud_reports_verdict
         CHECK (verdict_code IS NULL OR verdict_code IN ('GUILTY', 'INNOCENT', 'INCONCLUSIVE')),

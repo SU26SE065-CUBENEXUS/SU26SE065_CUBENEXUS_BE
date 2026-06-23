@@ -1,0 +1,162 @@
+using CubeNexus.Application.DTOs.OnlineArena;
+using CubeNexus.Application.Interfaces;
+using CubeNexus.Application.Interfaces.OnlineArena;
+using CubeNexus.Domain.Entities;
+using CubeNexus.Domain.Enums;
+
+namespace CubeNexus.Application.UseCases.OnlineArena;
+
+public class ConnectMobileTimerUseCase
+{
+    private readonly IOnlineMatchRepository _matchRepo;
+    private readonly IMobileTimerSessionRepository _sessionRepo;
+    private readonly IOnlineArenaRealtimeNotifier _notifier;
+    private readonly IUnitOfWork _uow;
+
+    public ConnectMobileTimerUseCase(
+        IOnlineMatchRepository matchRepo,
+        IMobileTimerSessionRepository sessionRepo,
+        IOnlineArenaRealtimeNotifier notifier,
+        IUnitOfWork uow)
+    {
+        _matchRepo = matchRepo;
+        _sessionRepo = sessionRepo;
+        _notifier = notifier;
+        _uow = uow;
+    }
+
+    public async Task<MobileTimerConnectResponseDto> ExecuteAsync(Guid userId, string qrSessionCode, string? deviceInfo)
+    {
+        if (string.IsNullOrWhiteSpace(qrSessionCode))
+            throw new ArgumentException("qrSessionCode is required.");
+
+        var match = await _matchRepo.GetByQrSessionCodeAsync(qrSessionCode);
+        if (match == null)
+            throw new KeyNotFoundException("Invalid QR code - no match found.");
+        if (match.Player1Id != userId && match.Player2Id != userId)
+            throw new UnauthorizedAccessException("Not a player in this match.");
+        if (OnlineArenaFlowHelpers.IsTerminal(match.StatusCode))
+            throw new ConflictException($"Match is already terminal ({match.StatusCode}).");
+
+        var session = await _sessionRepo.GetSessionAsync(match.Id, userId);
+        if (session == null)
+        {
+            session = new MobileTimerSession
+            {
+                Id = Guid.NewGuid(),
+                MatchId = match.Id,
+                UserId = userId,
+                QrSessionCode = qrSessionCode,
+                DeviceInfo = deviceInfo,
+                ConnectedAt = DateTime.UtcNow,
+                IsActive = true
+            };
+            await _sessionRepo.AddAsync(session);
+        }
+        else
+        {
+            session.QrSessionCode = qrSessionCode;
+            session.DeviceInfo = deviceInfo;
+            session.ConnectedAt = DateTime.UtcNow;
+            session.IsActive = true;
+            _sessionRepo.Update(session);
+        }
+
+        if (match.Player1Id == userId)
+            match.Player1TimerReady = true;
+        else
+            match.Player2TimerReady = true;
+
+        if (match.StatusCode == OnlineMatchStatus.CREATED.ToString() && MarkPlayerReadyUseCase.AllReady(match))
+            match.StatusCode = OnlineMatchStatus.READY.ToString();
+
+        _matchRepo.Update(match);
+        await _uow.SaveChangesAsync();
+
+        var response = new MobileTimerConnectResponseDto
+        {
+            Message = "Mobile timer connected.",
+            MatchId = match.Id,
+            StatusCode = match.StatusCode,
+            PlayerId = userId,
+            Player1TimerReady = match.Player1TimerReady,
+            Player2TimerReady = match.Player2TimerReady,
+            DeviceInfo = deviceInfo
+        };
+
+        await _notifier.NotifyTimerConnectedAsync(match.Id, response);
+        await _notifier.NotifyReadyStateUpdatedAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, "Timer connected."));
+        if (match.StatusCode == OnlineMatchStatus.READY.ToString())
+        {
+            await _notifier.NotifyMatchReadyAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, "Match ready."));
+        }
+
+        return response;
+    }
+}
+
+public class DisconnectMobileTimerUseCase
+{
+    private readonly IOnlineMatchRepository _matchRepo;
+    private readonly IMobileTimerSessionRepository _sessionRepo;
+    private readonly IOnlineArenaRealtimeNotifier _notifier;
+    private readonly IUnitOfWork _uow;
+
+    public DisconnectMobileTimerUseCase(
+        IOnlineMatchRepository matchRepo,
+        IMobileTimerSessionRepository sessionRepo,
+        IOnlineArenaRealtimeNotifier notifier,
+        IUnitOfWork uow)
+    {
+        _matchRepo = matchRepo;
+        _sessionRepo = sessionRepo;
+        _notifier = notifier;
+        _uow = uow;
+    }
+
+    public async Task<MobileTimerDisconnectResponseDto> ExecuteAsync(Guid userId, Guid matchId)
+    {
+        var match = await _matchRepo.GetByIdAsync(matchId);
+        if (match == null)
+            throw new KeyNotFoundException("Match not found.");
+        if (match.Player1Id != userId && match.Player2Id != userId)
+            throw new UnauthorizedAccessException("Not a player in this match.");
+        if (OnlineArenaFlowHelpers.IsTerminal(match.StatusCode))
+            throw new ConflictException($"Match is already terminal ({match.StatusCode}).");
+
+        var session = await _sessionRepo.GetSessionAsync(matchId, userId);
+        if (session == null)
+            throw new KeyNotFoundException("Mobile timer session not found.");
+
+        session.IsActive = false;
+        _sessionRepo.Update(session);
+
+        if (match.StatusCode != OnlineMatchStatus.ONGOING.ToString())
+        {
+            if (match.Player1Id == userId)
+                match.Player1TimerReady = false;
+            else
+                match.Player2TimerReady = false;
+
+            if (match.StatusCode == OnlineMatchStatus.READY.ToString())
+                match.StatusCode = OnlineMatchStatus.CREATED.ToString();
+
+            _matchRepo.Update(match);
+        }
+
+        await _uow.SaveChangesAsync();
+
+        var response = new MobileTimerDisconnectResponseDto
+        {
+            Message = "Mobile timer disconnected.",
+            MatchId = match.Id,
+            PlayerId = userId,
+            IsActive = false,
+            MatchStatus = match.StatusCode
+        };
+
+        await _notifier.NotifyTimerDisconnectedAsync(match.Id, response);
+        await _notifier.NotifyReadyStateUpdatedAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, "Timer disconnected."));
+        return response;
+    }
+}

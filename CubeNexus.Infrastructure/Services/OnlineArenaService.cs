@@ -284,7 +284,7 @@ public class OnlineArenaService : IOnlineArenaService
         bool wasComplete = profile.IsPlacementComplete;
 
         profile.Elo = newElo;
-        if (newElo > (profile.PeakElo ?? 0)) profile.PeakElo = newElo;
+        if (newElo > profile.PeakElo) profile.PeakElo = newElo;
 
         if      (actualScore == 1.0m) profile.TotalWins++;
         else if (actualScore == 0.0m) profile.TotalLosses++;
