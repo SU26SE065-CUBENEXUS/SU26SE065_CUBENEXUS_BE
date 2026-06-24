@@ -69,7 +69,7 @@ public class FindOnlineMatchUseCase
         await _uow.BeginTransactionAsync();
         try
         {
-            var opponentQueue = await _queueRepo.FindMatchForUpdateAsync(puzzleTypeId, userId, profile.Elo, 200);
+            var opponentQueue = await _queueRepo.FindMatchForUpdateAsync(puzzleTypeId, userId, profile.EloStandard, 200);
             if (opponentQueue == null)
             {
                 var newQueue = new MatchmakingQueue
@@ -123,8 +123,8 @@ public class FindOnlineMatchUseCase
                 StatusCode = OnlineMatchStatus.CREATED.ToString(),
                 RoomToken = Guid.NewGuid().ToString("N"),
                 QrSessionCode = Guid.NewGuid().ToString("N"),
-                Player1EloBefore = opponentQueue.OnlineProfile.Elo,
-                Player2EloBefore = profile.Elo,
+                Player1EloBefore = opponentQueue.OnlineProfile.EloStandard,
+                Player2EloBefore = profile.EloStandard,
                 CreatedAt = DateTime.UtcNow
             };
 

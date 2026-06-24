@@ -47,7 +47,7 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
             .Include(item => item.OnlineProfile)
             .FirstOrDefaultAsync();
 
-        if (queue != null && Math.Abs(queue.OnlineProfile.Elo - currentElo) <= eloRange)
+        if (queue != null && Math.Abs(queue.OnlineProfile.EloStandard - currentElo) <= eloRange)
             return queue;
 
         return null;

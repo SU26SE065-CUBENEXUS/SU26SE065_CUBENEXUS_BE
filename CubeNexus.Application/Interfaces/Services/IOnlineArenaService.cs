@@ -8,11 +8,11 @@ public interface IOnlineArenaService
         Guid matchId, Guid? winnerId, CancellationToken ct = default);
 
     Task<OnlineProfileDto?> GetPlayerProfileAsync(
-        Guid userId, Guid puzzleTypeId, CancellationToken ct = default);
+        Guid userId, CancellationToken ct = default);
 
     Task<LeaderboardResponseDto> GetLeaderboardAsync(
-        Guid puzzleTypeId, int page = 1, int pageSize = 50, CancellationToken ct = default);
+        int page = 1, int pageSize = 50, CancellationToken ct = default);
 
     Task<PlayerEligibilityDto> GetPlayerEligibilityAsync(
-        Guid userId, Guid puzzleTypeId, CancellationToken ct = default);
+        Guid userId, CancellationToken ct = default);
 }

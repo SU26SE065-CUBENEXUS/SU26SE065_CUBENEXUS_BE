@@ -28,12 +28,11 @@ public class OnlineProfileInitService : IOnlineProfileInitService
         {
             Id = Guid.NewGuid(),
             UserId = userId,
-            PuzzleTypeId = Guid.Empty,
-            Elo = defaultElo,
-            PeakElo = defaultElo,
-            PlacementMatchesDone = 0,
-            IsPlacementComplete = false,
-            KFactorCurrent = config.KFactorPlacement,
+            EloStandard = defaultElo,
+            PeakEloStandard = defaultElo,
+            PlacementMatchesDoneStandard = 0,
+            IsPlacementCompleteStandard = false,
+            KFactorCurrentStandard = config.KFactorPlacement,
             CreatedAt = now,
             UpdatedAt = now
         };

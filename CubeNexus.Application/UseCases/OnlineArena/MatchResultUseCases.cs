@@ -218,15 +218,15 @@ public class CompleteOnlineMatchUseCase
             var player2Score = existing.Outcome == nameof(OnlineMatchOutcome.PLAYER2_WIN) ? 1.0m : existing.Outcome == nameof(OnlineMatchOutcome.DRAW) ? 0.5m : 0.0m;
 
             var (player1EloAfter, player2EloAfter, expected1, expected2) = _eloCalc.Calculate(
-                p1Profile.Elo,
-                p1Profile.KFactorCurrent,
+                p1Profile.EloStandard,
+                p1Profile.KFactorCurrentStandard,
                 player1Score,
-                p2Profile.Elo,
-                p2Profile.KFactorCurrent,
+                p2Profile.EloStandard,
+                p2Profile.KFactorCurrentStandard,
                 player2Score);
 
-            existing.Player1EloBefore = p1Profile.Elo;
-            existing.Player2EloBefore = p2Profile.Elo;
+            existing.Player1EloBefore = p1Profile.EloStandard;
+            existing.Player2EloBefore = p2Profile.EloStandard;
             existing.Player1EloAfter = player1EloAfter;
             existing.Player2EloAfter = player2EloAfter;
 
@@ -260,33 +260,33 @@ public class CompleteOnlineMatchUseCase
             Id = Guid.NewGuid(),
             OnlineProfileId = profile.Id,
             MatchId = matchId,
-            EloBefore = profile.Elo,
+            EloBefore = profile.EloStandard,
             EloAfter = eloAfter,
-            Delta = eloAfter - profile.Elo,
-            KFactorUsed = profile.KFactorCurrent,
+            Delta = eloAfter - profile.EloStandard,
+            KFactorUsed = profile.KFactorCurrentStandard,
             ActualScore = actualScore,
             ExpectedScore = expectedScore,
-            IsPlacementMatch = !profile.IsPlacementComplete,
+            IsPlacementMatch = !profile.IsPlacementCompleteStandard,
             ChangedAt = DateTime.UtcNow
         };
 
     private static void UpdateProfile(OnlineProfile profile, int newElo, decimal score)
     {
-        profile.Elo = newElo;
-        profile.PeakElo = Math.Max(profile.PeakElo, newElo);
+        profile.EloStandard = newElo;
+        profile.PeakEloStandard = Math.Max(profile.PeakEloStandard, newElo);
 
-        if (score == 1.0m) profile.TotalWins++;
-        else if (score == 0.0m) profile.TotalLosses++;
-        else profile.TotalDraws++;
+        if (score == 1.0m) profile.TotalWinsStandard++;
+        else if (score == 0.0m) profile.TotalLossesStandard++;
+        else profile.TotalDrawsStandard++;
 
-        if (!profile.IsPlacementComplete)
+        if (!profile.IsPlacementCompleteStandard)
         {
-            profile.PlacementMatchesDone++;
-            if (profile.PlacementMatchesDone >= 5)
+            profile.PlacementMatchesDoneStandard++;
+            if (profile.PlacementMatchesDoneStandard >= 5)
             {
-                profile.IsPlacementComplete = true;
-                profile.PlacementCompletedAt = DateTime.UtcNow;
-                profile.KFactorCurrent = 20;
+                profile.IsPlacementCompleteStandard = true;
+                profile.PlacementCompletedAtStandard = DateTime.UtcNow;
+                profile.KFactorCurrentStandard = 20;
             }
         }
 

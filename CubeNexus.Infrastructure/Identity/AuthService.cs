@@ -217,6 +217,32 @@ public partial class AuthService : IAuthService
         return new MessageResponseDto { Message = "Đổi mật khẩu thành công." };
     }
 
+    public async Task<MessageResponseDto> LogoutAsync(Guid userId, LogoutRequestDto? request = null)
+    {
+        var now = DateTime.UtcNow;
+
+        if (!string.IsNullOrWhiteSpace(request?.RefreshToken))
+        {
+            var refreshToken = await _context.RefreshTokens
+                .FirstOrDefaultAsync(rt =>
+                    rt.Token == request.RefreshToken &&
+                    rt.UserId == userId &&
+                    rt.RevokedAt == null &&
+                    rt.ExpiresAt > now);
+
+            if (refreshToken != null)
+                refreshToken.RevokedAt = now;
+        }
+        else
+        {
+            await RevokeActiveRefreshTokensAsync(userId);
+        }
+
+        await _context.SaveChangesAsync();
+
+        return new MessageResponseDto { Message = "Đăng xuất thành công." };
+    }
+
     private async Task<string> CreatePasswordResetOtpAsync(Guid userId)
     {
         var now = DateTime.UtcNow;

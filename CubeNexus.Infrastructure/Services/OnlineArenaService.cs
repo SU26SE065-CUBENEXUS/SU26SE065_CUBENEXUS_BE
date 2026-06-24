@@ -18,46 +18,46 @@ public class OnlineArenaService : IOnlineArenaService
         Guid matchId, Guid? winnerId, CancellationToken ct = default)
     {
         var match = await _uow.OnlineMatches.GetByIdAsync(matchId, ct)
-            ?? throw new InvalidOperationException($"Khong tim thay tran dau {matchId}.");
+            ?? throw new InvalidOperationException($"Không tìm thấy trận đấu {matchId}.");
 
         if (match.EndedAt != null && match.Player1EloAfter != null)
-            throw new InvalidOperationException("Ket qua tran dau nay da duoc ghi nhan.");
+            throw new InvalidOperationException("Kết quả trận đấu này đã được ghi nhận.");
 
         var config = await _uow.EloConfigs.GetActiveConfigAsync(ct);
 
-        var profile1 = await _uow.OnlineProfiles
-            .GetByUserAndPuzzleTypeAsync(match.Player1Id, match.PuzzleTypeId, ct)
-            ?? throw new InvalidOperationException($"Khong tim thay online profile cua player1 ({match.Player1Id}).");
+        var profile1 = await _uow.OnlineProfiles.GetByUserIdAsync(match.Player1Id, ct)
+            ?? throw new InvalidOperationException(
+                $"Không tìm thấy online profile của player1 ({match.Player1Id}).");
 
-        var profile2 = await _uow.OnlineProfiles
-            .GetByUserAndPuzzleTypeAsync(match.Player2Id, match.PuzzleTypeId, ct)
-            ?? throw new InvalidOperationException($"Khong tim thay online profile cua player2 ({match.Player2Id}).");
+        var profile2 = await _uow.OnlineProfiles.GetByUserIdAsync(match.Player2Id, ct)
+            ?? throw new InvalidOperationException(
+                $"Không tìm thấy online profile của player2 ({match.Player2Id}).");
 
         (decimal s1, decimal s2) = winnerId switch
         {
-            null => (0.5m, 0.5m),
+            null                            => (0.5m, 0.5m),
             var w when w == match.Player1Id => (1.0m, 0.0m),
-            _ => (0.0m, 1.0m)
+            _                               => (0.0m, 1.0m)
         };
 
-        decimal e1 = CalculateExpectedScore(profile1.Elo, profile2.Elo);
+        decimal e1 = CalculateExpectedScore(profile1.EloStandard, profile2.EloStandard);
         decimal e2 = 1.0m - e1;
 
-        int eloBefore1 = profile1.Elo;
-        int eloBefore2 = profile2.Elo;
-        int k1 = profile1.KFactorCurrent;
-        int k2 = profile2.KFactorCurrent;
+        int eloBefore1 = profile1.EloStandard;
+        int eloBefore2 = profile2.EloStandard;
+        int k1 = profile1.KFactorCurrentStandard;
+        int k2 = profile2.KFactorCurrentStandard;
 
         int eloAfter1 = Math.Max(0, (int)Math.Round(eloBefore1 + k1 * (s1 - e1)));
         int eloAfter2 = Math.Max(0, (int)Math.Round(eloBefore2 + k2 * (s2 - e2)));
 
-        bool wasPlacement1 = !profile1.IsPlacementComplete;
-        bool wasPlacement2 = !profile2.IsPlacementComplete;
+        bool wasPlacement1 = !profile1.IsPlacementCompleteStandard;
+        bool wasPlacement2 = !profile2.IsPlacementCompleteStandard;
 
         var now = DateTime.UtcNow;
 
-        bool p1PlacementJustDone = UpdateProfile(profile1, s1, eloAfter1, config, now);
-        bool p2PlacementJustDone = UpdateProfile(profile2, s2, eloAfter2, config, now);
+        bool p1PlacementJustDone = UpdateStandardProfile(profile1, s1, eloAfter1, config, now);
+        bool p2PlacementJustDone = UpdateStandardProfile(profile2, s2, eloAfter2, config, now);
 
         match.WinnerId = winnerId;
         match.EndedAt = now;
@@ -87,50 +87,50 @@ public class OnlineArenaService : IOnlineArenaService
     }
 
     public async Task<OnlineProfileDto?> GetPlayerProfileAsync(
-        Guid userId, Guid puzzleTypeId, CancellationToken ct = default)
+        Guid userId, CancellationToken ct = default)
     {
         var config = await _uow.EloConfigs.GetActiveConfigAsync(ct);
-        var profile = await _uow.OnlineProfiles.GetByUserAndPuzzleTypeAsync(userId, puzzleTypeId, ct);
+        var profile = await _uow.OnlineProfiles.GetByUserIdAsync(userId, ct);
 
         if (profile is null) return null;
 
-        int total = profile.TotalWins + profile.TotalLosses + profile.TotalDraws;
+        int total = profile.TotalWinsStandard + profile.TotalLossesStandard + profile.TotalDrawsStandard;
         double winRate = total > 0
-            ? Math.Round((double)profile.TotalWins / total * 100, 1)
+            ? Math.Round((double)profile.TotalWinsStandard / total * 100, 1)
             : 0;
 
         return new OnlineProfileDto
         {
             UserId = profile.UserId,
-            EloStandardVisible = profile.IsPlacementComplete ? profile.Elo : null,
-            PeakEloStandard = profile.PeakElo,
-            EloMedley = null,
-            PlacementMatchesDoneStandard = profile.PlacementMatchesDone,
+            EloStandardVisible = profile.IsPlacementCompleteStandard ? profile.EloStandard : null,
+            PeakEloStandard = profile.PeakEloStandard,
+            EloMedley = profile.EloMedley,
+            PlacementMatchesDoneStandard = profile.PlacementMatchesDoneStandard,
             PlacementMatchCount = config.PlacementMatchCount,
-            IsPlacementCompleteStandard = profile.IsPlacementComplete,
-            PlacementCompletedAtStandard = profile.PlacementCompletedAt,
-            TotalWinsStandard = profile.TotalWins,
-            TotalLossesStandard = profile.TotalLosses,
-            TotalDrawsStandard = profile.TotalDraws,
+            IsPlacementCompleteStandard = profile.IsPlacementCompleteStandard,
+            PlacementCompletedAtStandard = profile.PlacementCompletedAtStandard,
+            TotalWinsStandard = profile.TotalWinsStandard,
+            TotalLossesStandard = profile.TotalLossesStandard,
+            TotalDrawsStandard = profile.TotalDrawsStandard,
             WinRate = winRate,
             CreatedAt = profile.CreatedAt
         };
     }
 
     public async Task<LeaderboardResponseDto> GetLeaderboardAsync(
-        Guid puzzleTypeId, int page = 1, int pageSize = 50, CancellationToken ct = default)
+        int page = 1, int pageSize = 50, CancellationToken ct = default)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
 
         var (items, totalCount) = await _uow.OnlineProfiles
-            .GetLeaderboardAsync(puzzleTypeId, page, pageSize, ct);
+            .GetLeaderboardAsync(page, pageSize, ct);
 
         var entries = items.Select((p, i) =>
         {
-            int total = p.TotalWins + p.TotalLosses + p.TotalDraws;
+            int total = p.TotalWinsStandard + p.TotalLossesStandard + p.TotalDrawsStandard;
             double wr = total > 0
-                ? Math.Round((double)p.TotalWins / total * 100, 1)
+                ? Math.Round((double)p.TotalWinsStandard / total * 100, 1)
                 : 0;
 
             return new LeaderboardEntryDto
@@ -139,13 +139,13 @@ public class OnlineArenaService : IOnlineArenaService
                 UserId = p.UserId,
                 DisplayName = p.User.DisplayName,
                 AvatarUrl = p.User.AvatarUrl,
-                Elo = p.Elo,
-                PeakElo = p.PeakElo,
-                TotalWins = p.TotalWins,
-                TotalLosses = p.TotalLosses,
-                TotalDraws = p.TotalDraws,
+                Elo = p.EloStandard,
+                PeakElo = p.PeakEloStandard,
+                TotalWins = p.TotalWinsStandard,
+                TotalLosses = p.TotalLossesStandard,
+                TotalDraws = p.TotalDrawsStandard,
                 WinRate = wr,
-                PlacementCompletedAt = p.PlacementCompletedAt
+                PlacementCompletedAt = p.PlacementCompletedAtStandard
             };
         }).ToList();
 
@@ -159,10 +159,10 @@ public class OnlineArenaService : IOnlineArenaService
     }
 
     public async Task<PlayerEligibilityDto> GetPlayerEligibilityAsync(
-        Guid userId, Guid puzzleTypeId, CancellationToken ct = default)
+        Guid userId, CancellationToken ct = default)
     {
         var config = await _uow.EloConfigs.GetActiveConfigAsync(ct);
-        var profile = await _uow.OnlineProfiles.GetByUserAndPuzzleTypeAsync(userId, puzzleTypeId, ct);
+        var profile = await _uow.OnlineProfiles.GetByUserIdAsync(userId, ct);
 
         if (profile is null)
         {
@@ -170,20 +170,16 @@ public class OnlineArenaService : IOnlineArenaService
             {
                 UserId = userId,
                 CanJoinPvp = false,
-                BlockReason = "Ban chua hoan thanh Practice Ao5 seeding.",
+                BlockReason = "Chưa có Online Profile. Vui lòng liên hệ hỗ trợ.",
                 HasOnlineProfile = false,
-                IsPlacementCompleteStandard = false,
-                PlacementMatchesDoneStandard = 0,
                 PlacementMatchCount = config.PlacementMatchCount,
-                HiddenEloStandard = null,
-                PublicEloStandard = null,
                 CurrentStage = "NO_PROFILE",
-                NextStepHint = "Hoan thanh Practice Ao5 seeding de mo khoa Online PVP."
+                NextStepHint = "Profile sẽ được tạo tự động khi đăng ký."
             };
         }
 
-        bool isPlacementComplete = profile.IsPlacementComplete;
-        int placementDone = profile.PlacementMatchesDone;
+        bool isPlacementComplete = profile.IsPlacementCompleteStandard;
+        int placementDone = profile.PlacementMatchesDoneStandard;
         int remaining = config.PlacementMatchCount - placementDone;
 
         string stage;
@@ -192,12 +188,13 @@ public class OnlineArenaService : IOnlineArenaService
         if (!isPlacementComplete)
         {
             stage = "PLACEMENT";
-            hint = $"Dang trong giai doan Placement. Hoan thanh them {remaining} tran PVP nua de Elo duoc cong khai.";
+            hint = $"Đang trong giai đoạn Placement (Elo Standard ẩn). " +
+                   $"Hoàn thành thêm {remaining} trận PVP nữa để Elo được công khai trên bảng xếp hạng.";
         }
         else
         {
             stage = "STANDARD";
-            hint = "Elo da duoc cong khai. Tiep tuc thi dau de leo rank.";
+            hint = "Elo Standard đã được công khai. Tiếp tục thi đấu để leo rank!";
         }
 
         return new PlayerEligibilityDto
@@ -209,8 +206,8 @@ public class OnlineArenaService : IOnlineArenaService
             IsPlacementCompleteStandard = isPlacementComplete,
             PlacementMatchesDoneStandard = placementDone,
             PlacementMatchCount = config.PlacementMatchCount,
-            HiddenEloStandard = !isPlacementComplete ? profile.Elo : null,
-            PublicEloStandard = isPlacementComplete ? profile.Elo : null,
+            HiddenEloStandard = !isPlacementComplete ? profile.EloStandard : null,
+            PublicEloStandard = isPlacementComplete ? profile.EloStandard : null,
             CurrentStage = stage,
             NextStepHint = hint
         };
@@ -222,36 +219,36 @@ public class OnlineArenaService : IOnlineArenaService
         return (decimal)Math.Round(expected, 4);
     }
 
-    private static bool UpdateProfile(
+    private static bool UpdateStandardProfile(
         OnlineProfile profile,
         decimal actualScore,
         int newElo,
         EloConfig config,
         DateTime now)
     {
-        bool wasComplete = profile.IsPlacementComplete;
+        bool wasComplete = profile.IsPlacementCompleteStandard;
 
-        profile.Elo = newElo;
-        if (newElo > profile.PeakElo) profile.PeakElo = newElo;
+        profile.EloStandard = newElo;
+        if (newElo > profile.PeakEloStandard) profile.PeakEloStandard = newElo;
 
-        if (actualScore == 1.0m) profile.TotalWins++;
-        else if (actualScore == 0.0m) profile.TotalLosses++;
-        else profile.TotalDraws++;
+        if (actualScore == 1.0m) profile.TotalWinsStandard++;
+        else if (actualScore == 0.0m) profile.TotalLossesStandard++;
+        else profile.TotalDrawsStandard++;
 
-        if (!profile.IsPlacementComplete)
+        if (!profile.IsPlacementCompleteStandard)
         {
-            profile.PlacementMatchesDone++;
+            profile.PlacementMatchesDoneStandard++;
 
-            if (profile.PlacementMatchesDone >= config.PlacementMatchCount)
+            if (profile.PlacementMatchesDoneStandard >= config.PlacementMatchCount)
             {
-                profile.IsPlacementComplete = true;
-                profile.PlacementCompletedAt = now;
-                profile.KFactorCurrent = config.KFactorStandard;
+                profile.IsPlacementCompleteStandard = true;
+                profile.PlacementCompletedAtStandard = now;
+                profile.KFactorCurrentStandard = config.KFactorStandard;
             }
         }
 
         profile.UpdatedAt = now;
-        return !wasComplete && profile.IsPlacementComplete;
+        return !wasComplete && profile.IsPlacementCompleteStandard;
     }
 
     private static EloHistory BuildEloHistory(
@@ -273,6 +270,7 @@ public class OnlineArenaService : IOnlineArenaService
             ExpectedScore = e,
             IsPlacementMatch = isPlacement,
             ReasonCode = isPlacement ? "PLACEMENT_MATCH" : "STANDARD_MATCH",
+            EloModeCode = "STANDARD",
             ChangedAt = now
         };
     }
@@ -292,8 +290,8 @@ public class OnlineArenaService : IOnlineArenaService
             ActualScore = s,
             ExpectedScore = e,
             KFactorUsed = k,
-            PlacementMatchesDone = profile.PlacementMatchesDone,
-            IsPlacementComplete = profile.IsPlacementComplete
+            PlacementMatchesDone = profile.PlacementMatchesDoneStandard,
+            IsPlacementComplete = profile.IsPlacementCompleteStandard
         };
     }
 }
