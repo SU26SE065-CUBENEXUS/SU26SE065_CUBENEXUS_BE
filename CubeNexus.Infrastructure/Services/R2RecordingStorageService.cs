@@ -15,6 +15,7 @@ public class R2RecordingStorageService : IRecordingStorageService
     public R2RecordingStorageService(IOptions<R2Options> options)
     {
         _options = options.Value;
+        EnsureConfigured();
 
         var config = new AmazonS3Config
         {
@@ -27,6 +28,21 @@ public class R2RecordingStorageService : IRecordingStorageService
         _s3Client = new AmazonS3Client(
             new BasicAWSCredentials(_options.AccessKeyId, _options.SecretAccessKey),
             config);
+    }
+
+    private void EnsureConfigured()
+    {
+        if (string.IsNullOrWhiteSpace(_options.AccountId)
+            || string.IsNullOrWhiteSpace(_options.Endpoint)
+            || string.IsNullOrWhiteSpace(_options.BucketName))
+        {
+            throw new InvalidOperationException("R2 recording is not configured. Missing R2 account, endpoint, or bucket settings.");
+        }
+
+        if (!_options.HasCredentials())
+        {
+            throw new InvalidOperationException("R2 recording is not configured. Set R2:AccessKeyId and R2:SecretAccessKey in User Secrets or environment variables.");
+        }
     }
 
     public Task<RecordingUploadUrlResult> CreateUploadUrlAsync(

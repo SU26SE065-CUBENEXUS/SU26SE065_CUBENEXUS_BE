@@ -135,8 +135,7 @@ builder.Services.AddOptions<R2Options>()
     .Bind(builder.Configuration.GetSection(R2Options.SectionName))
     .ValidateDataAnnotations()
     .Validate(options => options.UploadUrlExpirationMinutes == 15, "R2:UploadUrlExpirationMinutes must be 15.")
-    .Validate(options => options.PlaybackUrlExpirationMinutes == 60, "R2:PlaybackUrlExpirationMinutes must be 60.")
-    .ValidateOnStart();
+    .Validate(options => options.PlaybackUrlExpirationMinutes == 60, "R2:PlaybackUrlExpirationMinutes must be 60.");
 builder.Services.AddHttpClient<CubeNexus.Application.Interfaces.Services.IAiRubikClient, AiRubikClient>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IRecordingStorageService, R2RecordingStorageService>();
 

@@ -16,10 +16,8 @@ public class R2Options
     [Required]
     public string BucketName { get; set; } = string.Empty;
 
-    [Required]
     public string AccessKeyId { get; set; } = string.Empty;
 
-    [Required]
     public string SecretAccessKey { get; set; } = string.Empty;
 
     [Range(1, 1440)]
@@ -27,4 +25,8 @@ public class R2Options
 
     [Range(1, 1440)]
     public int PlaybackUrlExpirationMinutes { get; set; } = 60;
+
+    public bool HasCredentials()
+        => !string.IsNullOrWhiteSpace(AccessKeyId)
+        && !string.IsNullOrWhiteSpace(SecretAccessKey);
 }
