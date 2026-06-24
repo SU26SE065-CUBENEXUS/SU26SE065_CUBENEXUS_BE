@@ -1,7 +1,18 @@
 -- =========================================================
--- CubeNexus Database Schema
+-- CubeNexus Database Schema + Master Seed Data
 -- PostgreSQL
--- Merged CREATE TABLE + Constraints + Indexes
+--
+-- Fresh install (recommended):
+--   docker compose up -d
+--   → Postgres mounts this file to /docker-entrypoint-initdb.d/
+--   → runs once on empty volume (schema + seed below)
+--
+-- Manual install:
+--   psql -h localhost -p 5432 -U cubenexus -d CubeNexus -f scripts/init-db.sql
+--
+-- Existing database (created before this version):
+--   Apply scripts/migrations/*.sql in lexical order after init-db.sql
+--   Or reset dev DB: docker compose down -v && docker compose up -d
 -- =========================================================
 
 BEGIN;
@@ -1044,5 +1055,45 @@ CREATE TABLE IF NOT EXISTS result_audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_result_audit_logs_result
 ON result_audit_logs(result_id);
+
+
+-- =========================================================
+-- 8. MASTER SEED DATA (idempotent — safe to re-run)
+-- Required for register, practice, matchmaking, tournaments.
+-- Stable UUIDs so Postman/docs can reference puzzleTypeId.
+-- =========================================================
+
+INSERT INTO puzzle_types (id, name, code, scramble_length, is_active, created_at)
+VALUES
+    ('7dd820d8-6be0-4197-bc29-0026c578cdf5', '2x2x2 Cube', '222', 10, true, NOW()),
+    ('f4ddb522-426f-4dd0-a98d-20f21b192470', '3x3x3 Cube', '333', 20, true, NOW()),
+    ('167d6142-48e9-436a-a42c-53427bcad8a7', '4x4x4 Cube', '444', 40, true, NOW()),
+    ('1e36b408-c8d4-4e1a-9908-44fb7905e502', '5x5x5 Cube', '555', 60, true, NOW()),
+    ('84b0f049-9b3e-4b40-8930-e764ea9d4121', '6x6x6 Cube', '666', 80, true, NOW())
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO penalty_types (id, code, label, time_addition_ms, is_disqualified)
+VALUES
+    ('a1000001-0000-4000-8000-000000000001', 'OK',     'OK',  0,    false),
+    ('a1000001-0000-4000-8000-000000000002', 'PLUS_2', '+2',  2000, false),
+    ('a1000001-0000-4000-8000-000000000003', 'DNF',    'DNF', 0,    true)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO elo_config (
+    id,
+    k_factor_placement,
+    k_factor_standard,
+    placement_match_count,
+    default_elo,
+    updated_at
+)
+SELECT
+    'b2000001-0000-4000-8000-000000000001',
+    100,
+    20,
+    5,
+    1000,
+    NOW()
+WHERE NOT EXISTS (SELECT 1 FROM elo_config);
 
 COMMIT;
