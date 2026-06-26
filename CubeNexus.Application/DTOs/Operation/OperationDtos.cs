@@ -52,7 +52,44 @@ public class SubmitResultResponseDto
     public Guid ResultId { get; set; }
     public int? FinalTimeMs { get; set; }
     public bool IsDnf { get; set; }
+    public int? SubmittedSolveNumber { get; set; }
+    public SubmitProgressDto? Progress { get; set; }
+    public ScrambleInfoDto? NextScramble { get; set; }
 }
+
+public class ScrambleInfoDto
+{
+    public Guid ScrambleId { get; set; }
+    public int SolveNumber { get; set; }
+    public string Sequence { get; set; } = string.Empty;
+}
+
+public class SubmitProgressDto
+{
+    public int SubmittedCount { get; set; }
+    public int SolveCount { get; set; }
+    public int? NextSolveNumber { get; set; }
+    public bool CanSubmitNext { get; set; }
+}
+
+public class SolveProgressDto
+{
+    public Guid GroupCompetitorId { get; set; }
+    public Guid? EventId { get; set; }
+    public string EventName { get; set; } = string.Empty;
+    public int? RoundNumber { get; set; }
+    public Guid? GroupId { get; set; }
+    public string GroupName { get; set; } = string.Empty;
+    public int? StationNumber { get; set; }
+    public int SolveCount { get; set; }
+    public List<int> SubmittedSolveNumbers { get; set; } = new();
+    public int SubmittedCount { get; set; }
+    public int? NextSolveNumber { get; set; }
+    public bool CanSubmit { get; set; }
+    public string? Reason { get; set; }
+    public ScrambleInfoDto? CurrentScramble { get; set; }
+}
+
 
 public class GroupDto
 {
@@ -80,12 +117,12 @@ public class AdvanceRoundRequestDto
     public int StationCount { get; set; }
 }
 
-public class VerifyJudgeStationDto
+
+public class VerifyJudgeStationByStationDto
 {
     public string QrToken { get; set; } = string.Empty;
     public Guid EventId { get; set; }
     public int RoundNumber { get; set; }
-    public Guid GroupId { get; set; }
     public int StationNumber { get; set; }
 }
 
@@ -104,6 +141,7 @@ public class VerifyJudgeStationResponseDto
     public int? NextSolveNumber { get; set; }
     public int? SolveCount { get; set; }
     public bool CanSubmit { get; set; }
+    public ScrambleInfoDto? CurrentScramble { get; set; }
 }
 
 public class ResultCorrectionDto

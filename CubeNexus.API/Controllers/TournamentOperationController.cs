@@ -19,7 +19,7 @@ public class TournamentOperationController : ControllerBase
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteRoundUseCase _completeRoundUseCase;
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteEventUseCase _completeEventUseCase;
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IAdvanceRoundUseCase _advanceRoundUseCase;
-    private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationUseCase _verifyJudgeStationUseCase;
+    private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase _verifyJudgeStationByStationUseCase;
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase _correctResultUseCase;
 
     public TournamentOperationController(
@@ -30,7 +30,7 @@ public class TournamentOperationController : ControllerBase
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteRoundUseCase completeRoundUseCase,
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteEventUseCase completeEventUseCase,
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IAdvanceRoundUseCase advanceRoundUseCase,
-        CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationUseCase verifyJudgeStationUseCase,
+        CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase verifyJudgeStationByStationUseCase,
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase correctResultUseCase)
     {
         _operationService = operationService;
@@ -40,7 +40,7 @@ public class TournamentOperationController : ControllerBase
         _completeRoundUseCase = completeRoundUseCase;
         _completeEventUseCase = completeEventUseCase;
         _advanceRoundUseCase = advanceRoundUseCase;
-        _verifyJudgeStationUseCase = verifyJudgeStationUseCase;
+        _verifyJudgeStationByStationUseCase = verifyJudgeStationByStationUseCase;
         _correctResultUseCase = correctResultUseCase;
     }
 
@@ -338,16 +338,17 @@ public class TournamentOperationController : ControllerBase
         }
     }
 
+
     /// <summary>
-    /// Xác thực thông tin đấu thủ qua mã QR tại trạm của trọng tài (JUDGE, MANAGER, ADMIN).
+    /// Xác thực thông tin đấu thủ qua mã QR và tự động resolve GroupId theo trạm của trọng tài (JUDGE, MANAGER, ADMIN).
     /// </summary>
-    [HttpPost("api/tournament-operation/judge/verify")]
+    [HttpPost("api/tournament-operation/judge/verify-by-station")]
     [Authorize(Roles = "JUDGE,MANAGER,ADMIN")]
-    public async Task<IActionResult> VerifyJudgeStation([FromBody] VerifyJudgeStationDto dto, CancellationToken ct)
+    public async Task<IActionResult> VerifyJudgeStationByStation([FromBody] VerifyJudgeStationByStationDto dto, CancellationToken ct)
     {
         try
         {
-            var result = await _verifyJudgeStationUseCase.ExecuteAsync(dto);
+            var result = await _verifyJudgeStationByStationUseCase.ExecuteAsync(dto, ct);
             return Ok(result);
         }
         catch (CubeNexus.Application.Exceptions.CustomException ex)
@@ -356,7 +357,33 @@ public class TournamentOperationController : ControllerBase
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { message = "An error occurred while verifying the judge station.", detail = ex.Message });
+            return StatusCode(500, new { message = "An error occurred while verifying the competitor at the station.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Lấy tiến trình giải (solve progress) và thông tin scramble tiếp theo của đấu thủ (JUDGE, MANAGER, ADMIN).
+    /// </summary>
+    [HttpGet("api/tournament-operation/competitors/{groupCompetitorId:guid}/solve-progress")]
+    [Authorize(Roles = "JUDGE,MANAGER,ADMIN")]
+    public async Task<IActionResult> GetSolveProgress(Guid groupCompetitorId, CancellationToken ct)
+    {
+        try
+        {
+            var result = await _operationService.GetSolveProgressAsync(groupCompetitorId, ct);
+            return Ok(result);
+        }
+        catch (CubeNexus.Application.Exceptions.CustomException ex)
+        {
+            return HandleCustomException(ex);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while fetching solve progress.", detail = ex.Message });
         }
     }
 

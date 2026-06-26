@@ -308,17 +308,26 @@ public class TournamentOperationService : ITournamentOperationService
         if (ev.EventFormatCode != "TRADITIONAL")
             throw new InvalidOperationException("Event format must be TRADITIONAL.");
 
+        var existingResults = await _unitOfWork.Results.FindAsync(r => r.GroupCompetitorId == dto.GroupCompetitorId, ct);
+        var existingResultsList = existingResults.ToList();
+
+        if (existingResultsList.Count >= ev.SolveCount)
+            throw new Application.Exceptions.CustomException("SOLVE_COUNT_EXCEEDED", $"Competitor has already completed all {ev.SolveCount} solves.", 400);
+
+        int expectedSolveNumber = existingResultsList.Count + 1;
+        if (dto.SolveNumber != expectedSolveNumber)
+            throw new Application.Exceptions.CustomException("INVALID_SOLVE_NUMBER", $"Expected solve number {expectedSolveNumber}, but got {dto.SolveNumber}.", 400);
+
         // Check if scramble belongs to the group's scramble set and match solve number and puzzle type
         var scrambleSet = await _unitOfWork.ScrambleSets.FirstOrDefaultAsync(ss => ss.GroupId == group.Id, ct);
         if (scrambleSet == null)
             throw new InvalidOperationException("Scramble set not found for this group.");
 
         var scramble = await _unitOfWork.Scrambles.GetByIdAsync(dto.ScrambleId, ct);
-        if (scramble == null)
-            throw new Application.Exceptions.CustomException("SCRAMBLE_NOT_FOUND", $"Scramble {dto.ScrambleId} not found.", 404);
-
-        if (scramble.ScrambleSetId != scrambleSet.Id || scramble.SolveNumber != dto.SolveNumber || scramble.PuzzleTypeId != ev.PuzzleTypeId)
-            throw new InvalidOperationException("Invalid scramble for this solve.");
+        if (scramble == null || scramble.ScrambleSetId != scrambleSet.Id || scramble.SolveNumber != dto.SolveNumber || scramble.PuzzleTypeId != ev.PuzzleTypeId)
+        {
+            throw new Application.Exceptions.CustomException("INVALID_SCRAMBLE", $"Scramble does not match solve number {dto.SolveNumber} for this competitor/group.", 400);
+        }
 
         PenaltyType? penaltyType = null;
         if (dto.PenaltyTypeId.HasValue)
@@ -330,12 +339,8 @@ public class TournamentOperationService : ITournamentOperationService
         }
 
         // Check for existing result
-        var existingResult = await _unitOfWork.Results.FirstOrDefaultAsync(
-            r => r.GroupCompetitorId == dto.GroupCompetitorId && r.SolveNumber == dto.SolveNumber,
-            ct
-        );
-
-        if (existingResult != null)
+        var duplicateResult = existingResultsList.FirstOrDefault(r => r.SolveNumber == dto.SolveNumber);
+        if (duplicateResult != null)
             throw new Application.Exceptions.CustomException("DUPLICATE_RESULT", $"Result already exists for group competitor {dto.GroupCompetitorId} and solve number {dto.SolveNumber}.", 409);
 
         var result = new Result
@@ -358,7 +363,7 @@ public class TournamentOperationService : ITournamentOperationService
         _unitOfWork.Results.Add(result);
 
         // Check if completed
-        var resultCount = await _unitOfWork.Results.CountAsync(r => r.GroupCompetitorId == groupCompetitor.Id, ct);
+        var resultCount = existingResultsList.Count;
         resultCount++; // Since the new result is not yet in the DB
 
         if (resultCount >= ev.SolveCount && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED)
@@ -447,11 +452,40 @@ public class TournamentOperationService : ITournamentOperationService
             Console.WriteLine($"[Broadcast Stage ERROR] Failed to broadcast realtime event: {ex.Message}. GroupCompetitorId={dto.GroupCompetitorId}, RegistrationId={registration.Id}, UserId={user.Id}, ScrambleId={dto.ScrambleId}, SolveNumber={dto.SolveNumber}");
         }
 
+        int submittedCount = resultCount;
+        int? nextSolveNumber = submittedCount < ev.SolveCount ? submittedCount + 1 : null;
+        bool canSubmitNext = nextSolveNumber.HasValue && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW && group.StatusCode == "ONGOING";
+
+        ScrambleInfoDto? nextScramble = null;
+        if (canSubmitNext && nextSolveNumber.HasValue)
+        {
+            var nextScrambles = await _unitOfWork.Scrambles.FindAsync(s => s.ScrambleSetId == scrambleSet.Id && s.SolveNumber == nextSolveNumber.Value && s.PuzzleTypeId == ev.PuzzleTypeId, ct);
+            var nextS = nextScrambles.FirstOrDefault();
+            if (nextS != null)
+            {
+                nextScramble = new ScrambleInfoDto
+                {
+                    ScrambleId = nextS.Id,
+                    SolveNumber = nextS.SolveNumber,
+                    Sequence = nextS.Sequence
+                };
+            }
+        }
+
         return new SubmitResultResponseDto
         {
             ResultId = result.Id,
             FinalTimeMs = result.FinalTimeMs,
-            IsDnf = result.IsDnf
+            IsDnf = result.IsDnf,
+            SubmittedSolveNumber = result.SolveNumber,
+            Progress = new SubmitProgressDto
+            {
+                SubmittedCount = submittedCount,
+                SolveCount = ev.SolveCount,
+                NextSolveNumber = nextSolveNumber,
+                CanSubmitNext = canSubmitNext
+            },
+            NextScramble = nextScramble
         };
     }
 
@@ -500,13 +534,19 @@ public class TournamentOperationService : ITournamentOperationService
         var medleyPuzzles = medleyPuzzlesList.OrderBy(mp => mp.SortOrder).ToList();
         var medleyPuzzleMap = medleyPuzzles.ToDictionary(mp => mp.Id, mp => mp);
 
-        // Check for existing parent result
-        var existingResult = await _unitOfWork.Results.FirstOrDefaultAsync(
-            r => r.GroupCompetitorId == dto.GroupCompetitorId && r.SolveNumber == dto.SolveNumber,
-            ct
-        );
+        var existingResults = await _unitOfWork.Results.FindAsync(r => r.GroupCompetitorId == dto.GroupCompetitorId, ct);
+        var existingResultsList = existingResults.ToList();
 
-        if (existingResult != null)
+        if (existingResultsList.Count >= ev.SolveCount)
+            throw new Application.Exceptions.CustomException("SOLVE_COUNT_EXCEEDED", $"Competitor has already completed all {ev.SolveCount} solves.", 400);
+
+        int expectedSolveNumber = existingResultsList.Count + 1;
+        if (dto.SolveNumber != expectedSolveNumber)
+            throw new Application.Exceptions.CustomException("INVALID_SOLVE_NUMBER", $"Expected solve number {expectedSolveNumber}, but got {dto.SolveNumber}.", 400);
+
+        // Check for existing parent result
+        var duplicateResult = existingResultsList.FirstOrDefault(r => r.SolveNumber == dto.SolveNumber);
+        if (duplicateResult != null)
             throw new Application.Exceptions.CustomException("DUPLICATE_RESULT", $"Result already exists for group competitor {dto.GroupCompetitorId} and solve number {dto.SolveNumber}.", 409);
 
         var result = new Result
@@ -542,11 +582,10 @@ public class TournamentOperationService : ITournamentOperationService
 
             // Validate Scramble
             var scramble = await _unitOfWork.Scrambles.GetByIdAsync(detailDto.ScrambleId, ct);
-            if (scramble == null)
-                throw new Application.Exceptions.CustomException("SCRAMBLE_NOT_FOUND", $"Scramble {detailDto.ScrambleId} not found.", 404);
-
-            if (scramble.ScrambleSetId != scrambleSet.Id || scramble.SolveNumber != dto.SolveNumber || scramble.PuzzleTypeId != mp.PuzzleTypeId)
-                throw new InvalidOperationException($"Invalid scramble {detailDto.ScrambleId} for medley puzzle.");
+            if (scramble == null || scramble.ScrambleSetId != scrambleSet.Id || scramble.SolveNumber != dto.SolveNumber || scramble.PuzzleTypeId != mp.PuzzleTypeId)
+            {
+                throw new Application.Exceptions.CustomException("INVALID_SCRAMBLE", $"Scramble does not match solve number {dto.SolveNumber} for this competitor/group.", 400);
+            }
 
             PenaltyType? penaltyType = null;
             if (detailDto.PenaltyTypeId.HasValue)
@@ -671,11 +710,117 @@ public class TournamentOperationService : ITournamentOperationService
             Console.WriteLine($"[Broadcast Stage ERROR] Failed to broadcast medley realtime event: {ex.Message}. GroupCompetitorId={dto.GroupCompetitorId}, RegistrationId={registration.Id}, UserId={user.Id}, SolveNumber={dto.SolveNumber}");
         }
 
+        int submittedCount = resultCount;
+        int? nextSolveNumber = submittedCount < ev.SolveCount ? submittedCount + 1 : null;
+        bool canSubmitNext = nextSolveNumber.HasValue && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW && group.StatusCode == "ONGOING";
+
         return new SubmitResultResponseDto
         {
             ResultId = result.Id,
             FinalTimeMs = result.FinalTimeMs,
-            IsDnf = result.IsDnf
+            IsDnf = result.IsDnf,
+            SubmittedSolveNumber = result.SolveNumber,
+            Progress = new SubmitProgressDto
+            {
+                SubmittedCount = submittedCount,
+                SolveCount = ev.SolveCount,
+                NextSolveNumber = nextSolveNumber,
+                CanSubmitNext = canSubmitNext
+            },
+            NextScramble = null
+        };
+    }
+
+    public async Task<SolveProgressDto> GetSolveProgressAsync(Guid groupCompetitorId, CancellationToken ct = default)
+    {
+        var groupCompetitor = await _unitOfWork.GroupCompetitors.GetByIdAsync(groupCompetitorId, ct);
+        if (groupCompetitor == null)
+            throw new Application.Exceptions.CustomException("GROUP_COMPETITOR_NOT_FOUND", $"Group competitor {groupCompetitorId} not found.", 404);
+
+        var group = await _unitOfWork.Groups.GetByIdAsync(groupCompetitor.GroupId, ct);
+        if (group == null)
+            throw new KeyNotFoundException($"Group with ID {groupCompetitor.GroupId} not found.");
+
+        var ev = await _unitOfWork.Events.GetByIdAsync(group.EventId, ct);
+        if (ev == null)
+            throw new KeyNotFoundException($"Event with ID {group.EventId} not found.");
+
+        var puzzle = await _unitOfWork.PuzzleTypes.GetByIdAsync(ev.PuzzleTypeId, ct);
+        var eventName = puzzle?.Name ?? "Unknown Event";
+
+        var results = await _unitOfWork.Results.FindAsync(r => r.GroupCompetitorId == groupCompetitorId, ct);
+        var resultsList = results.ToList();
+
+        var submittedSolveNumbers = resultsList.Select(r => r.SolveNumber).OrderBy(n => n).ToList();
+        var submittedCount = resultsList.Count;
+        var solveCount = ev.SolveCount;
+
+        int? nextSolveNumber = submittedCount < solveCount ? submittedCount + 1 : null;
+        bool canSubmit = true;
+        string? reason = null;
+
+        if (groupCompetitor.StatusCode == CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW)
+        {
+            canSubmit = false;
+            reason = "COMPETITOR_NO_SHOW";
+        }
+        else if (group.StatusCode != "ONGOING")
+        {
+            canSubmit = false;
+            reason = "GROUP_NOT_ONGOING";
+        }
+        else
+        {
+            var offlineRegEvent = await _unitOfWork.OfflineRegistrationEvents.GetByIdAsync(groupCompetitor.RegistrationEventId, ct);
+            var registration = offlineRegEvent != null ? await _unitOfWork.Registrations.GetByIdAsync(offlineRegEvent.RegistrationId, ct) : null;
+            if (registration == null || registration.CheckedInAt == null)
+            {
+                canSubmit = false;
+                reason = "PLAYER_NOT_CHECKED_IN";
+            }
+            else if (submittedCount >= solveCount)
+            {
+                canSubmit = false;
+                reason = "ALL_SOLVES_COMPLETED";
+            }
+        }
+
+        ScrambleInfoDto? currentScramble = null;
+        if (canSubmit && nextSolveNumber.HasValue && ev.EventFormatCode == "TRADITIONAL")
+        {
+            var scrambleSet = await _unitOfWork.ScrambleSets.FirstOrDefaultAsync(ss => ss.GroupId == group.Id, ct);
+            if (scrambleSet != null)
+            {
+                var scrambles = await _unitOfWork.Scrambles.FindAsync(s => s.ScrambleSetId == scrambleSet.Id && s.SolveNumber == nextSolveNumber.Value && s.PuzzleTypeId == ev.PuzzleTypeId, ct);
+                var scramble = scrambles.FirstOrDefault();
+                if (scramble != null)
+                {
+                    currentScramble = new ScrambleInfoDto
+                    {
+                        ScrambleId = scramble.Id,
+                        SolveNumber = scramble.SolveNumber,
+                        Sequence = scramble.Sequence
+                    };
+                }
+            }
+        }
+
+        return new SolveProgressDto
+        {
+            GroupCompetitorId = groupCompetitorId,
+            EventId = ev.Id,
+            EventName = eventName,
+            RoundNumber = group.RoundNumber,
+            GroupId = group.Id,
+            GroupName = group.GroupName ?? string.Empty,
+            StationNumber = groupCompetitor.StationNumber,
+            SolveCount = solveCount,
+            SubmittedSolveNumbers = submittedSolveNumbers,
+            SubmittedCount = submittedCount,
+            NextSolveNumber = nextSolveNumber,
+            CanSubmit = canSubmit,
+            Reason = reason,
+            CurrentScramble = currentScramble
         };
     }
 

@@ -123,7 +123,7 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentO
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteEventUseCase, CubeNexus.Application.UseCases.TournamentOperation.CompleteEventUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteTournamentUseCase, CubeNexus.Application.UseCases.TournamentOperation.CompleteTournamentUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IAdvanceRoundUseCase, CubeNexus.Application.UseCases.TournamentOperation.AdvanceRoundUseCase>();
-builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationUseCase, CubeNexus.Application.UseCases.TournamentOperation.VerifyJudgeStationUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase, CubeNexus.Application.UseCases.TournamentOperation.VerifyJudgeStationUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase, CubeNexus.Application.UseCases.TournamentOperation.CorrectResultUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IRealtimeNotifier, CubeNexus.API.Services.RealtimeNotifier>();
 
