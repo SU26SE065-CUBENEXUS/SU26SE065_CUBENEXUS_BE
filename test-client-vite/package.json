@@ -7,12 +7,15 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "node --test src/features/rubik-scanner/scanBurstControl.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
     "@microsoft/signalr": "^10.0.0",
+    "onnxruntime-web": "^1.27.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "typescript": "^6.0.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

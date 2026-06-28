@@ -43,6 +43,21 @@ public class TournamentService : ITournamentService
                 throw new InvalidOperationException($"PuzzleTypeId {ev.PuzzleTypeId} is invalid or inactive.");
             }
 
+            if (ev.TimeLimitMs.HasValue && ev.TimeLimitMs.Value <= 0)
+            {
+                throw new InvalidOperationException("Time Limit must be greater than 0 ms.");
+            }
+
+            if (ev.CutoffTimeMs.HasValue && ev.CutoffTimeMs.Value <= 0)
+            {
+                throw new InvalidOperationException("Cutoff Time must be greater than 0 ms.");
+            }
+
+            if (ev.TimeLimitMs.HasValue && ev.CutoffTimeMs.HasValue && ev.CutoffTimeMs.Value > ev.TimeLimitMs.Value)
+            {
+                throw new InvalidOperationException("Cutoff Time must be less than or equal to Time Limit.");
+            }
+
             if (ev.EventFormatCode == "MEDLEY")
             {
                 if (ev.MedleyPuzzles == null || ev.MedleyPuzzles.Count < 2)

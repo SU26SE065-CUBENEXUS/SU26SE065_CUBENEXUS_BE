@@ -9,4 +9,5 @@ public interface IRealtimeNotifier
     Task BroadcastResultsLockedAsync(ResultsLockedEventDto payload, CancellationToken ct = default);
     Task BroadcastRoundCompletedAsync(RoundCompletedEventDto payload, CancellationToken ct = default);
     Task BroadcastResultCorrectedAsync(ResultCorrectedEventDto payload, CancellationToken ct = default);
+    Task SendStationCommandAsync(Guid eventId, int roundNumber, int stationNumber, string command, object? data = null, CancellationToken ct = default);
 }

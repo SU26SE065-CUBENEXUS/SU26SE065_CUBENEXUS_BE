@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using CubeNexus.Application.DTOs.Registration;
 using CubeNexus.Application.Exceptions;
 using CubeNexus.Application.Interfaces.Repositories;
@@ -32,12 +36,44 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
             throw new CustomException("REGISTRATION_CANCELLED", "The registration is cancelled.", 400);
         }
 
+        // Query assignments
+        var regEventIds = registration.OfflineRegistrationEvents.Select(ore => ore.Id).ToList();
+        var groupCompetitors = await _unitOfWork.GroupCompetitors.FindAsync(gc => regEventIds.Contains(gc.RegistrationEventId));
+        var gcList = groupCompetitors.ToList();
+
+        var assignments = new List<CheckInAssignmentDto>();
+        if (gcList.Any())
+        {
+            var groupIds = gcList.Select(gc => gc.GroupId).Distinct().ToList();
+            var groups = await _unitOfWork.Groups.FindAsync(g => groupIds.Contains(g.Id));
+            var groupMap = groups.ToDictionary(g => g.Id);
+
+            foreach (var gc in gcList)
+            {
+                if (groupMap.TryGetValue(gc.GroupId, out var group))
+                {
+                    var ore = registration.OfflineRegistrationEvents.First(e => e.Id == gc.RegistrationEventId);
+                    assignments.Add(new CheckInAssignmentDto
+                    {
+                        EventId = ore.EventId,
+                        EventName = ore.Event.PuzzleType.Name,
+                        RoundNumber = group.RoundNumber,
+                        GroupId = group.Id,
+                        GroupName = group.GroupName ?? string.Empty,
+                        GroupStatusCode = group.StatusCode,
+                        StationNumber = gc.StationNumber
+                    });
+                }
+            }
+        }
+
         var response = new CheckInResponseDto
         {
             RegistrationId = registration.Id,
             PlayerName = registration.User.DisplayName,
             TournamentName = registration.Tournament.Name,
-            Events = registration.OfflineRegistrationEvents.Select(e => e.Event.PuzzleType.Name).ToList()
+            Events = registration.OfflineRegistrationEvents.Select(e => e.Event.PuzzleType.Name).ToList(),
+            Assignments = assignments
         };
 
         if (registration.CheckedInAt.HasValue)

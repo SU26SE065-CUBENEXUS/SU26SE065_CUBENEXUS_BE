@@ -1,471 +1,725 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as signalR from '@microsoft/signalr';
+import { RubikScannerPanel } from './features/rubik-scanner';
+import { OnlineArenaScannerPanel } from './features/online-arena-scanner/OnlineArenaScannerPanel';
+import { useMatchRecording } from './features/online-arena-recording/useMatchRecording';
+
+const DEFAULT_BACKEND_URL = 'http://localhost:5212';
+const DEFAULT_HUB_URL = 'http://localhost:5212/hubs/online-arena';
+const SIGNALR_EVENTS = [
+  'MatchmakingQueued',
+  'MatchmakingFound',
+  'MatchmakingCancelled',
+  'MatchJoined',
+  'CameraReadyUpdated',
+  'WebRtcConnectionUpdated',
+  'VideoRecordingStarted',
+  'TimerConnected',
+  'TimerDisconnected',
+  'ReadyStateUpdated',
+  'MatchReady',
+  'AiCheckStarted',
+  'AiCheckCompleted',
+  'AiCheckFailed',
+  'ScrambleRevealed',
+  'ScrambleCheckUpdated',
+  'FinishCheckUpdated',
+  'ResultSubmitted',
+  'VideoEvidenceUploaded',
+  'MatchNeedsReview',
+  'MatchCompleted',
+  'MatchCancelled',
+  'FraudReportCreated',
+  'FraudReportResolved',
+  'WebRtcOfferReceived',
+  'WebRtcAnswerReceived',
+  'IceCandidateReceived',
+];
 
 function App() {
-  // Config state
-  const [serverUrl, setServerUrl] = useState('http://localhost:5212');
-  const [eventId, setEventId] = useState('11111111-1111-1111-1111-111111111111');
-  const [roundNumber, setRoundNumber] = useState(1);
+  const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
+  const [hubUrl, setHubUrl] = useState(DEFAULT_HUB_URL);
+  const [token, setToken] = useState('');
+  const [matchId, setMatchId] = useState('');
+  const [myUserId, setMyUserId] = useState('');
+  const [targetUserId, setTargetUserId] = useState('');
+  const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [peerStatus, setPeerStatus] = useState({
+    signalingState: 'idle',
+    iceConnectionState: 'idle',
+    connectionState: 'idle',
+    iceGatheringState: 'idle',
+  });
+  const [logs, setLogs] = useState([]);
 
-  // Connection status
-  const [connStatus, setConnStatus] = useState('disconnected'); // 'disconnected', 'connecting', 'connected'
   const hubConnectionRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const latestOfferRef = useRef(null);
+  const logViewportRef = useRef(null);
+  const matchTimeLimitMsRef = useRef(8 * 60 * 1000);
+  const recordingMarkedRef = useRef(false);
 
-  // Board state
-  const [boardState, setBoardState] = useState({
-    eventName: '-',
-    roundStatus: '-',
-    solveCount: 5,
-    progress: {
-      totalCompetitors: 0,
-      completedCompetitors: 0,
-      noShowCompetitors: 0,
-      pendingCompetitors: 0,
-      totalExpectedSolves: 0,
-      submittedSolves: 0
-    },
-    groups: [],
-    competitors: []
+  const recording = useMatchRecording({
+    backendUrl,
+    token,
+    matchId,
+    localVideoRef,
+    remoteVideoRef,
+    onLog: appendLog,
+    onFinalizeTracks: () => stopCamera(),
   });
 
-  // Animation references
-  const [flashedRow, setFlashedRow] = useState(null);
-  const [flashedCell, setFlashedCell] = useState(null);
-
-  // Terminal log state
-  const [logs, setLogs] = useState([
-    {
-      time: new Date().toLocaleTimeString(),
-      type: 'info',
-      eventName: 'Initialized',
-      payload: 'Vite Client ready. Enter configurations and click Connect.'
-    }
-  ]);
-  const terminalBodyRef = useRef(null);
-
-  // Auto-scroll terminal
   useEffect(() => {
-    if (terminalBodyRef.current) {
-      terminalBodyRef.current.scrollTop = terminalBodyRef.current.scrollHeight;
-    }
-  }, [logs]);
-
-  // Cleanup on unmount
-  useEffect(() => {
+    appendLog('info', 'PageReady', 'Online Arena WebRTC test page initialized.');
     return () => {
       if (hubConnectionRef.current) {
-        hubConnectionRef.current.stop();
+        hubConnectionRef.current.stop().catch(() => undefined);
+        hubConnectionRef.current = null;
       }
+      teardownPeer({ stopLocalStream: true });
     };
   }, []);
 
-  // Helper to add logs
-  const addLog = (type, eventName, payload) => {
-    setLogs(prev => [
-      ...prev,
+  useEffect(() => {
+    recordingMarkedRef.current = false;
+  }, [matchId, token]);
+
+  useEffect(() => {
+    if (logViewportRef.current) {
+      logViewportRef.current.scrollTop = logViewportRef.current.scrollHeight;
+    }
+  }, [logs]);
+
+  function appendLog(level, eventName, payload) {
+    setLogs((current) => [
+      ...current,
       {
+        id: crypto.randomUUID(),
         time: new Date().toLocaleTimeString(),
-        type,
+        level,
         eventName,
-        payload
-      }
+        payload,
+      },
     ]);
-  };
+  }
 
-  // Time formatter
-  const formatTime = (ms) => {
-    if (ms === null || ms === undefined) return '-';
-    if (ms === 2147483647 || ms === 99999999) return 'DNF';
-    return (ms / 1000).toFixed(2);
-  };
+  function setPeerStatusFromPeer(peer) {
+    setPeerStatus({
+      signalingState: peer?.signalingState ?? 'idle',
+      iceConnectionState: peer?.iceConnectionState ?? 'idle',
+      connectionState: peer?.connectionState ?? 'idle',
+      iceGatheringState: peer?.iceGatheringState ?? 'idle',
+    });
+  }
 
-  // REST API fetch
-  const fetchState = async (url, evId, roundNo) => {
-    try {
-      addLog('info', '[REST API] Fetching Live Board state...', null);
-      const res = await fetch(`${url}/api/live-board/events/${evId}/rounds/${roundNo}`);
-      if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
-      const data = await res.json();
+  function isConnectionReady() {
+    return hubConnectionRef.current && hubConnectionRef.current.state === signalR.HubConnectionState.Connected;
+  }
 
-      addLog('success', '[REST API] Live Board state loaded', data);
-      setBoardState(data);
-    } catch (err) {
-      addLog('error', `[REST API Error] ${err.message}`, null);
+  function ensureRequiredIds() {
+    if (!matchId || !myUserId || !targetUserId) {
+      appendLog('warn', 'Validation', 'matchId, myUserId, and targetUserId are required.');
+      return false;
     }
-  };
+    return true;
+  }
 
-  // SignalR Handler
-  const connectSignalR = (url, evId, roundNo) => {
-    if (hubConnectionRef.current) {
-      hubConnectionRef.current.stop();
+  async function connectHub() {
+    if (!token.trim()) {
+      appendLog('warn', 'Validation', 'JWT token is required before connecting.');
+      return;
     }
 
-    addLog('info', '[SignalR] Initializing hub connection...', null);
-    setConnStatus('connecting');
+    await disconnectHub();
+    setConnectionStatus('connecting');
+    appendLog('info', 'SignalRConnectStart', { hubUrl });
 
-    const conn = new signalR.HubConnectionBuilder()
-      .withUrl(`${url}/hubs/tournament`)
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl(hubUrl, {
+        accessTokenFactory: () => token.trim(),
+      })
       .withAutomaticReconnect()
       .build();
 
-    hubConnectionRef.current = conn;
+    SIGNALR_EVENTS.forEach((eventName) => {
+      connection.on(eventName, async (payload) => {
+        appendLog('event', eventName, payload);
 
-    // Listeners
-    conn.on('RoundStarted', (payload) => {
-      addLog('success', 'Signal: RoundStarted', payload);
+        if (payload?.timeLimitMs) {
+          matchTimeLimitMsRef.current = payload.timeLimitMs;
+        }
 
-      setBoardState(prev => {
-        // Mark no-show competitors
-        const updatedCompetitors = prev.competitors.map(c => {
-          if (payload.noShowCompetitorIds && payload.noShowCompetitorIds.includes(c.groupCompetitorId)) {
-            return { ...c, competitorStatus: 'NO_SHOW' };
-          }
-          return c;
-        });
+        if (eventName === 'ScrambleRevealed' && String(payload?.matchId ?? '').toLowerCase() === matchId.trim().toLowerCase()) {
+          await recording.startRecording({ timeLimitMs: payload?.timeLimitMs ?? matchTimeLimitMsRef.current });
+        } else if (
+          (eventName === 'MatchCompleted' || eventName === 'MatchCancelled')
+          && String(payload?.matchId ?? '').toLowerCase() === matchId.trim().toLowerCase()
+        ) {
+          await recording.stopRecording(eventName.toLowerCase());
+        }
 
-        return {
-          ...prev,
-          roundStatus: payload.roundStatus,
-          competitors: updatedCompetitors
-        };
+        if (eventName === 'WebRtcOfferReceived') {
+          await handleIncomingOffer(payload);
+        } else if (eventName === 'WebRtcAnswerReceived') {
+          await handleIncomingAnswer(payload);
+        } else if (eventName === 'IceCandidateReceived') {
+          await handleIncomingIceCandidate(payload);
+        }
       });
     });
 
-    conn.on('ResultSubmitted', (payload) => {
-      addLog('success', 'Signal: ResultSubmitted', payload);
-
-      const compId = payload.groupCompetitorId;
-      const solveNum = payload.result.solveNumber;
-
-      // Trigger animation highlights
-      setFlashedRow(compId);
-      setFlashedCell(`${compId}-${solveNum}`);
-
-      setTimeout(() => {
-        setFlashedRow(null);
-        setFlashedCell(null);
-      }, 1500);
-
-      // Re-fetch rankings state from DB to ensure rank consistency
-      fetchState(url, evId, roundNo);
+    connection.onreconnecting((error) => {
+      setConnectionStatus('reconnecting');
+      appendLog('warn', 'SignalRReconnecting', error?.message ?? 'Attempting reconnect.');
     });
 
-    conn.on('ResultCorrected', (payload) => {
-      addLog('success', 'Signal: ResultCorrected', payload);
-
-      const compId = payload.groupCompetitorId; git
-      const solveNum = payload.result.solveNumber;
-
-      // Trigger animation highlights
-      setFlashedRow(compId);
-      setFlashedCell(`${compId}-${solveNum}`);
-
-      setTimeout(() => {
-        setFlashedRow(null);
-        setFlashedCell(null);
-      }, 1500);
-
-      // Re-fetch rankings state from DB to ensure rank consistency
-      fetchState(url, evId, roundNo);
+    connection.onreconnected(async () => {
+      setConnectionStatus('connected');
+      appendLog('success', 'SignalRReconnected', 'Connection restored.');
+      if (matchId) {
+        try {
+          await connection.invoke('JoinMatchRoom', matchId);
+          appendLog('success', 'JoinMatchRoom', { matchId, rejoined: true });
+        } catch (error) {
+          appendLog('error', 'JoinMatchRoomFailed', error?.message ?? String(error));
+        }
+      }
     });
 
-    conn.on('ResultsLocked', (payload) => {
-      addLog('success', 'Signal: ResultsLocked', payload);
-      setBoardState(prev => ({ ...prev, roundStatus: 'LOCKED' }));
+    connection.onclose((error) => {
+      setConnectionStatus('disconnected');
+      appendLog('warn', 'SignalRClosed', error?.message ?? 'Connection closed.');
     });
 
-    conn.on('RoundCompleted', (payload) => {
-      addLog('success', 'Signal: RoundCompleted', payload);
-      setBoardState(prev => ({ ...prev, roundStatus: payload.roundStatus }));
-    });
+    try {
+      await connection.start();
+      hubConnectionRef.current = connection;
+      setConnectionStatus('connected');
+      appendLog('success', 'SignalRConnected', { connectionId: connection.connectionId });
+    } catch (error) {
+      setConnectionStatus('disconnected');
+      appendLog('error', 'SignalRConnectFailed', error?.message ?? String(error));
+    }
+  }
 
-    // Connection lifecycle
-    conn.onreconnected(() => {
-      addLog('success', '[SignalR] Reconnected. Re-joining room & synchronizing...', null);
-      setConnStatus('connected');
-
-      conn.invoke('JoinEventRound', evId, parseInt(roundNo))
-        .then(() => addLog('info', `[SignalR] Re-joined Room event:${evId}:round:${roundNo}`, null))
-        .catch(err => addLog('error', `[SignalR Room Error] ${err.message}`, null));
-
-      fetchState(url, evId, roundNo);
-    });
-
-    conn.onclose(() => {
-      addLog('error', '[SignalR] Connection closed', null);
-      setConnStatus('disconnected');
-    });
-
-    conn.start()
-      .then(() => {
-        addLog('success', '[SignalR] Connection established!', null);
-        setConnStatus('connected');
-
-        conn.invoke('JoinEventRound', evId, parseInt(roundNo))
-          .then(() => addLog('info', `[SignalR] Joined Room event:${evId}:round:${roundNo}`, null))
-          .catch(err => addLog('error', `[SignalR Room Error] ${err.message}`, null));
-      })
-      .catch(err => {
-        addLog('error', `[SignalR Connection Error] ${err.message}`, null);
-        setConnStatus('disconnected');
-      });
-  };
-
-  const handleConnect = () => {
-    if (!serverUrl || !eventId || !roundNumber) {
-      alert('Please fill in Server URL, Event ID, and Round Number.');
+  async function disconnectHub() {
+    if (!hubConnectionRef.current) {
+      setConnectionStatus('disconnected');
       return;
     }
-    fetchState(serverUrl, eventId, roundNumber);
-    connectSignalR(serverUrl, eventId, roundNumber);
-  };
 
-  const handleLeave = async () => {
-    if (hubConnectionRef.current && connStatus === 'connected') {
+    try {
+      await hubConnectionRef.current.stop();
+      appendLog('info', 'SignalRDisconnected', 'Hub connection stopped.');
+    } catch (error) {
+      appendLog('error', 'SignalRDisconnectFailed', error?.message ?? String(error));
+    } finally {
+      hubConnectionRef.current = null;
+      setConnectionStatus('disconnected');
+    }
+  }
+
+  async function joinMatchRoom() {
+    if (!isConnectionReady() || !ensureRequiredIds()) {
+      return;
+    }
+
+    try {
+      await hubConnectionRef.current.invoke('JoinMatchRoom', matchId.trim());
+      appendLog('success', 'JoinMatchRoom', { matchId });
+    } catch (error) {
+      appendLog('error', 'JoinMatchRoomFailed', error?.message ?? String(error));
+    }
+  }
+
+  async function leaveMatchRoom() {
+    if (!isConnectionReady() || !matchId.trim()) {
+      return;
+    }
+
+    try {
+      await hubConnectionRef.current.invoke('LeaveMatchRoom', matchId.trim());
+      appendLog('info', 'LeaveMatchRoom', { matchId });
+    } catch (error) {
+      appendLog('error', 'LeaveMatchRoomFailed', error?.message ?? String(error));
+    }
+  }
+
+  async function ensureLocalStream() {
+    if (localStreamRef.current) {
+      return localStreamRef.current;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.muted = true;
+        localVideoRef.current.playsInline = true;
+        void localVideoRef.current.play().catch(() => undefined);
+      }
+      appendLog('success', 'CameraStarted', 'Local camera stream acquired.');
+      return stream;
+    } catch (error) {
+      appendLog(
+        'error',
+        'CameraStartFailed',
+        error?.message ?? 'Browser blocked camera or no webcam is available. Signaling can still be tested through logs.'
+      );
+      return null;
+    }
+  }
+
+  function ensurePeerConnection() {
+    if (peerConnectionRef.current) {
+      return peerConnectionRef.current;
+    }
+
+    const peer = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    });
+
+    peer.onicecandidate = async (event) => {
+      if (!event.candidate) {
+        return;
+      }
+
+      appendLog('info', 'LocalIceCandidate', event.candidate);
+      if (!isConnectionReady() || !ensureRequiredIds()) {
+        appendLog('warn', 'IceCandidateSkipped', 'Hub is not connected or IDs are missing.');
+        return;
+      }
+
       try {
-        await hubConnectionRef.current.invoke('LeaveEventRound', eventId, parseInt(roundNumber));
-        addLog('info', `[SignalR] Left Room event:${eventId}:round:${roundNumber}`, null);
-      } catch (err) {
-        addLog('error', `[SignalR Leave Error] ${err.message}`, null);
+        await hubConnectionRef.current.invoke(
+          'SendIceCandidate',
+          matchId.trim(),
+          targetUserId.trim(),
+          JSON.stringify(event.candidate)
+        );
+      } catch (error) {
+        appendLog('error', 'SendIceCandidateFailed', error?.message ?? String(error));
+      }
+    };
+
+    peer.ontrack = (event) => {
+      const [stream] = event.streams;
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = stream ?? null;
+        remoteVideoRef.current.muted = true;
+        remoteVideoRef.current.playsInline = true;
+        void remoteVideoRef.current.play().catch(() => undefined);
+      }
+      appendLog('success', 'RemoteTrack', 'Remote media track attached.');
+    };
+
+    peer.onsignalingstatechange = () => setPeerStatusFromPeer(peer);
+    peer.oniceconnectionstatechange = () => setPeerStatusFromPeer(peer);
+    peer.onconnectionstatechange = () => setPeerStatusFromPeer(peer);
+    peer.onicegatheringstatechange = () => setPeerStatusFromPeer(peer);
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        peer.addTrack(track, localStreamRef.current);
+      });
+    }
+
+    peerConnectionRef.current = peer;
+    setPeerStatusFromPeer(peer);
+    appendLog('info', 'PeerCreated', 'RTCPeerConnection ready.');
+    return peer;
+  }
+
+  async function startCamera() {
+    const stream = await ensureLocalStream();
+    if (!stream) {
+      return;
+    }
+
+    const peer = ensurePeerConnection();
+    const currentSenders = peer.getSenders().map((sender) => sender.track?.id);
+    stream.getTracks().forEach((track) => {
+      if (!currentSenders.includes(track.id)) {
+        peer.addTrack(track, stream);
+      }
+    });
+    setPeerStatusFromPeer(peer);
+
+    if (matchId.trim() && token.trim() && !recordingMarkedRef.current) {
+      try {
+        const mime = window.MediaRecorder?.isTypeSupported?.('video/webm;codecs=vp9,opus')
+          ? 'video/webm'
+          : 'video/webm';
+        await recording.markRecordingStarted({
+          startedAt: new Date().toISOString(),
+          mimeType: mime,
+        });
+        recordingMarkedRef.current = true;
+      } catch (error) {
+        appendLog('error', 'RecordingStartedMarkFailed', error?.message ?? String(error));
       }
     }
-  };
+  }
 
-  // Get status badge properties
-  const getBadgeClass = () => {
-    if (connStatus === 'connected') return 'status-badge connected';
-    if (connStatus === 'connecting') return 'status-badge connecting';
-    return 'status-badge';
-  };
+  function stopCamera() {
+    teardownPeer({ stopLocalStream: true });
+    appendLog('info', 'CameraStopped', 'Local media tracks stopped.');
+  }
 
-  const getBadgeText = () => {
-    if (connStatus === 'connected') return 'SignalR Connected';
-    if (connStatus === 'connecting') return 'Connecting...';
-    return 'SignalR Disconnected';
-  };
+  function teardownPeer({ stopLocalStream }) {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.onicecandidate = null;
+      peerConnectionRef.current.ontrack = null;
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
 
-  const solvesPercent = boardState.progress.totalExpectedSolves > 0
-    ? Math.round((boardState.progress.submittedSolves / boardState.progress.totalExpectedSolves) * 100)
-    : 0;
+    if (stopLocalStream && localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+    }
+
+    latestOfferRef.current = null;
+
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+
+    setPeerStatus({
+      signalingState: 'idle',
+      iceConnectionState: 'idle',
+      connectionState: 'idle',
+      iceGatheringState: 'idle',
+    });
+  }
+
+  async function createOffer() {
+    if (!isConnectionReady() || !ensureRequiredIds()) {
+      return;
+    }
+
+    await startCamera();
+    const peer = ensurePeerConnection();
+
+    try {
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      appendLog('success', 'LocalOfferCreated', peer.localDescription);
+      await hubConnectionRef.current.invoke(
+        'SendWebRtcOffer',
+        matchId.trim(),
+        targetUserId.trim(),
+        JSON.stringify(peer.localDescription)
+      );
+      appendLog('success', 'SendWebRtcOffer', { matchId, targetUserId });
+    } catch (error) {
+      appendLog('error', 'CreateOfferFailed', error?.message ?? String(error));
+    }
+  }
+
+  async function createAnswerFromLatestOffer() {
+    if (!latestOfferRef.current) {
+      appendLog('warn', 'CreateAnswerSkipped', 'No latest offer is available.');
+      return;
+    }
+
+    await createAnswerFromOfferPayload(latestOfferRef.current);
+  }
+
+  async function createAnswerFromOfferPayload(payload) {
+    const fromUserId = String(payload?.fromUserId ?? '');
+    if (!fromUserId) {
+      appendLog('error', 'CreateAnswerFailed', 'Incoming offer payload is missing fromUserId.');
+      return;
+    }
+
+    const stream = await ensureLocalStream();
+    if (!stream) {
+      appendLog('warn', 'AnswerNeedsCamera', 'Start Camera and retry Create Answer if auto camera failed.');
+    }
+
+    const peer = ensurePeerConnection();
+
+    try {
+      const remoteOffer = JSON.parse(payload.offer);
+      await peer.setRemoteDescription(remoteOffer);
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      appendLog('success', 'LocalAnswerCreated', peer.localDescription);
+
+      if (!isConnectionReady()) {
+        appendLog('error', 'SendWebRtcAnswerFailed', 'Hub is not connected.');
+        return;
+      }
+
+      await hubConnectionRef.current.invoke(
+        'SendWebRtcAnswer',
+        String(payload.matchId),
+        fromUserId,
+        JSON.stringify(peer.localDescription)
+      );
+      appendLog('success', 'SendWebRtcAnswer', { matchId: payload.matchId, targetUserId: fromUserId });
+    } catch (error) {
+      appendLog('error', 'CreateAnswerFailed', error?.message ?? String(error));
+    }
+  }
+
+  async function handleIncomingOffer(payload) {
+    latestOfferRef.current = payload;
+    if (String(payload?.fromUserId ?? '').toLowerCase() !== targetUserId.trim().toLowerCase()) {
+      appendLog('warn', 'OfferSourceMismatch', payload);
+    }
+
+    await createAnswerFromOfferPayload(payload);
+  }
+
+  async function handleIncomingAnswer(payload) {
+    const peer = ensurePeerConnection();
+    try {
+      await peer.setRemoteDescription(JSON.parse(payload.answer));
+      appendLog('success', 'RemoteAnswerApplied', payload);
+    } catch (error) {
+      appendLog('error', 'ApplyAnswerFailed', error?.message ?? String(error));
+    }
+  }
+
+  async function handleIncomingIceCandidate(payload) {
+    const peer = ensurePeerConnection();
+    try {
+      await peer.addIceCandidate(JSON.parse(payload.candidate));
+      appendLog('success', 'RemoteIceCandidateApplied', payload);
+    } catch (error) {
+      appendLog('error', 'ApplyIceCandidateFailed', error?.message ?? String(error));
+    }
+  }
+
+  function clearLogs() {
+    setLogs([]);
+  }
+
+  async function copyLogs() {
+    try {
+      const value = logs
+        .map((log) => `[${log.time}] ${log.level.toUpperCase()} ${log.eventName}\n${formatPayload(log.payload)}`)
+        .join('\n\n');
+      await navigator.clipboard.writeText(value);
+      appendLog('success', 'CopyLogs', 'Logs copied to clipboard.');
+    } catch (error) {
+      appendLog('error', 'CopyLogsFailed', error?.message ?? String(error));
+    }
+  }
+
+  function fillTokenFromLocalStorage() {
+    const candidateKeys = ['token', 'accessToken', 'jwt', 'authToken'];
+    const foundKey = candidateKeys.find((key) => localStorage.getItem(key));
+    if (!foundKey) {
+      appendLog('warn', 'LocalStorageTokenMissing', 'No token found in localStorage keys: token, accessToken, jwt, authToken.');
+      return;
+    }
+
+    const foundToken = localStorage.getItem(foundKey) ?? '';
+    setToken(foundToken);
+    appendLog('success', 'LocalStorageTokenLoaded', { key: foundKey });
+  }
+
+  function formatPayload(payload) {
+    if (payload == null) {
+      return '';
+    }
+    return typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+  }
 
   return (
-    <div className="container">
-      {/* HEADER */}
-      <header>
-        <div className="logo-section">
-          <h1>CubeNexus Live Board</h1>
-          <p>Offline Tournament Realtime Monitoring Console (Vite React)</p>
+    <div className="app-shell">
+      <section className="hero">
+        <div>
+          <p className="eyebrow">Online Arena Dev Console</p>
+          <h1>SignalR + WebRTC signaling test page</h1>
+          <p className="subcopy">
+            Use two browsers or two tabs with different JWT tokens to validate hub connection, match room events,
+            and offer/answer/ice forwarding.
+          </p>
         </div>
-        <div className={getBadgeClass()}>
-          <span className="dot"></span>
-          <span>{getBadgeText()}</span>
+        <div className={`connection-pill ${connectionStatus}`}>
+          <span className="dot" />
+          <span>{connectionStatus}</span>
         </div>
-      </header>
+      </section>
 
-      {/* SIDEBAR: CONTROLS */}
-      <aside class="glass-card">
-        <h2>🔌 Configuration</h2>
+      <section className="grid-layout">
+        <div className="panel">
+          <h2>Hub Setup</h2>
+          <label>Backend URL</label>
+          <input value={backendUrl} onChange={(event) => setBackendUrl(event.target.value)} />
+          <label>Hub URL</label>
+          <input value={hubUrl} onChange={(event) => setHubUrl(event.target.value)} />
+          <label>JWT Token</label>
+          <textarea rows="5" value={token} onChange={(event) => setToken(event.target.value)} />
+          <label>Match ID</label>
+          <input value={matchId} onChange={(event) => setMatchId(event.target.value)} />
+          <label>My User ID</label>
+          <input value={myUserId} onChange={(event) => setMyUserId(event.target.value)} />
+          <label>Target User ID</label>
+          <input value={targetUserId} onChange={(event) => setTargetUserId(event.target.value)} />
 
-        <div className="form-group">
-          <label>Backend Server API URL</label>
-          <input
-            type="text"
-            value={serverUrl}
-            onChange={(e) => setServerUrl(e.target.value)}
-            placeholder="http://localhost:5212"
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Event ID (GUID)</label>
-          <input
-            type="text"
-            value={eventId}
-            onChange={(e) => setEventId(e.target.value)}
-            placeholder="Event GUID"
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Round Number</label>
-          <input
-            type="number"
-            value={roundNumber}
-            onChange={(e) => setRoundNumber(parseInt(e.target.value) || 1)}
-            min="1"
-          />
-        </div>
-
-        <button onClick={handleConnect} className="btn">Connect & Load State</button>
-        <button
-          onClick={handleLeave}
-          className="btn btn-secondary"
-          disabled={connStatus !== 'connected'}
-        >
-          Leave Room
-        </button>
-
-        <h2>📊 Round Status</h2>
-        <div className="info-grid">
-          <div className="info-tile">
-            <span class="label">Round Name</span>
-            <span className="value">{boardState.eventName}</span>
+          <div className="button-row">
+            <button onClick={connectHub}>Connect Hub</button>
+            <button onClick={disconnectHub} className="secondary">Disconnect Hub</button>
+            <button onClick={fillTokenFromLocalStorage} className="secondary">Fill token from localStorage</button>
           </div>
-          <div className="info-tile">
-            <span class="label">Status</span>
-            <span className="value">
-              {boardState.roundStatus === 'ONGOING' ? (
-                <span className="round-status-tag ongoing">ONGOING</span>
-              ) : boardState.roundStatus === 'COMPLETED' ? (
-                <span className="round-status-tag completed">COMPLETED</span>
-              ) : boardState.roundStatus === 'LOCKED' ? (
-                <span className="round-status-tag">LOCKED</span>
-              ) : (
-                <span className="round-status-tag">{boardState.roundStatus}</span>
-              )}
-            </span>
+
+          <div className="button-row">
+            <button onClick={joinMatchRoom}>Join Match Room</button>
+            <button onClick={leaveMatchRoom} className="secondary">Leave Match Room</button>
           </div>
         </div>
 
-        <div className="progress-container">
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', fontWeight: '600' }}>
-            <span style={{ color: 'var(--text-muted)' }}>SOLVES PROGRESS</span>
-            <span>{boardState.progress.submittedSolves} / {boardState.progress.totalExpectedSolves} ({solvesPercent}%)</span>
+        <div className="panel">
+          <h2>WebRTC Controls</h2>
+          <div className="button-row">
+            <button onClick={startCamera}>Start Camera</button>
+            <button onClick={stopCamera} className="secondary">Stop Camera</button>
           </div>
-          <div className="progress-bar-bg">
-            <div className="progress-bar-fill" style={{ width: `${solvesPercent}%` }}></div>
+          <div className="button-row">
+            <button onClick={createOffer}>Create Offer</button>
+            <button onClick={createAnswerFromLatestOffer}>Create Answer / Retry Answer</button>
+            <button onClick={() => teardownPeer({ stopLocalStream: true })} className="secondary">Hang Up / Close Peer</button>
           </div>
-        </div>
 
-        <div className="info-grid">
-          <div className="info-tile">
-            <span class="label">Total Competitors</span>
-            <span className="value">{boardState.progress.totalCompetitors}</span>
+          <div className="status-grid">
+            <div><span>signalingState</span><strong>{peerStatus.signalingState}</strong></div>
+            <div><span>iceConnectionState</span><strong>{peerStatus.iceConnectionState}</strong></div>
+            <div><span>connectionState</span><strong>{peerStatus.connectionState}</strong></div>
+            <div><span>iceGatheringState</span><strong>{peerStatus.iceGatheringState}</strong></div>
           </div>
-          <div className="info-tile">
-            <span class="label">Completed</span>
-            <span className="value">{boardState.progress.completedCompetitors}</span>
-          </div>
-          <div className="info-tile">
-            <span class="label">No Show</span>
-            <span className="value">{boardState.progress.noShowCompetitors}</span>
-          </div>
-          <div className="info-tile">
-            <span class="label">Pending</span>
-            <span className="value">{boardState.progress.pendingCompetitors}</span>
-          </div>
-        </div>
-      </aside>
 
-      {/* MAIN PANEL: LIVE BOARD */}
-      <main className="glass-card live-board-panel">
-        <h2>
-          📋 Live Rankings & Submissions
-          <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>
-            {' '}Format: {boardState.solveCount} Solves
-          </span>
-        </h2>
-
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th style={{ width: '60px' }}>Rank</th>
-                <th>Competitor</th>
-                <th style={{ width: '100px' }}>Station</th>
-                <th style={{ width: '120px' }}>Status</th>
-                {Array.from({ length: boardState.solveCount }).map((_, i) => (
-                  <th key={i} style={{ width: '70px', textAlign: 'center' }}>S{i + 1}</th>
-                ))}
-                <th>Best</th>
-                <th>Average</th>
-              </tr>
-            </thead>
-            <tbody>
-              {boardState.competitors.length === 0 ? (
-                <tr>
-                  <td colSpan={boardState.solveCount + 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
-                    Configure Backend Server and click Connect to load data.
-                  </td>
-                </tr>
-              ) : (
-                boardState.competitors.map(comp => {
-                  const solveMap = {};
-                  comp.results.forEach(res => {
-                    solveMap[res.solveNumber] = res;
-                  });
-
-                  const isRowFlashed = flashedRow === comp.groupCompetitorId;
-
-                  return (
-                    <tr
-                      key={comp.groupCompetitorId}
-                      className={isRowFlashed ? 'flash-updated-row' : ''}
-                    >
-                      <td>
-                        {comp.rank ? <span className="rank-badge">{comp.rank}</span> : <span className="rank-badge">-</span>}
-                      </td>
-                      <td style={{ fontWeight: '600' }}>{comp.competitorName}</td>
-                      <td>{comp.stationNumber ? `Station ${comp.stationNumber}` : '-'}</td>
-                      <td>
-                        <span className={`comp-status-tag ${comp.competitorStatus}`}>
-                          {comp.competitorStatus}
-                        </span>
-                      </td>
-                      {Array.from({ length: boardState.solveCount }).map((_, i) => {
-                        const solveNum = i + 1;
-                        const res = solveMap[solveNum];
-                        const isCellFlashed = flashedCell === `${comp.groupCompetitorId}-${solveNum}`;
-
-                        let cellClass = 'solve-cell';
-                        if (res) cellClass += ' has-val';
-                        if (res?.isDnf) cellClass += ' dnf';
-                        if (isCellFlashed) cellClass += ' flash-updated-cell';
-
-                        return (
-                          <td key={i} className={cellClass}>
-                            {res ? (res.isDnf ? 'DNF' : formatTime(res.finalTimeMs)) : '-'}
-                          </td>
-                        );
-                      })}
-                      <td className="time-best">{comp.bestTimeMs ? formatTime(comp.bestTimeMs) : '-'}</td>
-                      <td className="time-avg">{comp.averageTimeMs ? formatTime(comp.averageTimeMs) : '-'}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </main>
-
-      {/* EVENT CONSOLE LOGGER */}
-      <section className="terminal-panel">
-        <div className="terminal-header">
-          <div className="circles">
-            <span className="c-1"></span>
-            <span className="c-2"></span>
-            <span className="c-3"></span>
-          </div>
-          <span>WebSocket Hub Monitor (Received Signals)</span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>Terminal Active</span>
-        </div>
-        <div className="terminal-body" ref={terminalBodyRef}>
-          {logs.map((log, index) => (
-            <div key={index} className="log-entry">
-              <div className={`log-meta ${log.type}`}>
-                <span className="log-time">[{log.time}]</span>{' '}
-                <span className="log-event">{log.eventName}</span>
-              </div>
-              {log.payload && (
-                <pre className="log-json">
-                  {typeof log.payload === 'string'
-                    ? log.payload
-                    : JSON.stringify(log.payload, null, 2)}
-                </pre>
-              )}
+          <div className="video-grid">
+            <div className="video-card">
+              <div className="video-label">Local video</div>
+              <video ref={localVideoRef} autoPlay muted playsInline />
             </div>
-          ))}
+            <div className="video-card">
+              <div className="video-label">Remote video</div>
+              <video ref={remoteVideoRef} autoPlay playsInline />
+            </div>
+          </div>
+        </div>
+
+        <div className="panel panel-wide">
+          <div className="panel-header">
+            <h2>Realtime event log</h2>
+            <div className="button-row compact">
+              <button onClick={clearLogs} className="secondary">Clear Logs</button>
+              <button onClick={copyLogs} className="secondary">Copy Logs</button>
+            </div>
+          </div>
+          <div className="log-viewport" ref={logViewportRef}>
+            {logs.map((log) => (
+              <article key={log.id} className={`log-entry ${log.level}`}>
+                <header>
+                  <span>{log.time}</span>
+                  <strong>{log.eventName}</strong>
+                </header>
+                {log.payload ? <pre>{formatPayload(log.payload)}</pre> : null}
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel panel-wide">
+          <RubikScannerPanel backendUrl={backendUrl} />
+        </div>
+
+        <div className="panel panel-wide">
+          <OnlineArenaScannerPanel backendUrl={backendUrl} token={token} matchId={matchId} />
+        </div>
+
+        <div className="panel panel-wide">
+          <div className="panel-header">
+            <h2>Match Recording</h2>
+            <div className="button-row compact">
+              <button onClick={() => recording.startRecording({ timeLimitMs: matchTimeLimitMsRef.current })}>
+                Start Recording
+              </button>
+              <button onClick={() => recording.stopRecording('manual-stop')} className="secondary">
+                Stop + Upload
+              </button>
+              <button onClick={() => recording.retryUpload()} className="secondary">
+                Retry Upload
+              </button>
+              <button onClick={() => recording.refreshPlayback()} className="secondary">
+                Load Playback URLs
+              </button>
+            </div>
+          </div>
+
+          <div className="status-grid">
+            <div><span>Status</span><strong>{recording.status}</strong></div>
+            <div><span>MIME</span><strong>{recording.mimeType || '-'}</strong></div>
+            <div><span>Duration</span><strong>{recording.durationSeconds ? `${recording.durationSeconds.toFixed(2)} s` : '-'}</strong></div>
+            <div><span>Upload progress</span><strong>{`${recording.uploadProgress}%`}</strong></div>
+          </div>
+
+          <div className="status-grid">
+            <div><span>Recorded at</span><strong>{recording.recordedAt ?? '-'}</strong></div>
+            <div><span>Marked started</span><strong>{recording.recordingStartedMarkedAt ?? '-'}</strong></div>
+            <div><span>Object key</span><strong>{recording.objectKey || '-'}</strong></div>
+            <div><span>Auto cap</span><strong>8m match + 2m finish scan</strong></div>
+            <div><span>Source</span><strong>Local + Remote composite</strong></div>
+          </div>
+
+          {recording.error ? <p className="error-text">{recording.error}</p> : null}
+          {recording.recordingStartedMarkedAt ? (
+            <p>Recording-started is now marked automatically when you press <code>Start Camera</code> on a loaded match.</p>
+          ) : (
+            <p>Load a real match, then press <code>Start Camera</code> once so backend preparation is marked before auto recording begins.</p>
+          )}
+          {recording.status === 'failed' ? (
+            <p>Upload failed. Press <code>Retry Upload</code> after checking network, JWT, backend R2 config, and bucket permissions.</p>
+          ) : null}
+          {recording.status === 'ready' ? (
+            <p>Recording uploaded successfully. Use the playback buttons below to verify the signed R2 video.</p>
+          ) : null}
+          {recording.playback?.recordings?.length ? (
+            <div className="button-row">
+              {recording.playback.recordings.map((item) => (
+                <a key={item.videoEvidenceId} href={item.playbackUrl} target="_blank" rel="noreferrer">
+                  <button type="button" className="secondary">
+                    View Video {item.playerId.slice(0, 8)}
+                  </button>
+                </a>
+              ))}
+            </div>
+          ) : null}
+          {recording.playback ? <pre>{JSON.stringify(recording.playback, null, 2)}</pre> : null}
+        </div>
+
+        <div className="panel panel-wide">
+          <h2>Local test checklist</h2>
+          <ol className="checklist">
+            <li>Run backend at <code>{backendUrl}</code> and frontend with <code>npm run dev</code>.</li>
+            <li>Use Swagger to create a match and collect token A/B, userId A/B, matchId, roomToken, qrSessionCode.</li>
+            <li>Open Chrome for User A and Edge for User B to avoid mixed localStorage tokens.</li>
+            <li>In both browsers, paste token, matchId, myUserId, targetUserId, then click Connect Hub and Join Match Room.</li>
+            <li>Use REST endpoints for camera ready, timer connect, ready, start, submit result, and watch the realtime log.</li>
+            <li>Use the standalone 6-Face AI Scanner Test panel to verify centralized AI scanning without JWT, match state, or production arena checks.</li>
+            <li>Use the OnlineArena AI Scanner Test panel to verify scramble and finish scanner APIs without manually looping requests in Swagger.</li>
+            <li>When the match emits ScrambleRevealed, the recording hook auto-starts and records a single composite video of local + remote players.</li>
+            <li>When MatchCompleted or MatchCancelled arrives, recording auto-stops, uploads to R2 with a presigned URL, then calls complete.</li>
+            <li>If webcam is available on both sides, click Start Camera before Create Offer.</li>
+            <li>If second browser cannot access the camera, continue testing offer, answer, ice, and AI check logs separately.</li>
+          </ol>
         </div>
       </section>
     </div>

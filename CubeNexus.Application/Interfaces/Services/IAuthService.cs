@@ -11,4 +11,5 @@ public interface IAuthService
     Task<MessageResponseDto> VerifyOtpAsync(VerifyOtpRequestDto request);
     Task<MessageResponseDto> ResetPasswordAsync(ResetPasswordRequestDto request);
     Task<MessageResponseDto> ChangePasswordAsync(Guid userId, ChangePasswordRequestDto request);
+    Task<MessageResponseDto> LogoutAsync(Guid userId, LogoutRequestDto? request = null);
 }

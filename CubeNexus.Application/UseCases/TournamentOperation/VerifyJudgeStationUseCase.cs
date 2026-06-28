@@ -1,15 +1,17 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CubeNexus.Application.DTOs.Operation;
 using CubeNexus.Application.Exceptions;
 using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.UseCases.TournamentOperation;
+using CubeNexus.Domain.Entities;
 using CubeNexus.Domain.Enums;
 
 namespace CubeNexus.Application.UseCases.TournamentOperation;
 
-public class VerifyJudgeStationUseCase : IVerifyJudgeStationUseCase
+public class VerifyJudgeStationUseCase : IVerifyJudgeStationByStationUseCase
 {
     private readonly IUnitOfWork _unitOfWork;
 
@@ -18,8 +20,8 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationUseCase
         _unitOfWork = unitOfWork;
     }
 
-    // Judge Station Verify is optional UX verification and does not replace submit result validation.
-    public async Task<VerifyJudgeStationResponseDto> ExecuteAsync(VerifyJudgeStationDto dto)
+    // New verify-by-station flow (resolving GroupId automatically)
+    public async Task<VerifyJudgeStationResponseDto> ExecuteAsync(VerifyJudgeStationByStationDto dto, CancellationToken ct = default)
     {
         var registration = await _unitOfWork.Registrations.GetByQrTokenAsync(dto.QrToken);
         if (registration == null)
@@ -31,34 +33,55 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationUseCase
         if (registration.CheckedInAt == null || registration.StatusCode != "CHECKED_IN")
             throw new CustomException("NOT_CHECKED_IN", "Competitor has not checked in at the reception.", 400);
 
-        var group = await _unitOfWork.Groups.GetByIdAsync(dto.GroupId);
-        if (group == null || group.EventId != dto.EventId || group.RoundNumber != dto.RoundNumber)
-            throw new CustomException("INVALID_GROUP", "Group does not match the specified event or round.", 400);
+        var offlineRegEvent = await _unitOfWork.OfflineRegistrationEvents.FirstOrDefaultAsync(re => re.RegistrationId == registration.Id && re.EventId == dto.EventId, ct);
+        if (offlineRegEvent == null)
+            throw new CustomException("COMPETITOR_NOT_REGISTERED_FOR_EVENT", "Competitor is not registered for this event.", 400);
 
-        if (group.StatusCode != "ONGOING")
-            throw new CustomException("GROUP_NOT_ONGOING", "This group is not currently ongoing.", 400);
-
-        var ev = await _unitOfWork.Events.GetByIdAsync(dto.EventId);
+        var ev = await _unitOfWork.Events.GetByIdAsync(dto.EventId, ct);
         if (ev == null)
             throw new CustomException("EVENT_NOT_FOUND", "Event not found.", 404);
 
-        var puzzle = await _unitOfWork.PuzzleTypes.GetByIdAsync(ev.PuzzleTypeId);
-        var eventName = puzzle?.Name ?? "Unknown Event";
+        var groups = await _unitOfWork.Groups.FindAsync(g => g.EventId == dto.EventId && g.RoundNumber == dto.RoundNumber, ct);
+        var groupIds = groups.Select(g => g.Id).ToList();
 
-        var groupCompetitors = await _unitOfWork.GroupCompetitors.FindAsync(gc => gc.GroupId == group.Id && gc.StationNumber == dto.StationNumber);
-        var comp = groupCompetitors.FirstOrDefault();
+        if (!groupIds.Any())
+            throw new CustomException("GROUPS_NOT_GENERATED", "Groups have not been generated for this round yet.", 400);
+
+        var groupCompetitors = await _unitOfWork.GroupCompetitors.FindAsync(gc => groupIds.Contains(gc.GroupId) && gc.RegistrationEventId == offlineRegEvent.Id, ct);
+        var groupCompetitorsList = groupCompetitors.ToList();
+
+        if (groupCompetitorsList.Count == 0)
+            throw new CustomException("COMPETITOR_NOT_ASSIGNED_TO_ROUND", "Competitor is not assigned to any group in this round.", 400);
         
-        if (comp == null)
-            throw new CustomException("COMPETITOR_NOT_FOUND", "No competitor assigned to this station for this group.", 404);
+        if (groupCompetitorsList.Count > 1)
+            throw new CustomException("AMBIGUOUS_ASSIGNMENT", "Ambiguous group assignments found for this round.", 400);
 
-        var offlineRegEvent = await _unitOfWork.OfflineRegistrationEvents.GetByIdAsync(comp.RegistrationEventId);
-        if (offlineRegEvent == null || offlineRegEvent.RegistrationId != registration.Id)
-            throw new CustomException("MISMATCHED_COMPETITOR", "The scanned QR code does not belong to the competitor assigned to this station.", 400);
+        var comp = groupCompetitorsList.First();
+
+        if (comp.StationNumber != dto.StationNumber)
+            throw new CustomException("STATION_MISMATCH", $"Competitor is assigned to station {comp.StationNumber}, but scanned at station {dto.StationNumber}.", 400);
+
+        var group = groups.First(g => g.Id == comp.GroupId);
+
+        return await ValidateAndBuildResponseAsync(comp, group, ev, registration, dto.StationNumber, ct);
+    }
+
+    // Shared Validation and Response construction helper
+    private async Task<VerifyJudgeStationResponseDto> ValidateAndBuildResponseAsync(
+        GroupCompetitor comp,
+        Group group,
+        Event ev,
+        Registration registration,
+        int requestedStationNumber,
+        CancellationToken ct)
+    {
+        if (group.StatusCode != "ONGOING")
+            throw new CustomException("GROUP_NOT_ONGOING", "This group is not currently ongoing.", 400);
 
         if (comp.StatusCode == GroupCompetitorStatus.NO_SHOW)
             throw new CustomException("COMPETITOR_NO_SHOW", "This competitor was marked as NO_SHOW and cannot compete.", 400);
 
-        var results = await _unitOfWork.Results.FindAsync(r => r.GroupCompetitorId == comp.Id);
+        var results = await _unitOfWork.Results.FindAsync(r => r.GroupCompetitorId == comp.Id, ct);
         var resultsList = results.ToList();
 
         if (resultsList.Any() && resultsList.All(r => r.IsLocked))
@@ -68,6 +91,29 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationUseCase
             throw new CustomException("COMPETITOR_COMPLETED", "This competitor has already completed all solves for this round.", 400);
 
         int nextSolveNumber = resultsList.Count + 1;
+
+        ScrambleInfoDto? currentScramble = null;
+        if (ev.EventFormatCode == "TRADITIONAL")
+        {
+            var scrambleSet = await _unitOfWork.ScrambleSets.FirstOrDefaultAsync(ss => ss.GroupId == group.Id, ct);
+            if (scrambleSet == null)
+                throw new CustomException("SCRAMBLES_NOT_GENERATED", "Scrambles have not been generated for this group yet.", 400);
+
+            var scrambles = await _unitOfWork.Scrambles.FindAsync(s => s.ScrambleSetId == scrambleSet.Id && s.SolveNumber == nextSolveNumber && s.PuzzleTypeId == ev.PuzzleTypeId, ct);
+            var scramble = scrambles.FirstOrDefault();
+            if (scramble == null)
+                throw new CustomException("SCRAMBLES_NOT_GENERATED", "Scrambles have not been generated for this group yet.", 400);
+
+            currentScramble = new ScrambleInfoDto
+            {
+                ScrambleId = scramble.Id,
+                SolveNumber = scramble.SolveNumber,
+                Sequence = scramble.Sequence
+            };
+        }
+
+        var puzzle = await _unitOfWork.PuzzleTypes.GetByIdAsync(ev.PuzzleTypeId, ct);
+        var eventName = puzzle?.Name ?? "Unknown Event";
 
         return new VerifyJudgeStationResponseDto
         {
@@ -82,7 +128,8 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationUseCase
             StationNumber = comp.StationNumber,
             NextSolveNumber = nextSolveNumber,
             SolveCount = ev.SolveCount,
-            CanSubmit = true
+            CanSubmit = true,
+            CurrentScramble = currentScramble
         };
     }
 }

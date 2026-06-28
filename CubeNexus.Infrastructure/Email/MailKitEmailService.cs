@@ -123,7 +123,10 @@ public class MailKitEmailService : IEmailService
             await client.ConnectAsync(_settings.SmtpHost, _settings.SmtpPort, secureSocketOptions);
 
             if (client.Capabilities.HasFlag(SmtpCapabilities.Authentication))
-                await client.AuthenticateAsync(Encoding.UTF8, _settings.Username, _settings.Password);
+                await client.AuthenticateAsync(
+                    Encoding.UTF8,
+                    _settings.Username,
+                    _settings.Password.Replace(" ", string.Empty));
 
             await client.SendAsync(message);
             await client.DisconnectAsync(true);

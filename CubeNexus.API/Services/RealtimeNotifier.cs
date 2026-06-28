@@ -86,4 +86,22 @@ public class RealtimeNotifier : IRealtimeNotifier
             Console.WriteLine($"[Realtime Hub ERROR] Failed to broadcast ResultCorrected: {ex.Message}");
         }
     }
+
+    public async Task SendStationCommandAsync(Guid eventId, int roundNumber, int stationNumber, string command, object? data = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var stationGroup = $"event:{eventId}:round:{roundNumber}:station:{stationNumber}";
+            Console.WriteLine($"[Realtime Hub] Sending station command '{command}' to {stationGroup}");
+            await _hubContext.Clients.Group(stationGroup).SendAsync("ReceiveStationCommand", new
+            {
+                Command = command,
+                Data = data
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Realtime Hub ERROR] Failed to send station command: {ex.Message}");
+        }
+    }
 }

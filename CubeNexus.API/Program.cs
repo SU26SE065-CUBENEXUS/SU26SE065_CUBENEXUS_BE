@@ -1,9 +1,11 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Infrastructure;
 using CubeNexus.Infrastructure.Email;
 using CubeNexus.Infrastructure.Identity;
+using CubeNexus.Infrastructure.Options;
 using CubeNexus.Infrastructure.Persistence;
 using CubeNexus.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -79,10 +81,30 @@ builder.Services.AddAuthentication(options =>
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Secret)),
         ClockSkew = TimeSpan.Zero // Token hết hạn chính xác, không có buffer
     };
+
+    // SignalR truyền token qua query string "access_token" (WebSocket không gửi header)
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+            if (!string.IsNullOrEmpty(accessToken) &&
+                (path.StartsWithSegments("/hubs/online-arena") || path.StartsWithSegments("/hubs/tournament")))
+            {
+                context.Token = accessToken;
+            }
+            return Task.CompletedTask;
+        }
+    };
 });
 
 // Unit of Work (gom tất cả repositories, dùng chung 1 DbContext)
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+// Online Arena UseCases dùng CubeNexus.Application.Interfaces.IUnitOfWork (có transaction methods)
+// Resolve cùng instance UnitOfWork đã đăng ký ở trên (cùng scope → cùng DbContext)
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.IUnitOfWork>(
+    sp => (CubeNexus.Application.Interfaces.IUnitOfWork)sp.GetRequiredService<IUnitOfWork>());
 
 // Services (business logic – inject IUnitOfWork, không phụ thuộc DbContext trực tiếp)
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -101,15 +123,75 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentO
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteEventUseCase, CubeNexus.Application.UseCases.TournamentOperation.CompleteEventUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteTournamentUseCase, CubeNexus.Application.UseCases.TournamentOperation.CompleteTournamentUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IAdvanceRoundUseCase, CubeNexus.Application.UseCases.TournamentOperation.AdvanceRoundUseCase>();
-builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationUseCase, CubeNexus.Application.UseCases.TournamentOperation.VerifyJudgeStationUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase, CubeNexus.Application.UseCases.TournamentOperation.VerifyJudgeStationUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase, CubeNexus.Application.UseCases.TournamentOperation.CorrectResultUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IRealtimeNotifier, CubeNexus.API.Services.RealtimeNotifier>();
+
+// --- Online Arena services & usecases ---
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineArenaRealtimeNotifier, CubeNexus.API.Services.OnlineArenaRealtimeNotifier>();
+builder.Services.AddScoped<CubeNexus.Domain.Services.IEloCalculator, CubeNexus.Domain.Services.EloCalculator>();
+builder.Services.Configure<AiRubikOptions>(builder.Configuration.GetSection(AiRubikOptions.SectionName));
+builder.Services.AddOptions<R2Options>()
+    .Bind(builder.Configuration.GetSection(R2Options.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(options => options.UploadUrlExpirationMinutes == 15, "R2:UploadUrlExpirationMinutes must be 15.")
+    .Validate(options => options.PlaybackUrlExpirationMinutes == 60, "R2:PlaybackUrlExpirationMinutes must be 60.");
+builder.Services.AddHttpClient<CubeNexus.Application.Interfaces.Services.IAiRubikClient, AiRubikClient>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IRecordingStorageService, R2RecordingStorageService>();
+
+// Repositories (Since they are created via UnitOfWork or registered individually, let's register the specific repositories for DI if any use case injects them directly)
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.Repositories.IPuzzleTypeRepository, CubeNexus.Infrastructure.Repositories.PuzzleTypeRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository, CubeNexus.Infrastructure.Repositories.OnlineProfileRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IMatchmakingQueueRepository, CubeNexus.Infrastructure.Repositories.MatchmakingQueueRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineMatchRepository, CubeNexus.Infrastructure.Repositories.OnlineMatchRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineMatchAiCheckRepository, CubeNexus.Infrastructure.Repositories.OnlineMatchAiCheckRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineMatchVideoEvidenceRepository, CubeNexus.Infrastructure.Repositories.OnlineMatchVideoEvidenceRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineMatchAuditLogRepository, CubeNexus.Infrastructure.Repositories.OnlineMatchAuditLogRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IMobileTimerSessionRepository, CubeNexus.Infrastructure.Repositories.MobileTimerSessionRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IEloHistoryRepository, CubeNexus.Infrastructure.Repositories.EloHistoryRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IFraudReportRepository, CubeNexus.Infrastructure.Repositories.FraudReportRepository>();
+
+// UseCases
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.InitOnlineProfileUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMyOnlineProfilesUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetOnlineLeaderboardUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.FindOnlineMatchUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CancelMatchmakingUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchmakingStatusUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.MarkCameraReadyUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.MarkWebRtcConnectedUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.MarkVideoRecordingStartedUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.MarkPlayerReadyUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.StartOnlineMatchUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchDetailUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ReconcileOnlineMatchStatusUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.MockOnlineMatchFinishPassUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CancelActiveMatchUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ConnectMobileTimerUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.DisconnectMobileTimerUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.RunAiRubikCheckUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ValidateScrambleCubeStateUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ValidateFinishCubeStateUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.StartOnlineMatchScannerSessionUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetOnlineMatchScannerSessionUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ObserveOnlineMatchScannerFrameUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.RetryOnlineMatchScannerFaceUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ResetOnlineMatchScannerSessionUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CreateMatchRecordingUploadUrlUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CompleteMatchRecordingUploadUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchRecordingPlaybackUrlUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.SubmitOnlineMatchResultUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CompleteOnlineMatchUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CreateFraudReportUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetPendingFraudReportsUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetFraudReportDetailUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ReviewFraudReportUseCase>();
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowVite", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8081", "http://127.0.0.1:8081")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
@@ -117,6 +199,19 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddSignalR();
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("AiRubikScannerTest", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "local",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+});
 
 var app = builder.Build();
 
@@ -129,9 +224,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowVite");
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<CubeNexus.API.Hubs.TournamentHub>("/hubs/tournament");
+app.MapHub<CubeNexus.API.Hubs.OnlineArenaHub>("/hubs/online-arena");
 
 app.Run();
