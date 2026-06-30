@@ -415,6 +415,45 @@ public class TournamentOperationController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Lấy danh sách thuật toán trộn (Scrambles) của một nhóm đấu.
+    /// </summary>
+    [HttpGet("api/tournament-operation/groups/{groupId:guid}/scrambles")]
+    [Authorize]
+    public async Task<IActionResult> GetGroupScrambles(Guid groupId)
+    {
+        try
+        {
+            var scrambles = await _operationService.GetGroupScramblesAsync(groupId);
+            return Ok(scrambles);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while fetching group scrambles.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Lấy danh sách các Penalty Type.
+    /// </summary>
+    [HttpGet("api/tournament-operation/penalty-types")]
+    public async Task<IActionResult> GetPenaltyTypes()
+    {
+        try
+        {
+            var penaltyTypes = await _operationService.GetPenaltyTypesAsync();
+            return Ok(penaltyTypes);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while fetching penalty types.", detail = ex.Message });
+        }
+    }
+
     private IActionResult HandleCustomException(CubeNexus.Application.Exceptions.CustomException ex)
     {
         var response = new Dictionary<string, object>

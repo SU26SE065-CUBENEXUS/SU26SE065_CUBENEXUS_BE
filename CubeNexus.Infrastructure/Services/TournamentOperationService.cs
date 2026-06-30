@@ -824,4 +824,52 @@ public class TournamentOperationService : ITournamentOperationService
         };
     }
 
+    public async Task<List<GroupScrambleDetailDto>> GetGroupScramblesAsync(Guid groupId, CancellationToken ct = default)
+    {
+        var group = await _unitOfWork.Groups.GetByIdAsync(groupId, ct);
+        if (group == null)
+        {
+            throw new KeyNotFoundException($"Group with ID {groupId} not found.");
+        }
+
+        var scrambleSet = await _unitOfWork.ScrambleSets.FirstOrDefaultAsync(ss => ss.GroupId == groupId, ct);
+        if (scrambleSet == null)
+        {
+            return new List<GroupScrambleDetailDto>();
+        }
+
+        var scrambles = await _unitOfWork.Scrambles.FindAsync(s => s.ScrambleSetId == scrambleSet.Id, ct);
+        var result = new List<GroupScrambleDetailDto>();
+        foreach (var s in scrambles)
+        {
+            result.Add(new GroupScrambleDetailDto
+            {
+                Id = s.Id,
+                ScrambleSetId = s.ScrambleSetId,
+                PuzzleTypeId = s.PuzzleTypeId,
+                SolveNumber = s.SolveNumber,
+                Sequence = s.Sequence,
+                IsExtra = false
+            });
+        }
+        return result;
+    }
+
+    public async Task<List<PenaltyTypeDto>> GetPenaltyTypesAsync(CancellationToken ct = default)
+    {
+        var penaltyTypes = await _unitOfWork.PenaltyTypes.GetAllAsync(ct);
+        var result = new List<PenaltyTypeDto>();
+        foreach (var pt in penaltyTypes)
+        {
+            result.Add(new PenaltyTypeDto
+            {
+                Id = pt.Id,
+                Code = pt.Code,
+                Label = pt.Label,
+                TimeAdditionMs = pt.TimeAdditionMs,
+                IsDisqualified = pt.IsDisqualified
+            });
+        }
+        return result;
+    }
 }

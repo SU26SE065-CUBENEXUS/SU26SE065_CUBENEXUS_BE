@@ -172,3 +172,22 @@ public class ResultCorrectionResponseDto
     public string CompetitorStatus { get; set; } = string.Empty;
 }
 
+public class GroupScrambleDetailDto
+{
+    public Guid Id { get; set; }
+    public Guid ScrambleSetId { get; set; }
+    public Guid? PuzzleTypeId { get; set; }
+    public int SolveNumber { get; set; }
+    public string Sequence { get; set; } = string.Empty;
+    public bool IsExtra { get; set; }
+}
+
+public class PenaltyTypeDto
+{
+    public Guid Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public int TimeAdditionMs { get; set; }
+    public bool IsDisqualified { get; set; }
+}
+

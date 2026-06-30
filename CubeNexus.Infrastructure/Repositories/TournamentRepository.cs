@@ -15,6 +15,12 @@ public class TournamentRepository : Repository<Tournament>, ITournamentRepositor
     {
         var publicStatuses = new[] { "DRAFT", "REGISTRATION_OPEN", "PUBLISHED", "ONGOING", "COMPLETED" };
         return await _set
+            .Include(t => t.Events)
+                .ThenInclude(e => e.PuzzleType)
+            .Include(t => t.Events)
+                .ThenInclude(e => e.MedleyPuzzles)
+                    .ThenInclude(mp => mp.PuzzleType)
+            .Include(t => t.CreatedByUser)
             .Where(t => publicStatuses.Contains(t.StatusCode))
             .OrderByDescending(t => t.StartDate)
             .ToListAsync(ct);
