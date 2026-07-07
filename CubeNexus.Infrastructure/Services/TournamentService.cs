@@ -176,6 +176,7 @@ public class TournamentService : ITournamentService
                 SolveCount = e.SolveCount,
                 SortOrder = e.SortOrder,
                 MaxCapacity = e.MaxCapacity,
+                RegistrationStatusCode = e.RegistrationStatusCode,
                 MedleyPuzzles = e.MedleyPuzzles.OrderBy(mp => mp.SortOrder).Select(mp => new MedleyPuzzleDetailDto
                 {
                     Id = mp.Id,
