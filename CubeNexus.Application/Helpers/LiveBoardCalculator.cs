@@ -93,6 +93,8 @@ public static class LiveBoardCalculator
             {
                 GroupCompetitorId = c.Id,
                 CompetitorName = user?.DisplayName ?? "Unknown Competitor",
+                CompetitorUserCode = user?.UserCode ?? string.Empty,
+                CompetitorAvatarUrl = user?.AvatarUrl,
                 StationNumber = c.StationNumber,
                 CompetitorStatus = c.StatusCode.ToString(),
                 GroupId = c.GroupId,

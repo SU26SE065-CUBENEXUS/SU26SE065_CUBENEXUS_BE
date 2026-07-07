@@ -143,6 +143,7 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IRecordingS
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.Repositories.IPuzzleTypeRepository, CubeNexus.Infrastructure.Repositories.PuzzleTypeRepository>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository, CubeNexus.Infrastructure.Repositories.OnlineProfileRepository>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IMatchmakingQueueRepository, CubeNexus.Infrastructure.Repositories.MatchmakingQueueRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineMatchConfirmationRepository, CubeNexus.Infrastructure.Repositories.OnlineMatchConfirmationRepository>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineMatchRepository, CubeNexus.Infrastructure.Repositories.OnlineMatchRepository>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineMatchAiCheckRepository, CubeNexus.Infrastructure.Repositories.OnlineMatchAiCheckRepository>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineMatchVideoEvidenceRepository, CubeNexus.Infrastructure.Repositories.OnlineMatchVideoEvidenceRepository>();
@@ -158,6 +159,8 @@ builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetOnlineL
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.FindOnlineMatchUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CancelMatchmakingUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchmakingStatusUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ConfirmOnlineMatchUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ApplyConfirmationTimeoutUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.MarkCameraReadyUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.MarkWebRtcConnectedUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.MarkVideoRecordingStartedUseCase>();
@@ -186,12 +189,21 @@ builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CreateFrau
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetPendingFraudReportsUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetFraudReportDetailUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ReviewFraudReportUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ApplySetupTimeoutUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ApplyReadyTimeoutUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ApplySolveTimeoutUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.TransitionToSolvingUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.SubmitMobileTimerSolveTimeUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchRecoveryStateUseCase>();
+
+// Background Services
+builder.Services.AddHostedService<CubeNexus.API.BackgroundServices.OnlineArenaBackgroundService>();
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowVite", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8081", "http://127.0.0.1:8081", "http://192.168.88.198:8081", "http://192.168.101.25:8081", "http://localhost:3000", "http://127.0.0.1:3000", "http://192.168.101.25:3000")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();

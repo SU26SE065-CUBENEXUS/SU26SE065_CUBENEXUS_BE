@@ -59,6 +59,16 @@ public class OnlineArenaHub : Hub
         };
 
         await Clients.Group(GetMatchGroup(matchId)).SendAsync("MatchJoined", payload);
+
+        // Pre-populate or refresh the cache
+        _matchCache[match.Id] = new CachedMatch
+        {
+            Id = match.Id,
+            Player1Id = match.Player1Id,
+            Player2Id = match.Player2Id,
+            StatusCode = match.StatusCode,
+            CachedAt = DateTime.UtcNow
+        };
     }
 
     public Task LeaveMatchRoom(Guid matchId)
@@ -70,7 +80,7 @@ public class OnlineArenaHub : Hub
             throw new HubException("offer is required.");
 
         var currentUserId = RequireCurrentUserId();
-        var match = await RequireMatchAccessAsync(matchId, currentUserId, allowAdmin: false);
+        var match = await RequireMatchAccessCachedAsync(matchId, currentUserId, allowAdmin: false);
         ValidateOpponentTarget(match, currentUserId, targetUserId);
         EnsureNonTerminal(match.StatusCode);
 
@@ -89,7 +99,7 @@ public class OnlineArenaHub : Hub
             throw new HubException("answer is required.");
 
         var currentUserId = RequireCurrentUserId();
-        var match = await RequireMatchAccessAsync(matchId, currentUserId, allowAdmin: false);
+        var match = await RequireMatchAccessCachedAsync(matchId, currentUserId, allowAdmin: false);
         ValidateOpponentTarget(match, currentUserId, targetUserId);
         EnsureNonTerminal(match.StatusCode);
 
@@ -108,7 +118,7 @@ public class OnlineArenaHub : Hub
             throw new HubException("candidate is required.");
 
         var currentUserId = RequireCurrentUserId();
-        var match = await RequireMatchAccessAsync(matchId, currentUserId, allowAdmin: false);
+        var match = await RequireMatchAccessCachedAsync(matchId, currentUserId, allowAdmin: false);
         ValidateOpponentTarget(match, currentUserId, targetUserId);
         EnsureNonTerminal(match.StatusCode);
 
@@ -147,7 +157,47 @@ public class OnlineArenaHub : Hub
         return match;
     }
 
-    private static void ValidateOpponentTarget(CubeNexus.Domain.Entities.OnlineMatch match, Guid currentUserId, Guid targetUserId)
+    // In-memory cache to bypass DB hits during high-frequency signaling (SDP/ICE candidate) exchanges
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, CachedMatch> _matchCache = new();
+
+    private class CachedMatch
+    {
+        public Guid Id { get; set; }
+        public Guid Player1Id { get; set; }
+        public Guid Player2Id { get; set; }
+        public string StatusCode { get; set; } = string.Empty;
+        public DateTime CachedAt { get; set; }
+    }
+
+    private async Task<CachedMatch> RequireMatchAccessCachedAsync(Guid matchId, Guid currentUserId, bool allowAdmin)
+    {
+        if (!_matchCache.TryGetValue(matchId, out var cached) || (DateTime.UtcNow - cached.CachedAt).TotalSeconds > 15)
+        {
+            var match = await _matchRepository.GetByIdAsync(matchId);
+            if (match == null)
+                throw new HubException("Match not found.");
+
+            cached = new CachedMatch
+            {
+                Id = match.Id,
+                Player1Id = match.Player1Id,
+                Player2Id = match.Player2Id,
+                StatusCode = match.StatusCode,
+                CachedAt = DateTime.UtcNow
+            };
+            _matchCache[matchId] = cached;
+        }
+
+        var isParticipant = cached.Player1Id == currentUserId || cached.Player2Id == currentUserId;
+        var isAdmin = allowAdmin && UserClaimsHelper.IsAdminOrManager(Context.User);
+
+        if (!isParticipant && !isAdmin)
+            throw new HubException("You are not allowed to access this match room.");
+
+        return cached;
+    }
+
+    private static void ValidateOpponentTarget(CachedMatch match, Guid currentUserId, Guid targetUserId)
     {
         if (targetUserId == currentUserId)
             throw new HubException("targetUserId must be the opponent.");
@@ -166,3 +216,4 @@ public class OnlineArenaHub : Hub
     private static string GetUserGroup(Guid userId) => $"user:{userId}";
     private static string GetMatchGroup(Guid matchId) => $"online-match:{matchId}";
 }
+

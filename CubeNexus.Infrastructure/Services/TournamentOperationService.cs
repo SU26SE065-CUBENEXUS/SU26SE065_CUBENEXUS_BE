@@ -179,6 +179,10 @@ public class TournamentOperationService : ITournamentOperationService
         if (!groups.Any())
             throw new InvalidOperationException("Groups must be generated before generating scrambles.");
 
+        // Strict regeneration rule 0: check if any group in this round is not PENDING
+        if (groups.Any(g => g.StatusCode != "PENDING"))
+            throw new InvalidOperationException("Cannot generate scrambles after groups have started.");
+
         var groupIds = groups.Select(g => g.Id).ToList();
 
         // Strict regeneration rule 1: scramble sets already exist for these groups
@@ -821,6 +825,79 @@ public class TournamentOperationService : ITournamentOperationService
             CanSubmit = canSubmit,
             Reason = reason,
             CurrentScramble = currentScramble
+        };
+    }
+
+    public async Task<JudgeStationRosterResponseDto> GetJudgeStationRosterAsync(Guid eventId, int roundNumber, int groupNumber, int stationNumber, CancellationToken ct = default)
+    {
+        var ev = await _unitOfWork.Events.GetByIdAsync(eventId, ct);
+        if (ev == null)
+            throw new KeyNotFoundException($"Event with ID {eventId} not found.");
+
+        var puzzle = await _unitOfWork.PuzzleTypes.GetByIdAsync(ev.PuzzleTypeId, ct);
+        var eventName = puzzle?.Name ?? "Unknown Event";
+
+        var expectedGroupName = $"Group {groupNumber}";
+        var group = await _unitOfWork.Groups.FirstOrDefaultAsync(
+            g => g.EventId == eventId && g.RoundNumber == roundNumber && g.GroupName != null && g.GroupName.ToLower() == expectedGroupName.ToLower(),
+            ct
+        );
+
+        if (group == null)
+            throw new KeyNotFoundException($"Group {groupNumber} not found for event {eventId} and round {roundNumber}.");
+
+        var groupCompetitors = await _unitOfWork.GroupCompetitors.FindAsync(
+            gc => gc.GroupId == group.Id && gc.StationNumber == stationNumber,
+            ct
+        );
+
+        var list = new List<JudgeStationRosterItemDto>();
+
+        foreach (var gc in groupCompetitors)
+        {
+            var offlineRegEvent = await _unitOfWork.OfflineRegistrationEvents.GetByIdAsync(gc.RegistrationEventId, ct);
+            if (offlineRegEvent == null) continue;
+
+            var registration = await _unitOfWork.Registrations.GetByIdAsync(offlineRegEvent.RegistrationId, ct);
+            if (registration == null) continue;
+
+            var user = await _unitOfWork.Users.GetByIdAsync(registration.UserId, ct);
+            var competitorName = user?.DisplayName ?? "Unknown Competitor";
+
+            var results = await _unitOfWork.Results.FindAsync(r => r.GroupCompetitorId == gc.Id, ct);
+            var resultsList = results.ToList();
+            var submittedCount = resultsList.Count;
+
+            int? nextSolveNumber = submittedCount < ev.SolveCount ? submittedCount + 1 : null;
+            bool canSubmit = gc.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW &&
+                             group.StatusCode == "ONGOING" &&
+                             registration.CheckedInAt != null &&
+                             registration.StatusCode == "CHECKED_IN" &&
+                             submittedCount < ev.SolveCount;
+
+            list.Add(new JudgeStationRosterItemDto
+            {
+                GroupCompetitorId = gc.Id,
+                GroupId = group.Id,
+                GroupName = group.GroupName ?? string.Empty,
+                CompetitorName = competitorName,
+                EventId = ev.Id,
+                EventName = eventName,
+                RoundNumber = roundNumber,
+                StationNumber = stationNumber,
+                SolveCount = ev.SolveCount,
+                SubmittedCount = submittedCount,
+                NextSolveNumber = nextSolveNumber,
+                CanSubmit = canSubmit,
+                Status = gc.StatusCode.ToString()
+            });
+        }
+
+        return new JudgeStationRosterResponseDto
+        {
+            Success = true,
+            Message = "Roster retrieved successfully.",
+            Competitors = list
         };
     }
 

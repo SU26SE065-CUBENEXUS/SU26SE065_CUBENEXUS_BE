@@ -36,6 +36,10 @@ public class OnlineProfileRepository : Repository<OnlineProfile>,
 
     public Task AddAsync(OnlineProfile profile) => _db.Set<OnlineProfile>().AddAsync(profile).AsTask();
 
+    // --- IOnlineProfileRepository.GetByUserIdAsync (new) ---
+    Task<OnlineProfile?> CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository.GetByUserIdAsync(Guid userId)
+        => GetByUserIdAsync(userId);
+
     void CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository.Update(OnlineProfile profile) =>
         base.Update(profile);
 

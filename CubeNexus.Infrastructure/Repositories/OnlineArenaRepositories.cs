@@ -21,6 +21,13 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
                 && queue.PuzzleTypeId == puzzleTypeId
                 && queue.StatusCode == "QUEUED");
 
+    public Task<MatchmakingQueue?> GetConfirmingQueueAsync(Guid userId, Guid puzzleTypeId)
+        => _context.Set<MatchmakingQueue>()
+            .FirstOrDefaultAsync(queue =>
+                queue.UserId == userId
+                && queue.PuzzleTypeId == puzzleTypeId
+                && queue.StatusCode == "CONFIRMING");
+
     public Task<MatchmakingQueue?> GetLatestNonCancelledQueueAsync(Guid userId, Guid puzzleTypeId)
         => _context.Set<MatchmakingQueue>()
             .Where(queue =>
@@ -108,6 +115,11 @@ public class OnlineMatchRepository : IOnlineMatchRepository
             match.PuzzleTypeId == puzzleTypeId
             && (match.Player1Id == userId || match.Player2Id == userId)
             && ActiveStatuses.Contains(match.StatusCode));
+
+    public Task<List<OnlineMatch>> GetActiveMatchesForReconcileAsync(CancellationToken ct = default)
+        => _context.Set<OnlineMatch>()
+            .Where(m => ActiveStatuses.Contains(m.StatusCode))
+            .ToListAsync(ct);
 
     public Task AddAsync(OnlineMatch match)
         => _context.Set<OnlineMatch>().AddAsync(match).AsTask();
@@ -219,6 +231,66 @@ public class EloHistoryRepository : IEloHistoryRepository
 
     public Task AddAsync(EloHistory history)
         => _context.Set<EloHistory>().AddAsync(history).AsTask();
+}
+
+public class OnlineMatchConfirmationRepository : IOnlineMatchConfirmationRepository
+{
+    private readonly ApplicationDbContext _context;
+
+    public OnlineMatchConfirmationRepository(ApplicationDbContext context)
+    {
+        _context = context;
+    }
+
+    public Task<OnlineMatchConfirmation?> GetByIdAsync(Guid id)
+        => _context.Set<OnlineMatchConfirmation>()
+            .Include(c => c.Player1)
+            .Include(c => c.Player2)
+            .FirstOrDefaultAsync(c => c.Id == id);
+
+    public async Task<OnlineMatchConfirmation?> GetByIdForUpdateAsync(Guid id)
+    {
+        // Raw SQL with FOR UPDATE to acquire a row-level lock inside a transaction.
+        // Prevents two concurrent Confirm calls from both creating an OnlineMatch.
+        const string sql = """
+            SELECT * FROM online_match_confirmations
+            WHERE id = {0}
+            FOR UPDATE
+            """;
+
+        var confirmation = await _context.Set<OnlineMatchConfirmation>()
+            .FromSqlRaw(sql, id)
+            .FirstOrDefaultAsync();
+
+        if (confirmation == null) return null;
+
+        // Load navigation properties separately (EF doesn't support Include on FromSqlRaw with row-locks)
+        await _context.Entry(confirmation).Reference(c => c.Player1).LoadAsync();
+        await _context.Entry(confirmation).Reference(c => c.Player2).LoadAsync();
+        return confirmation;
+    }
+
+    public Task<OnlineMatchConfirmation?> GetPendingConfirmationAsync(Guid userId, Guid puzzleTypeId)
+        => _context.Set<OnlineMatchConfirmation>()
+            .Include(c => c.Player1)
+            .Include(c => c.Player2)
+            .FirstOrDefaultAsync(c =>
+                c.PuzzleTypeId == puzzleTypeId
+                && (c.Player1UserId == userId || c.Player2UserId == userId)
+                && c.Status == "PENDING");
+
+    public Task<List<OnlineMatchConfirmation>> GetExpiredPendingConfirmationsAsync(DateTime now)
+        => _context.Set<OnlineMatchConfirmation>()
+            .Include(c => c.Player1)
+            .Include(c => c.Player2)
+            .Where(c => c.Status == "PENDING" && c.ConfirmDeadlineAt <= now)
+            .ToListAsync();
+
+    public Task AddAsync(OnlineMatchConfirmation confirmation)
+        => _context.Set<OnlineMatchConfirmation>().AddAsync(confirmation).AsTask();
+
+    public void Update(OnlineMatchConfirmation confirmation)
+        => _context.Set<OnlineMatchConfirmation>().Update(confirmation);
 }
 
 public class FraudReportRepository : IFraudReportRepository

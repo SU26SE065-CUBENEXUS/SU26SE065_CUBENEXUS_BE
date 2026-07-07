@@ -28,6 +28,12 @@ public class OnlineArenaController : ControllerBase
         return !string.IsNullOrWhiteSpace(rawUserId) && Guid.TryParse(rawUserId, out userId);
     }
 
+    private Guid GetCurrentUserId()
+    {
+        if (!TryGetCurrentUserId(out var userId)) throw new UnauthorizedAccessException("Missing or invalid user id claim.");
+        return userId;
+    }
+
     private bool IsAdminLike()
         => AdminRoles.Any(User.IsInRole);
 
@@ -107,15 +113,40 @@ public class OnlineArenaController : ControllerBase
         }
     }
 
-    [HttpPost("matchmaking/cancel")]
-    public async Task<IActionResult> CancelMatchmaking([FromBody] FindMatchRequest request, [FromServices] CancelMatchmakingUseCase useCase)
+    /// <summary>
+    /// Cancel matchmaking — either from QUEUED state or MATCH_FOUND confirmation window.
+    /// If cancelling during confirmation window, a 30s cooldown is applied to the cancelling player.
+    /// </summary>
+    [HttpDelete("matchmaking")]
+    public async Task<IActionResult> CancelMatchmaking([FromQuery] Guid puzzleTypeId, [FromServices] CancelMatchmakingUseCase useCase)
     {
         if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
 
         try
         {
-            await useCase.ExecuteAsync(userId, request.PuzzleTypeId);
+            await useCase.ExecuteAsync(userId, puzzleTypeId);
             return Ok(new { message = "Matchmaking cancelled." });
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
+    /// <summary>
+    /// Confirm a match during the 60-second confirmation window.
+    /// Both players must call this endpoint. Once both confirm, an OnlineMatch is created.
+    /// Returns current status (MATCH_CONFIRMING if waiting on opponent, MATCHED if both confirmed).
+    /// </summary>
+    [HttpPost("matchmaking/confirm/{confirmationId:guid}")]
+    public async Task<IActionResult> ConfirmMatch([FromRoute] Guid confirmationId, [FromServices] ConfirmOnlineMatchUseCase useCase)
+    {
+        if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
+
+        try
+        {
+            var result = await useCase.ExecuteAsync(userId, confirmationId);
+            return Ok(result);
         }
         catch (Exception ex)
         {
@@ -198,14 +229,19 @@ public class OnlineArenaController : ControllerBase
         }
     }
 
-    [HttpPost("matches/{matchId:guid}/ready")]
-    public async Task<IActionResult> MarkPlayerReady(Guid matchId, [FromServices] MarkPlayerReadyUseCase useCase)
+    /// <summary>
+    /// Signal that this player has started video recording during COUNTDOWN.
+    /// When both players call this, the match immediately transitions to INSPECTION.
+    /// Must only be called while phase == COUNTDOWN (StatusCode == READY).
+    /// </summary>
+    [HttpPost("matches/{matchId:guid}/video-recording-started")]
+    public async Task<IActionResult> MarkVideoRecordingStarted(Guid matchId, [FromBody] MarkVideoRecordingStartedRequest request, [FromServices] MarkVideoRecordingStartedUseCase useCase)
     {
         if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
 
         try
         {
-            return Ok(await useCase.ExecuteAsync(matchId, userId));
+            return Ok(await useCase.ExecuteAsync(matchId, userId, request));
         }
         catch (Exception ex)
         {
@@ -536,6 +572,36 @@ public class OnlineArenaController : ControllerBase
         try
         {
             return Ok(await useCase.ExecuteAsync(userId, request.MatchId, request.TimeMs, request.IsDnf));
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
+    [HttpPost("mobile-timer/submit-time")]
+    public async Task<IActionResult> SubmitSolveTime([FromBody] SubmitSolveTimeRequest request, [FromServices] SubmitMobileTimerSolveTimeUseCase useCase)
+    {
+        if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
+
+        try
+        {
+            return Ok(await useCase.ExecuteAsync(userId, request));
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
+    [HttpGet("matches/{matchId:guid}/state")]
+    public async Task<IActionResult> GetMatchState(Guid matchId, [FromServices] GetMatchRecoveryStateUseCase useCase)
+    {
+        if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
+
+        try
+        {
+            return Ok(await useCase.ExecuteAsync(userId, matchId));
         }
         catch (Exception ex)
         {

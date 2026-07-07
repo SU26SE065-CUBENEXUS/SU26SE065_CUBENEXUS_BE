@@ -20,10 +20,57 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
 
     public async Task<CheckInResponseDto> ExecuteAsync(CheckInRequestDto dto)
     {
-        var registration = await _unitOfWork.Registrations.GetByQrTokenAsync(dto.QrToken);
-        if (registration == null)
+        if (string.IsNullOrWhiteSpace(dto.QrToken))
         {
             throw new CustomException("QR_INVALID", "Invalid QR code.", 400);
+        }
+
+        RegistrationQrPayload? payload = null;
+        try
+        {
+            payload = System.Text.Json.JsonSerializer.Deserialize<RegistrationQrPayload>(dto.QrToken);
+        }
+        catch
+        {
+            // Fallback for raw text token
+        }
+
+        Domain.Entities.Registration? registration = null;
+        if (payload != null && payload.RegistrationId != Guid.Empty && !string.IsNullOrEmpty(payload.Token))
+        {
+            if (payload.ExpiresAt < DateTime.UtcNow)
+            {
+                throw new CustomException("QR_EXPIRED", "The competitor's QR ticket has expired.", 400);
+            }
+
+            // Look up by registration ID first (eager loading all entities)
+            registration = await _unitOfWork.Registrations.GetRegistrationWithDetailsAsync(payload.RegistrationId);
+
+            if (registration != null)
+            {
+                // Verify the payload token matches the one stored in the DB (resolves whitespace differences)
+                try
+                {
+                    var dbPayload = System.Text.Json.JsonSerializer.Deserialize<RegistrationQrPayload>(registration.QrToken);
+                    if (dbPayload == null || dbPayload.Token != payload.Token)
+                    {
+                        registration = null; // Token mismatch
+                    }
+                }
+                catch
+                {
+                    registration = null; // Invalid DB JSON token
+                }
+            }
+        }
+        else
+        {
+            registration = await _unitOfWork.Registrations.GetByQrTokenAsync(dto.QrToken);
+        }
+
+        if (registration == null)
+        {
+            throw new CustomException("QR_INVALID", "Invalid QR code credentials or token mismatch.", 400);
         }
 
         if (registration.Tournament.StatusCode == "CANCELLED")

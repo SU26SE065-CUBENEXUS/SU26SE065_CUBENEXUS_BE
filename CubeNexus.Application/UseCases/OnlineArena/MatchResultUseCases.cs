@@ -163,25 +163,36 @@ public class CompleteOnlineMatchUseCase
         {
             return BuildCompletedResponse(existing);
         }
-        if (existing.StatusCode is not nameof(OnlineMatchStatus.PENDING_EVIDENCE) and not nameof(OnlineMatchStatus.NEEDS_REVIEW))
-            throw new InvalidOperationException("Only PENDING_EVIDENCE or NEEDS_REVIEW matches can be completed.");
+        if (existing.StatusCode is not nameof(OnlineMatchStatus.ONGOING) and not nameof(OnlineMatchStatus.PENDING_EVIDENCE) and not nameof(OnlineMatchStatus.NEEDS_REVIEW))
+            throw new InvalidOperationException("Only ONGOING, PENDING_EVIDENCE or NEEDS_REVIEW matches can be completed.");
         if (existing.Player1ResultStatus == PlayerResultStatus.PENDING.ToString()
             || existing.Player2ResultStatus == PlayerResultStatus.PENDING.ToString())
             throw new InvalidOperationException("Both results are required before completion.");
 
         var fraudReports = await _fraudReportRepo.GetByMatchAsync(existing.Id);
+        var p1Valid = existing.Player1ResultStatus == PlayerResultStatus.VALID.ToString();
+        var p2Valid = existing.Player2ResultStatus == PlayerResultStatus.VALID.ToString();
+
+        var p1ScrambleOk = !p1Valid || existing.Player1ScrambleCheckStatus == "PASSED";
+        var p2ScrambleOk = !p2Valid || existing.Player2ScrambleCheckStatus == "PASSED";
+
+        var p1FinishOk = p1Valid ? existing.Player1FinishCheckStatus == "PASSED" : existing.Player1FinishCheckStatus == "NOT_REQUIRED";
+        var p2FinishOk = p2Valid ? existing.Player2FinishCheckStatus == "PASSED" : existing.Player2FinishCheckStatus == "NOT_REQUIRED";
+
         var shouldReview =
-            existing.Player1ScrambleCheckStatus != "PASSED"
-            || existing.Player2ScrambleCheckStatus != "PASSED"
-            || existing.Player1FinishCheckStatus != "PASSED"
-            || existing.Player2FinishCheckStatus != "PASSED"
+            !p1ScrambleOk
+            || !p2ScrambleOk
+            || !p1FinishOk
+            || !p2FinishOk
             || existing.Player1ScrambleCheckStatus == "FAILED"
             || existing.Player2ScrambleCheckStatus == "FAILED"
-            || OnlineArenaFlowHelpers.HasOpenFraudReport(fraudReports)
+            || existing.Player1FinishCheckStatus == "FAILED"
+            || existing.Player2FinishCheckStatus == "FAILED"
             || existing.Player1ScrambleCheckStatus == "NEEDS_REVIEW"
             || existing.Player2ScrambleCheckStatus == "NEEDS_REVIEW"
             || existing.Player1FinishCheckStatus == "NEEDS_REVIEW"
-            || existing.Player2FinishCheckStatus == "NEEDS_REVIEW";
+            || existing.Player2FinishCheckStatus == "NEEDS_REVIEW"
+            || OnlineArenaFlowHelpers.HasOpenFraudReport(fraudReports);
 
         if (shouldReview)
         {

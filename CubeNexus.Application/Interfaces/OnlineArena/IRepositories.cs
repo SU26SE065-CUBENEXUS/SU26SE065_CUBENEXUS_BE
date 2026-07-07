@@ -5,6 +5,7 @@ namespace CubeNexus.Application.Interfaces.OnlineArena;
 public interface IOnlineProfileRepository
 {
     Task<OnlineProfile?> GetProfileAsync(Guid userId, Guid puzzleTypeId);
+    Task<OnlineProfile?> GetByUserIdAsync(Guid userId);
     Task<List<OnlineProfile>> GetUserProfilesAsync(Guid userId);
     Task<List<OnlineProfile>> GetLeaderboardAsync(Guid puzzleTypeId, int top = 100);
     Task AddAsync(OnlineProfile profile);
@@ -14,6 +15,7 @@ public interface IOnlineProfileRepository
 public interface IMatchmakingQueueRepository
 {
     Task<MatchmakingQueue?> GetQueuedQueueAsync(Guid userId, Guid puzzleTypeId);
+    Task<MatchmakingQueue?> GetConfirmingQueueAsync(Guid userId, Guid puzzleTypeId);
     Task<MatchmakingQueue?> GetLatestNonCancelledQueueAsync(Guid userId, Guid puzzleTypeId);
     Task<MatchmakingQueue?> FindMatchForUpdateAsync(Guid puzzleTypeId, Guid currentUserId, int currentElo, int eloRange);
     Task AddAsync(MatchmakingQueue queue);
@@ -29,6 +31,8 @@ public interface IOnlineMatchRepository
     Task<OnlineMatch?> GetLatestActiveMatchAsync(Guid userId, Guid puzzleTypeId);
     Task<OnlineMatch?> GetLatestMatchAsync(Guid userId, Guid puzzleTypeId);
     Task<bool> HasActiveMatchAsync(Guid userId, Guid puzzleTypeId);
+    /// <summary>Fetch all non-terminal matches for BackgroundService reconciliation.</summary>
+    Task<List<OnlineMatch>> GetActiveMatchesForReconcileAsync(CancellationToken ct = default);
     Task AddAsync(OnlineMatch match);
     void Update(OnlineMatch match);
 }
@@ -64,6 +68,23 @@ public interface IMobileTimerSessionRepository
 public interface IEloHistoryRepository
 {
     Task AddAsync(EloHistory history);
+}
+
+public interface IOnlineMatchConfirmationRepository
+{
+    /// <summary>Returns the confirmation with Player1 and Player2 navigation loaded.</summary>
+    Task<OnlineMatchConfirmation?> GetByIdAsync(Guid id);
+    /// <summary>
+    /// Returns the confirmation row with a FOR UPDATE lock — must be called inside an open transaction.
+    /// Used by Confirm API to prevent duplicate OnlineMatch creation under concurrent requests.
+    /// </summary>
+    Task<OnlineMatchConfirmation?> GetByIdForUpdateAsync(Guid id);
+    /// <summary>Returns any PENDING confirmation that the given player is part of.</summary>
+    Task<OnlineMatchConfirmation?> GetPendingConfirmationAsync(Guid userId, Guid puzzleTypeId);
+    /// <summary>Returns all PENDING confirmations whose deadline has passed.</summary>
+    Task<List<OnlineMatchConfirmation>> GetExpiredPendingConfirmationsAsync(DateTime now);
+    Task AddAsync(OnlineMatchConfirmation confirmation);
+    void Update(OnlineMatchConfirmation confirmation);
 }
 
 public interface IFraudReportRepository

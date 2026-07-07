@@ -50,6 +50,10 @@ public class LiveBoardController : ControllerBase
         {
             roundStatus = "ONGOING";
         }
+        else if (groups.Any() && groups.All(g => g.StatusCode == "LOCKED"))
+        {
+            roundStatus = "LOCKED";
+        }
         else if (groups.Any() && groups.All(g => g.StatusCode == "COMPLETED"))
         {
             roundStatus = "COMPLETED";

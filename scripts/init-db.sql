@@ -499,6 +499,12 @@ CREATE TABLE IF NOT EXISTS online_profiles (
     total_losses_medley INTEGER NOT NULL DEFAULT 0,
     total_draws_medley INTEGER NOT NULL DEFAULT 0,
 
+    -- Matchmaking cooldown (lưu tại profile, không phải MatchmakingQueue)
+    matchmaking_cooldown_until TIMESTAMPTZ,
+    setup_timeout_count INTEGER NOT NULL DEFAULT 0,
+    setup_timeout_window_started_at TIMESTAMPTZ,
+    last_setup_timeout_at TIMESTAMPTZ,
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -527,6 +533,10 @@ WHERE is_placement_complete_standard = true;
 CREATE INDEX IF NOT EXISTS idx_online_profiles_matchmaking
 ON online_profiles(is_placement_complete_standard, elo_standard);
 
+CREATE INDEX IF NOT EXISTS idx_online_profiles_cooldown
+ON online_profiles(matchmaking_cooldown_until)
+WHERE matchmaking_cooldown_until IS NOT NULL;
+
 
 CREATE TABLE IF NOT EXISTS matchmaking_queue (
     id UUID PRIMARY KEY,
@@ -537,13 +547,13 @@ CREATE TABLE IF NOT EXISTS matchmaking_queue (
     status_code VARCHAR(20) NOT NULL,
 
     CONSTRAINT ck_matchmaking_queue_status
-        CHECK (status_code IN ('QUEUED', 'MATCHED', 'CANCELLED'))
+        CHECK (status_code IN ('QUEUED', 'CONFIRMING', 'MATCHED', 'CANCELLED'))
     
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_matchmaking_queue_active_user_puzzle
 ON matchmaking_queue(user_id, puzzle_type_id)
-WHERE status_code = 'QUEUED';
+WHERE status_code IN ('QUEUED', 'CONFIRMING');
 
 CREATE INDEX IF NOT EXISTS idx_matchmaking_queue_search
 ON matchmaking_queue(puzzle_type_id, status_code, queued_at);
@@ -565,6 +575,10 @@ CREATE TABLE IF NOT EXISTS online_matches (
 
     winner_id UUID REFERENCES users(id),
     status_code VARCHAR(20) NOT NULL,
+
+    -- Phase chuẩn hóa (granular state cho frontend)
+    phase VARCHAR(30) NOT NULL DEFAULT 'ROOM_SETUP',
+
     room_token VARCHAR(255) UNIQUE NOT NULL,
     qr_session_code VARCHAR(255),
     player1_time_ms INTEGER,
@@ -579,6 +593,21 @@ CREATE TABLE IF NOT EXISTS online_matches (
     player1_recording_started_at TIMESTAMPTZ,
     player2_recording_started_at TIMESTAMPTZ,
     time_limit_ms INTEGER NOT NULL DEFAULT 480000,
+
+    -- Deadlines (UTC) — backend là nguồn sự thật, không để frontend tự tính
+    setup_deadline_at TIMESTAMPTZ,
+    ready_deadline_at TIMESTAMPTZ,
+    countdown_ends_at TIMESTAMPTZ,
+    inspection_deadline_at TIMESTAMPTZ,
+    solve_deadline_at TIMESTAMPTZ,
+    finish_check_deadline_at TIMESTAMPTZ,
+
+    -- Cancellation info
+    cancel_reason VARCHAR(100),
+    timeout_player_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    elo_changed BOOLEAN NOT NULL DEFAULT false,
+    -- Idempotency guard cho BackgroundService
+    setup_timeout_penalty_applied_at TIMESTAMPTZ,
     
     -- Trạng thái sẵn sàng (Readiness Fields)
     player1_camera_ready BOOLEAN NOT NULL DEFAULT false,
@@ -623,6 +652,13 @@ CREATE TABLE IF NOT EXISTS online_matches (
 
     CONSTRAINT ck_online_matches_status
         CHECK (status_code IN ('CREATED', 'READY', 'ONGOING', 'PENDING_EVIDENCE', 'NEEDS_REVIEW', 'COMPLETED', 'CANCELLED', 'DRAW')),
+
+    CONSTRAINT ck_online_matches_phase
+        CHECK (phase IN (
+            'ROOM_SETUP', 'WEBRTC_CONNECTING', 'MOBILE_TIMER_PAIRING', 'SCRAMBLE_CHECKING',
+            'WAITING_READY', 'COUNTDOWN', 'INSPECTION', 'SOLVING', 'FINISH_CHECKING',
+            'PENDING_EVIDENCE', 'COMPLETED', 'NEEDS_REVIEW', 'CANCELLED'
+        )),
 
     CONSTRAINT ck_online_matches_players
         CHECK (player1_id <> player2_id),
@@ -675,6 +711,62 @@ ON online_matches(player2_profile_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_online_matches_qr_session_code
 ON online_matches(qr_session_code)
 WHERE qr_session_code IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_online_matches_active_phase
+ON online_matches(status_code, phase)
+WHERE status_code NOT IN ('COMPLETED', 'CANCELLED', 'DRAW');
+
+CREATE INDEX IF NOT EXISTS idx_online_matches_setup_deadline
+ON online_matches(setup_deadline_at)
+WHERE status_code NOT IN ('COMPLETED', 'CANCELLED', 'DRAW') AND setup_deadline_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_online_matches_timeout_player
+ON online_matches(timeout_player_id)
+WHERE timeout_player_id IS NOT NULL;
+
+
+CREATE TABLE IF NOT EXISTS online_match_confirmations (
+    id UUID PRIMARY KEY,
+    puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id) ON DELETE CASCADE,
+
+    player1_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    player2_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+    player1_confirmed BOOLEAN NOT NULL DEFAULT false,
+    player2_confirmed BOOLEAN NOT NULL DEFAULT false,
+
+    confirm_deadline_at TIMESTAMPTZ NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+
+    created_at TIMESTAMPTZ NOT NULL,
+    confirmed_at TIMESTAMPTZ,
+    match_id UUID REFERENCES online_matches(id) ON DELETE SET NULL,
+
+    CONSTRAINT ck_online_match_confirmations_status
+        CHECK (status IN ('PENDING', 'CONFIRMED', 'EXPIRED', 'CANCELLED')),
+
+    CONSTRAINT ck_online_match_confirmations_players
+        CHECK (player1_user_id <> player2_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_online_match_confirmations_deadline
+ON online_match_confirmations(confirm_deadline_at)
+WHERE status = 'PENDING';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_online_match_confirmations_player1_active
+ON online_match_confirmations(player1_user_id, puzzle_type_id)
+WHERE status = 'PENDING';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_online_match_confirmations_player2_active
+ON online_match_confirmations(player2_user_id, puzzle_type_id)
+WHERE status = 'PENDING';
+
+CREATE INDEX IF NOT EXISTS idx_online_match_confirmations_player1
+ON online_match_confirmations(player1_user_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_online_match_confirmations_player2
+ON online_match_confirmations(player2_user_id, status);
+
 
 CREATE TABLE IF NOT EXISTS online_match_video_evidence (
     id UUID PRIMARY KEY,
@@ -835,65 +927,6 @@ ON fraud_reports(status_code);
 
 CREATE INDEX IF NOT EXISTS idx_fraud_reports_accused
 ON fraud_reports(accused_user_id);
-
-
--- =========================================================
--- 4. ASYNC TOURNAMENT
--- =========================================================
-
-CREATE TABLE IF NOT EXISTS async_tournaments (
-    id UUID PRIMARY KEY,
-    puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
-    title VARCHAR(255) NOT NULL,
-    description TEXT,
-    scramble_sequence TEXT NOT NULL,
-    start_at TIMESTAMPTZ NOT NULL,
-    end_at TIMESTAMPTZ NOT NULL,
-    status_code VARCHAR(20) NOT NULL,
-    created_by UUID NOT NULL REFERENCES users(id),
-    created_at TIMESTAMPTZ NOT NULL,
-
-    CONSTRAINT ck_async_tournaments_status
-        CHECK (status_code IN ('UPCOMING', 'ONGOING', 'COMPLETED', 'CANCELLED')),
-
-    CONSTRAINT ck_async_tournaments_date
-        CHECK (end_at > start_at)
-);
-
-CREATE INDEX IF NOT EXISTS idx_async_tournaments_puzzle
-ON async_tournaments(puzzle_type_id);
-
-CREATE INDEX IF NOT EXISTS idx_async_tournaments_status
-ON async_tournaments(status_code);
-
-
-CREATE TABLE IF NOT EXISTS async_submissions (
-    id UUID PRIMARY KEY,
-    async_tournament_id UUID NOT NULL REFERENCES async_tournaments(id),
-    user_id UUID NOT NULL REFERENCES users(id),
-    video_url TEXT NOT NULL,
-    claimed_time_ms INTEGER NOT NULL,
-    status_code VARCHAR(20) NOT NULL,
-    reviewed_by UUID REFERENCES users(id),
-    admin_note TEXT,
-    submitted_at TIMESTAMPTZ NOT NULL,
-    reviewed_at TIMESTAMPTZ,
-
-    CONSTRAINT ck_async_submissions_status
-        CHECK (status_code IN ('PENDING', 'APPROVED', 'REJECTED')),
-
-    CONSTRAINT uq_async_submissions_tournament_user
-        UNIQUE (async_tournament_id, user_id),
-
-    CONSTRAINT ck_async_submissions_time
-        CHECK (claimed_time_ms > 0)
-);
-
-CREATE INDEX IF NOT EXISTS idx_async_submissions_user
-ON async_submissions(user_id);
-
-CREATE INDEX IF NOT EXISTS idx_async_submissions_status
-ON async_submissions(status_code);
 
 
 -- =========================================================

@@ -111,7 +111,7 @@ public class ObserveOnlineMatchScannerFrameUseCase
         _completeMatchUseCase = completeMatchUseCase;
     }
 
-    public async Task<OnlineArenaScannerSessionResponseDto> ExecuteAsync(
+    public async Task<object> ExecuteAsync(
         Guid matchId,
         Guid userId,
         string validationType,
@@ -173,18 +173,84 @@ public class ObserveOnlineMatchScannerFrameUseCase
                 await OnlineArenaScannerFlow.NotifyScannerUpdatedAsync(_notifier, match.Id, validationType, completedResponse);
                 await _notifier.NotifyReadyStateUpdatedAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, completedResponse.Message));
 
-                if (validationType == OnlineArenaScannerFlow.ValidationTypeFinish
-                    && validation.Status == "PASS"
-                    && match.Player1ResultStatus != PlayerResultStatus.PENDING.ToString()
-                    && match.Player2ResultStatus != PlayerResultStatus.PENDING.ToString()
-                    && match.Player1FinishCheckStatus == "PASSED"
-                    && match.Player2FinishCheckStatus == "PASSED")
+                var isP1 = match.Player1Id == userId;
+                var normValidationType = OnlineArenaScannerFlow.NormalizeValidationType(validationType);
+
+                if (normValidationType == OnlineArenaScannerFlow.ValidationTypeFinish)
                 {
-                    await _completeMatchUseCase.ExecuteAsync(match.Id);
+                    if (validation.Status == "PASS")
+                    {
+                        var bothSubmitted = match.Player1ResultStatus != PlayerResultStatus.PENDING.ToString()
+                            && match.Player2ResultStatus != PlayerResultStatus.PENDING.ToString();
+
+                        var p1Done = match.Player1ResultStatus == PlayerResultStatus.DNF.ToString() || match.Player1FinishCheckStatus == "PASSED";
+                        var p2Done = match.Player2ResultStatus == PlayerResultStatus.DNF.ToString() || match.Player2FinishCheckStatus == "PASSED";
+
+                        if (bothSubmitted && p1Done && p2Done)
+                        {
+                            await _completeMatchUseCase.ExecuteAsync(match.Id);
+                            var reloaded = await _matchRepo.GetByIdAsync(match.Id) ?? match;
+                            return new ObserveFinishFrameResponseDto
+                            {
+                                MatchId = reloaded.Id,
+                                MeUserId = userId,
+                                FinishCheckStatus = "PASSED",
+                                WaitingForOpponent = false,
+                                OpponentResultStatus = isP1 ? reloaded.Player2ResultStatus : reloaded.Player1ResultStatus,
+                                OpponentFinishCheckStatus = isP1 ? reloaded.Player2FinishCheckStatus : reloaded.Player1FinishCheckStatus,
+                                NextUiState = "COMPLETED",
+                                ServerNow = DateTime.UtcNow,
+                                MatchStatus = reloaded.StatusCode,
+                                Outcome = reloaded.Outcome,
+                                WinnerId = reloaded.WinnerId
+                            };
+                        }
+                        else
+                        {
+                            var signalRPayload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Player waiting for opponent.");
+                            await _notifier.NotifyPlayerWaitingOpponentAsync(match.Id, signalRPayload);
+                            await _notifier.NotifyFinishCheckUpdatedAsync(match.Id, signalRPayload);
+
+                            return new ObserveFinishFrameResponseDto
+                            {
+                                MatchId = match.Id,
+                                MeUserId = userId,
+                                FinishCheckStatus = "PASSED",
+                                WaitingForOpponent = true,
+                                OpponentResultStatus = isP1 ? match.Player2ResultStatus : match.Player1ResultStatus,
+                                OpponentFinishCheckStatus = isP1 ? match.Player2FinishCheckStatus : match.Player1FinishCheckStatus,
+                                NextUiState = "WAITING_OPPONENT",
+                                ServerNow = DateTime.UtcNow
+                            };
+                        }
+                    }
+                    else
+                    {
+                        var signalRPayload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Finish check failed. Match moved to review.");
+                        await _notifier.NotifyFinishCheckUpdatedAsync(match.Id, signalRPayload);
+                        await _notifier.NotifyMatchNeedsReviewAsync(match.Id, signalRPayload);
+
+                        return new ObserveFinishFrameResponseDto
+                        {
+                            MatchId = match.Id,
+                            MeUserId = userId,
+                            FinishCheckStatus = "FAILED",
+                            WaitingForOpponent = false,
+                            OpponentResultStatus = isP1 ? match.Player2ResultStatus : match.Player1ResultStatus,
+                            OpponentFinishCheckStatus = isP1 ? match.Player2FinishCheckStatus : match.Player1FinishCheckStatus,
+                            NextUiState = "NEEDS_REVIEW",
+                            ServerNow = DateTime.UtcNow,
+                            MatchStatus = match.StatusCode,
+                            Outcome = match.Outcome
+                        };
+                    }
                 }
-                else if (match.StatusCode == OnlineMatchStatus.READY.ToString())
+                else
                 {
-                    await _notifier.NotifyMatchReadyAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, "Match ready."));
+                    // SCRAMBLE validation completed — trigger event-driven auto-ready
+                    // This may transition the match to COUNTDOWN if both players' checklists are now complete
+                    await MarkCameraReadyUseCase.AutoReadyIfChecklistPassedAsync(
+                        match, userId, _matchRepo, _notifier, _uow);
                 }
 
                 return completedResponse;
@@ -335,10 +401,14 @@ internal static class OnlineArenaScannerFlow
 
         if (match.StatusCode is not nameof(OnlineMatchStatus.ONGOING) and not nameof(OnlineMatchStatus.PENDING_EVIDENCE))
             throw new InvalidOperationException("Finish scanner is only allowed after the match has started.");
-        if (match.Player1Id == userId && match.Player1ResultStatus == PlayerResultStatus.PENDING.ToString())
+
+        var isPlayer1 = match.Player1Id == userId;
+        var resultStatus = isPlayer1 ? match.Player1ResultStatus : match.Player2ResultStatus;
+
+        if (resultStatus == PlayerResultStatus.PENDING.ToString())
             throw new InvalidOperationException("Submit result before finish validation.");
-        if (match.Player2Id == userId && match.Player2ResultStatus == PlayerResultStatus.PENDING.ToString())
-            throw new InvalidOperationException("Submit result before finish validation.");
+        if (resultStatus == PlayerResultStatus.DNF.ToString())
+            throw new InvalidOperationException("Finish validation is not allowed for DNF results.");
     }
 
     public static string NormalizeValidationType(string validationType)
@@ -500,8 +570,7 @@ internal static class OnlineArenaScannerFlow
 
             SetPlayerReady(match, userId, passed);
             CubeStateValidationShared.ApplyLegacyPreCheckCompatibility(match, userId);
-            if (passed && MarkPlayerReadyUseCase.AllReady(match))
-                match.StatusCode = OnlineMatchStatus.READY.ToString();
+            // Auto-ready is handled by the caller (ObserveOnlineMatchScannerFrameUseCase) via AutoReadyIfChecklistPassedAsync
         }
         else
         {

@@ -16,6 +16,16 @@ public class OnlineProfile
     public int TotalLossesStandard { get; set; } = 0;
     public int TotalDrawsStandard { get; set; } = 0;
 
+    // === Matchmaking Cooldown (lưu tại profile, không phải MatchmakingQueue) ===
+    /// <summary>Player không được matchmaking cho đến thời điểm này (UTC).</summary>
+    public DateTime? MatchmakingCooldownUntil { get; set; }
+    /// <summary>Tổng số lần timeout setup phase (để tăng dần cooldown).</summary>
+    public int SetupTimeoutCount { get; set; } = 0;
+    /// <summary>Thời điểm bắt đầu đếm cửa sổ timeout (để reset count nếu user cải thiện).</summary>
+    public DateTime? SetupTimeoutWindowStartedAt { get; set; }
+    /// <summary>Lần timeout setup gần nhất.</summary>
+    public DateTime? LastSetupTimeoutAt { get; set; }
+
     // === ELO MEDLEY (dự phòng — chưa kích hoạt) ===
     public int? EloMedley { get; set; }
     public int? PeakEloMedley { get; set; }
