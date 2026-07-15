@@ -42,9 +42,12 @@ public class MarkWebRtcConnectedUseCase
         else
             match.Player2WebRtcConnected = true;
 
-        _matchRepo.Update(match);
         await _auditRepo.AddAsync(OnlineArenaAuditFactory.BuildAudit(match.Id, userId, "WEBRTC_CONNECTED", request));
-        await _uow.SaveChangesAsync();
+
+        // Event-driven auto-ready: if this player's checklist now passes, auto-set playerReady
+        // and transition to COUNTDOWN immediately if both players are ready.
+        await MarkCameraReadyUseCase.AutoReadyIfChecklistPassedAsync(
+            match, userId, _matchRepo, _notifier, _uow);
 
         var response = new WebRtcConnectionResponseDto
         {
@@ -57,7 +60,6 @@ public class MarkWebRtcConnectedUseCase
         };
 
         await _notifier.NotifyWebRtcConnectionUpdatedAsync(match.Id, response);
-        await _notifier.NotifyReadyStateUpdatedAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, response.Message));
         return response;
     }
 
@@ -77,17 +79,20 @@ public class MarkVideoRecordingStartedUseCase
     private readonly IOnlineMatchRepository _matchRepo;
     private readonly IOnlineMatchAuditLogRepository _auditRepo;
     private readonly IOnlineArenaRealtimeNotifier _notifier;
+    private readonly StartOnlineMatchUseCase _startMatchUseCase;
     private readonly IUnitOfWork _uow;
 
     public MarkVideoRecordingStartedUseCase(
         IOnlineMatchRepository matchRepo,
         IOnlineMatchAuditLogRepository auditRepo,
         IOnlineArenaRealtimeNotifier notifier,
+        StartOnlineMatchUseCase startMatchUseCase,
         IUnitOfWork uow)
     {
         _matchRepo = matchRepo;
         _auditRepo = auditRepo;
         _notifier = notifier;
+        _startMatchUseCase = startMatchUseCase;
         _uow = uow;
     }
 
@@ -96,8 +101,10 @@ public class MarkVideoRecordingStartedUseCase
         var match = await RequireParticipantMatchAsync(matchId, userId);
         if (OnlineArenaFlowHelpers.IsTerminal(match.StatusCode))
             throw new ConflictException($"Match is already terminal ({match.StatusCode}).");
-        if (match.StatusCode is not nameof(OnlineMatchStatus.CREATED) and not nameof(OnlineMatchStatus.READY))
-            throw new InvalidOperationException("Recording can only be marked during preparation.");
+
+        // Recording is ONLY valid during COUNTDOWN phase (StatusCode == READY)
+        if (match.StatusCode != nameof(OnlineMatchStatus.READY) || match.Phase != "COUNTDOWN")
+            throw new InvalidOperationException("Video recording can only be started during the COUNTDOWN phase.");
 
         if (match.Player1Id == userId)
         {
@@ -126,7 +133,13 @@ public class MarkVideoRecordingStartedUseCase
         };
 
         await _notifier.NotifyVideoRecordingStartedAsync(match.Id, response);
-        await _notifier.NotifyReadyStateUpdatedAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, response.Message));
+
+        // Event-driven: if both players have started recording, transition to INSPECTION immediately
+        if (OnlineArenaFlowHelpers.BothRecordingStarted(match))
+        {
+            await _startMatchUseCase.TransitionToInspectionAsync(match);
+        }
+
         return response;
     }
 

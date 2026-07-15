@@ -67,11 +67,9 @@ public class ConnectMobileTimerUseCase
         else
             match.Player2TimerReady = true;
 
-        if (match.StatusCode == OnlineMatchStatus.CREATED.ToString() && MarkPlayerReadyUseCase.AllReady(match))
-            match.StatusCode = OnlineMatchStatus.READY.ToString();
-
-        _matchRepo.Update(match);
-        await _uow.SaveChangesAsync();
+        // Event-driven auto-ready: evaluate checklist after timer connected
+        await MarkCameraReadyUseCase.AutoReadyIfChecklistPassedAsync(
+            match, userId, _matchRepo, _notifier, _uow);
 
         var response = new MobileTimerConnectResponseDto
         {
@@ -85,12 +83,6 @@ public class ConnectMobileTimerUseCase
         };
 
         await _notifier.NotifyTimerConnectedAsync(match.Id, response);
-        await _notifier.NotifyReadyStateUpdatedAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, "Timer connected."));
-        if (match.StatusCode == OnlineMatchStatus.READY.ToString())
-        {
-            await _notifier.NotifyMatchReadyAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, "Match ready."));
-        }
-
         return response;
     }
 }

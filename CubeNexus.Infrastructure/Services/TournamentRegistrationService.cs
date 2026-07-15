@@ -123,7 +123,24 @@ public class TournamentRegistrationService : ITournamentRegistrationService
     public async Task<List<RegistrationResultDto>> GetUserRegistrationsAsync(Guid userId, CancellationToken ct = default)
     {
         var registrations = await _unitOfWork.Registrations.GetUserRegistrationsAsync(userId, ct);
-        return registrations.Select(MapToDto).ToList();
+        
+        var regEventIds = registrations.SelectMany(r => r.OfflineRegistrationEvents).Select(ore => ore.Id).ToList();
+        Console.WriteLine($"[DEBUG] GetUserRegistrationsAsync: userId={userId}, registrations={registrations.Count}, regEventIds={regEventIds.Count} -> [{string.Join(", ", regEventIds.Take(5))}]");
+        
+        var groupCompetitors = regEventIds.Any()
+            ? await _unitOfWork.GroupCompetitors.FindAsync(gc => regEventIds.Contains(gc.RegistrationEventId), ct)
+            : new List<GroupCompetitor>();
+        var gcList = groupCompetitors.ToList();
+        Console.WriteLine($"[DEBUG] GroupCompetitors found: {gcList.Count} -> [{string.Join(", ", gcList.Select(gc => $"gc.RegEventId={gc.RegistrationEventId},gc.GroupId={gc.GroupId}").Take(5))}]");
+
+        var gcGroupIds = gcList.Select(gc => gc.GroupId).Distinct().ToList();
+        var groups = gcGroupIds.Any()
+            ? await _unitOfWork.Groups.FindAsync(g => gcGroupIds.Contains(g.Id), ct)
+            : new List<Group>();
+        var groupMap = groups.ToDictionary(g => g.Id);
+        Console.WriteLine($"[DEBUG] Groups found: {groupMap.Count} -> [{string.Join(", ", groupMap.Values.Select(g => $"{g.GroupName}:{g.StatusCode}").Take(5))}]");
+
+        return registrations.Select(r => MapToDto(r, gcList, groupMap)).ToList();
     }
 
     public async Task<RegistrationResultDto> GetUserRegistrationByIdAsync(Guid registrationId, Guid userId, CancellationToken ct = default)
@@ -132,10 +149,27 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         if (reg == null)
             throw new KeyNotFoundException($"Registration with ID {registrationId} not found.");
 
-        return MapToDto(reg);
+        var regEventIds = reg.OfflineRegistrationEvents.Select(ore => ore.Id).ToList();
+        var groupCompetitors = regEventIds.Any()
+            ? await _unitOfWork.GroupCompetitors.FindAsync(gc => regEventIds.Contains(gc.RegistrationEventId), ct)
+            : new List<GroupCompetitor>();
+        var gcList = groupCompetitors.ToList();
+
+        var gcGroupIds = gcList.Select(gc => gc.GroupId).Distinct().ToList();
+        var groups = gcGroupIds.Any()
+            ? await _unitOfWork.Groups.FindAsync(g => gcGroupIds.Contains(g.Id), ct)
+            : new List<Group>();
+        var groupMap = groups.ToDictionary(g => g.Id);
+
+        return MapToDto(reg, gcList, groupMap);
     }
 
     private RegistrationResultDto MapToDto(Registration r)
+    {
+        return MapToDto(r, new List<GroupCompetitor>(), new Dictionary<Guid, Group>());
+    }
+
+    private RegistrationResultDto MapToDto(Registration r, List<GroupCompetitor> gcList, Dictionary<Guid, Group> groupMap)
     {
         return new RegistrationResultDto
         {
@@ -146,16 +180,36 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             StatusCode = r.StatusCode,
             RegisteredAt = r.RegisteredAt,
             QrToken = r.QrToken,
-            RegisteredEvents = r.OfflineRegistrationEvents.Select(ore => new RegisteredEventDetailDto
-            {
-                RegistrationEventId = ore.Id,
-                EventId = ore.EventId,
-                PuzzleTypeName = ore.Event?.PuzzleType?.Name ?? string.Empty,
-                EventFormatCode = ore.Event?.EventFormatCode ?? string.Empty,
-                StatusCode = ore.StatusCode,
-                SeedTimeMs = ore.SeedTimeMs,
-                SeedSourceCode = ore.SeedSourceCode,
-                SeedGeneratedAt = ore.SeedGeneratedAt
+            TournamentStartDate = r.Tournament?.StartDate,
+            TournamentEndDate = r.Tournament?.EndDate,
+            TournamentStatusCode = r.Tournament?.StatusCode ?? string.Empty,
+            RegisteredEvents = r.OfflineRegistrationEvents.Select(ore => {
+                var gc = gcList.FirstOrDefault(c => c.RegistrationEventId == ore.Id);
+                CompetitorAssignmentDto? assignment = null;
+                if (gc != null && groupMap.TryGetValue(gc.GroupId, out var group))
+                {
+                    assignment = new CompetitorAssignmentDto
+                    {
+                        RoundNumber = group.RoundNumber,
+                        GroupId = group.Id,
+                        GroupName = group.GroupName ?? string.Empty,
+                        StationNumber = gc.StationNumber,
+                        GroupStatusCode = group.StatusCode,
+                        IsPublished = group.StatusCode != "PENDING"
+                    };
+                }
+                return new RegisteredEventDetailDto
+                {
+                    RegistrationEventId = ore.Id,
+                    EventId = ore.EventId,
+                    PuzzleTypeName = ore.Event?.PuzzleType?.Name ?? string.Empty,
+                    EventFormatCode = ore.Event?.EventFormatCode ?? string.Empty,
+                    StatusCode = ore.StatusCode,
+                    SeedTimeMs = ore.SeedTimeMs,
+                    SeedSourceCode = ore.SeedSourceCode,
+                    SeedGeneratedAt = ore.SeedGeneratedAt,
+                    Assignment = assignment
+                };
             }).ToList()
         };
     }
@@ -278,5 +332,103 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             .OrderBy(x => x.SeedTimeMs.HasValue ? 0 : 1)
             .ThenBy(x => x.SeedTimeMs)
             .ToList();
+    }
+
+    public async Task<List<TournamentRegistrationDetailDto>> GetTournamentRegistrationsAsync(Guid tournamentId, CancellationToken ct = default)
+    {
+        var list = await _unitOfWork.Registrations.GetTournamentRegistrationsAsync(tournamentId, ct);
+        return list.Select(r => new TournamentRegistrationDetailDto
+        {
+            RegistrationId = r.Id,
+            TournamentId = r.TournamentId,
+            TournamentName = r.Tournament?.Name ?? string.Empty,
+            UserId = r.UserId,
+            CompetitorName = r.User?.DisplayName ?? string.Empty,
+            Email = r.User?.Email ?? string.Empty,
+            CompetitorUserCode = r.User?.UserCode ?? string.Empty,
+            CompetitorAvatarUrl = r.User?.AvatarUrl,
+            StatusCode = r.StatusCode,
+            RegisteredAt = r.RegisteredAt,
+            CheckedInAt = r.CheckedInAt,
+            QrToken = r.QrToken,
+            RegisteredEvents = r.OfflineRegistrationEvents.Select(ore => new RegisteredEventDetailDto
+            {
+                RegistrationEventId = ore.Id,
+                EventId = ore.EventId,
+                PuzzleTypeName = ore.Event?.PuzzleType?.Name ?? string.Empty,
+                EventFormatCode = ore.Event?.EventFormatCode ?? string.Empty,
+                StatusCode = ore.StatusCode,
+                SeedTimeMs = ore.SeedTimeMs,
+                SeedSourceCode = ore.SeedSourceCode,
+                SeedGeneratedAt = ore.SeedGeneratedAt
+            }).ToList()
+        }).ToList();
+    }
+
+    public async Task<RegistrationResultDto> UpdateRegistrationStatusAsync(Guid registrationId, string status, CancellationToken ct = default)
+    {
+        var temp = await _unitOfWork.Registrations.GetByIdAsync(registrationId, ct);
+        if (temp == null)
+            throw new KeyNotFoundException($"Registration with ID {registrationId} not found.");
+
+        var registration = await _unitOfWork.Registrations.GetRegistrationWithEventsAsync(registrationId, temp.UserId, ct);
+        if (registration == null)
+            throw new KeyNotFoundException($"Registration with ID {registrationId} not found.");
+
+        var validStatuses = new[] { "PENDING", "CONFIRMED", "CANCELLED", "CHECKED_IN" };
+        var normalizedStatus = status.ToUpperInvariant();
+        if (!validStatuses.Contains(normalizedStatus))
+            throw new InvalidOperationException($"Invalid registration status: {status}");
+
+        registration.StatusCode = normalizedStatus;
+        if (normalizedStatus == "CANCELLED")
+        {
+            foreach (var ore in registration.OfflineRegistrationEvents)
+            {
+                ore.StatusCode = "WITHDRAWN";
+            }
+        }
+        else if (normalizedStatus == "CONFIRMED" || normalizedStatus == "CHECKED_IN")
+        {
+            foreach (var ore in registration.OfflineRegistrationEvents)
+            {
+                if (ore.StatusCode == "WITHDRAWN")
+                {
+                    ore.StatusCode = "REGISTERED";
+                }
+            }
+        }
+
+        _unitOfWork.Registrations.Update(registration);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        return MapToDto(registration);
+    }
+
+    public async Task<RegistrationResultDto> ManuallyCheckInAsync(Guid registrationId, CancellationToken ct = default)
+    {
+        var temp = await _unitOfWork.Registrations.GetByIdAsync(registrationId, ct);
+        if (temp == null)
+            throw new KeyNotFoundException($"Registration with ID {registrationId} not found.");
+
+        var registration = await _unitOfWork.Registrations.GetRegistrationWithEventsAsync(registrationId, temp.UserId, ct);
+        if (registration == null)
+            throw new KeyNotFoundException($"Registration with ID {registrationId} not found.");
+
+        registration.StatusCode = "CHECKED_IN";
+        registration.CheckedInAt = DateTime.UtcNow;
+
+        foreach (var ore in registration.OfflineRegistrationEvents)
+        {
+            if (ore.StatusCode == "WITHDRAWN")
+            {
+                ore.StatusCode = "REGISTERED";
+            }
+        }
+
+        _unitOfWork.Registrations.Update(registration);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        return MapToDto(registration);
     }
 }

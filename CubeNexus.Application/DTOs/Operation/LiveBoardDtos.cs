@@ -26,6 +26,8 @@ public class LiveBoardCompetitorDto
 {
     public Guid GroupCompetitorId { get; set; }
     public string CompetitorName { get; set; } = string.Empty;
+    public string CompetitorUserCode { get; set; } = string.Empty;
+    public string? CompetitorAvatarUrl { get; set; }
     public int? StationNumber { get; set; }
     public string CompetitorStatus { get; set; } = string.Empty;
     public Guid GroupId { get; set; }

@@ -215,3 +215,94 @@ public class VideoRecordingStartedResponseDto
     public DateTime RecordingStartedAt { get; set; }
     public string StatusCode { get; set; } = string.Empty;
 }
+
+public class SubmitSolveTimeResponseDto
+{
+    public Guid MatchId { get; set; }
+    public Guid MeUserId { get; set; }
+    public string MyResultStatus { get; set; } = string.Empty;
+    public int? MyTimeMs { get; set; }
+    public string MyFinishCheckStatus { get; set; } = string.Empty;
+    public string OpponentResultStatus { get; set; } = string.Empty;
+    public string OpponentFinishCheckStatus { get; set; } = string.Empty;
+    public bool CanStartFinishCheck { get; set; }
+    public string MatchPhase { get; set; } = string.Empty;
+    public DateTime ServerNow { get; set; }
+}
+
+public class OnlineArenaScannerStartResponseDto
+{
+    public Guid ScanSessionId { get; set; }
+    public string? AiSessionId { get; set; }
+    public int ScanGeneration { get; set; }
+    public int RequestedFaceIndex { get; set; }
+    public string ScanStatus { get; set; } = string.Empty;
+    public string FinishCheckStatus { get; set; } = string.Empty;
+    public DateTime ServerNow { get; set; }
+}
+
+public class ObserveFinishFrameResponseDto
+{
+    public Guid MatchId { get; set; }
+    public Guid MeUserId { get; set; }
+    public string FinishCheckStatus { get; set; } = string.Empty;
+    public bool WaitingForOpponent { get; set; }
+    public string OpponentResultStatus { get; set; } = string.Empty;
+    public string OpponentFinishCheckStatus { get; set; } = string.Empty;
+    public string NextUiState { get; set; } = string.Empty;
+    public DateTime ServerNow { get; set; }
+
+    // If completed
+    public string? MatchStatus { get; set; }
+    public string? Outcome { get; set; }
+    public Guid? WinnerId { get; set; }
+}
+
+public class RecoveryPlayerStateDto
+{
+    public Guid UserId { get; set; }
+    public string? DisplayName { get; set; }
+    public string ResultStatus { get; set; } = string.Empty;
+    public int? TimeMs { get; set; }
+    public string FinishCheckStatus { get; set; } = string.Empty;
+    public bool IsReady { get; set; }
+    /// <summary>All ROOM_SETUP checklist items complete (camera + webrtc + timer + scramble PASSED). Auto-set by backend.</summary>
+    public bool ChecklistPassed { get; set; }
+    public string ScrambleCheckStatus { get; set; } = string.Empty;
+    public bool CameraReady { get; set; }
+    public bool WebRtcConnected { get; set; }
+    public bool RecordingStarted { get; set; }
+    public bool TimerReady { get; set; }
+}
+
+public class RecoveryMeStateDto
+{
+    public Guid UserId { get; set; }
+    public bool CanSubmitTime { get; set; }
+    public bool CanStartFinishCheck { get; set; }
+    public bool CanWatchOpponent { get; set; }
+    public string NextUiState { get; set; } = string.Empty;
+}
+
+public class OnlineMatchRecoveryStateDto
+{
+    public Guid MatchId { get; set; }
+    public string StatusCode { get; set; } = string.Empty;
+    public string Phase { get; set; } = string.Empty;
+    public string? QrSessionCode { get; set; }
+    public DateTime? SetupDeadlineAt { get; set; }
+    public DateTime? CountdownEndsAt { get; set; }
+    public string? ScrambleSequence { get; set; }
+    public DateTime? InspectionDeadlineAt { get; set; }
+    public DateTime? SolveDeadlineAt { get; set; }
+    public string? Outcome { get; set; }
+    public Guid? WinnerId { get; set; }
+    public int? Player1EloBefore { get; set; }
+    public int? Player2EloBefore { get; set; }
+    public int? Player1EloAfter { get; set; }
+    public int? Player2EloAfter { get; set; }
+    public DateTime ServerNow { get; set; }
+    public RecoveryPlayerStateDto Player1 { get; set; } = null!;
+    public RecoveryPlayerStateDto Player2 { get; set; } = null!;
+    public RecoveryMeStateDto Me { get; set; } = null!;
+}

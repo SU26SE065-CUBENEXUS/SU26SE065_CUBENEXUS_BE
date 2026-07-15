@@ -12,6 +12,10 @@ public class RegistrationResultDto
     // Serialized JSON of RegistrationQrPayload or similar representation
     public string QrToken { get; set; } = string.Empty;
 
+    public DateTime? TournamentStartDate { get; set; }
+    public DateTime? TournamentEndDate { get; set; }
+    public string TournamentStatusCode { get; set; } = string.Empty;
+
     public List<RegisteredEventDetailDto> RegisteredEvents { get; set; } = new();
 }
 
@@ -25,6 +29,18 @@ public class RegisteredEventDetailDto
     public int? SeedTimeMs { get; set; }
     public string? SeedSourceCode { get; set; }
     public DateTime? SeedGeneratedAt { get; set; }
+    public CompetitorAssignmentDto? Assignment { get; set; }
+}
+
+public class CompetitorAssignmentDto
+{
+    public int RoundNumber { get; set; }
+    public Guid GroupId { get; set; }
+    public string GroupName { get; set; } = string.Empty;
+    public int? StationNumber { get; set; }
+    public string GroupStatusCode { get; set; } = string.Empty;
+    public DateTime? ScheduledAt { get; set; }
+    public bool IsPublished { get; set; }
 }
 
 public class RegistrationQrPayload

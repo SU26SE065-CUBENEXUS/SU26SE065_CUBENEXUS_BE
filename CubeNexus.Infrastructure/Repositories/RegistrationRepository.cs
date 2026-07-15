@@ -61,12 +61,38 @@ public class RegistrationRepository : Repository<Registration>, IRegistrationRep
 
     public async Task<Registration?> GetByQrTokenAsync(string qrToken, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(qrToken)) return null;
+
         return await _set
             .Include(r => r.Tournament)
             .Include(r => r.User)
             .Include(r => r.OfflineRegistrationEvents)
                 .ThenInclude(ore => ore.Event)
                     .ThenInclude(e => e.PuzzleType)
-            .FirstOrDefaultAsync(r => r.QrToken == qrToken, ct);
+            .FirstOrDefaultAsync(r => r.QrToken == qrToken || r.QrToken.Contains(qrToken), ct);
+    }
+
+    public async Task<Registration?> GetRegistrationWithDetailsAsync(Guid registrationId, CancellationToken ct = default)
+    {
+        return await _set
+            .Include(r => r.Tournament)
+            .Include(r => r.User)
+            .Include(r => r.OfflineRegistrationEvents)
+                .ThenInclude(ore => ore.Event)
+                    .ThenInclude(e => e.PuzzleType)
+            .FirstOrDefaultAsync(r => r.Id == registrationId, ct);
+    }
+
+    public async Task<List<Registration>> GetTournamentRegistrationsAsync(Guid tournamentId, CancellationToken ct = default)
+    {
+        return await _set
+            .Include(r => r.Tournament)
+            .Include(r => r.User)
+            .Include(r => r.OfflineRegistrationEvents)
+                .ThenInclude(ore => ore.Event)
+                    .ThenInclude(e => e.PuzzleType)
+            .Where(r => r.TournamentId == tournamentId)
+            .OrderByDescending(r => r.RegisteredAt)
+            .ToListAsync(ct);
     }
 }

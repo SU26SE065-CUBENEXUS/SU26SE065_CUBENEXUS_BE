@@ -35,6 +35,7 @@ public class ApplicationDbContext : DbContext
     // 3. Online Arena
     public DbSet<OnlineProfile> OnlineProfiles => Set<OnlineProfile>();
     public DbSet<MatchmakingQueue> MatchmakingQueues => Set<MatchmakingQueue>();
+    public DbSet<OnlineMatchConfirmation> OnlineMatchConfirmations => Set<OnlineMatchConfirmation>();
     public DbSet<OnlineMatch> OnlineMatches => Set<OnlineMatch>();
     public DbSet<OnlineMatchAiCheck> OnlineMatchAiChecks => Set<OnlineMatchAiCheck>();
     public DbSet<OnlineMatchVideoEvidence> OnlineMatchVideoEvidences => Set<OnlineMatchVideoEvidence>();
@@ -43,9 +44,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<EloHistory> EloHistories => Set<EloHistory>();
     public DbSet<FraudReport> FraudReports => Set<FraudReport>();
 
-    // 4. Async Tournament
-    public DbSet<AsyncTournament> AsyncTournaments => Set<AsyncTournament>();
-    public DbSet<AsyncSubmission> AsyncSubmissions => Set<AsyncSubmission>();
 
     // 5. Practice
     public DbSet<PracticeSession> PracticeSessions => Set<PracticeSession>();
@@ -86,6 +84,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<ResultAuditLog>().ToTable("result_audit_logs");
         modelBuilder.Entity<OnlineProfile>().ToTable("online_profiles");
         modelBuilder.Entity<MatchmakingQueue>().ToTable("matchmaking_queue");
+        modelBuilder.Entity<OnlineMatchConfirmation>().ToTable("online_match_confirmations");
         modelBuilder.Entity<OnlineMatch>().ToTable("online_matches");
         modelBuilder.Entity<OnlineMatchAiCheck>().ToTable("online_match_ai_checks");
         modelBuilder.Entity<OnlineMatchVideoEvidence>().ToTable("online_match_video_evidence");
@@ -93,8 +92,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<MobileTimerSession>().ToTable("mobile_timer_sessions");
         modelBuilder.Entity<EloHistory>().ToTable("elo_history");
         modelBuilder.Entity<FraudReport>().ToTable("fraud_reports");
-        modelBuilder.Entity<AsyncTournament>().ToTable("async_tournaments");
-        modelBuilder.Entity<AsyncSubmission>().ToTable("async_submissions");
+
         modelBuilder.Entity<PracticeSession>().ToTable("practice_sessions");
         modelBuilder.Entity<PracticeAttempt>().ToTable("practice_attempts");
         modelBuilder.Entity<PracticeSolve>().ToTable("practice_solves");
@@ -175,6 +173,7 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.Player1).WithMany().HasForeignKey(e => e.Player1Id);
             entity.HasOne(e => e.Player2).WithMany().HasForeignKey(e => e.Player2Id);
             entity.HasOne(e => e.Winner).WithMany().HasForeignKey(e => e.WinnerId);
+            entity.HasOne(e => e.TimeoutPlayer).WithMany().HasForeignKey(e => e.TimeoutPlayerId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId);
             // Player profile FK — cần map rõ ràng vì EF không tự suy ra từ tên
             entity.HasOne(e => e.Player1Profile).WithMany().HasForeignKey(e => e.Player1ProfileId).OnDelete(DeleteBehavior.Restrict);
@@ -215,22 +214,18 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.Match).WithMany().HasForeignKey(e => e.MatchId);
         });
 
-        modelBuilder.Entity<AsyncTournament>(entity =>
-        {
-            entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedBy);
-            entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId);
-        });
-
-        modelBuilder.Entity<AsyncSubmission>(entity =>
-        {
-            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
-            entity.HasOne(e => e.ReviewedByUser).WithMany().HasForeignKey(e => e.ReviewedBy);
-            entity.HasOne(e => e.AsyncTournament).WithMany().HasForeignKey(e => e.AsyncTournamentId);
-        });
 
         modelBuilder.Entity<OnlineProfile>(entity =>
         {
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        });
+
+        modelBuilder.Entity<OnlineMatchConfirmation>(entity =>
+        {
+            entity.HasOne(e => e.Player1).WithMany().HasForeignKey(e => e.Player1UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Player2).WithMany().HasForeignKey(e => e.Player2UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Match).WithMany().HasForeignKey(e => e.MatchId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<MatchmakingQueue>(entity =>

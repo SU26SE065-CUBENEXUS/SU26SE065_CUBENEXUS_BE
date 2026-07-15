@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,6 +22,7 @@ public class TournamentOperationController : ControllerBase
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IAdvanceRoundUseCase _advanceRoundUseCase;
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase _verifyJudgeStationByStationUseCase;
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase _correctResultUseCase;
+    private readonly CubeNexus.Application.Interfaces.Repositories.IUnitOfWork _unitOfWork;
 
     public TournamentOperationController(
         ITournamentOperationService operationService,
@@ -31,7 +33,8 @@ public class TournamentOperationController : ControllerBase
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICompleteEventUseCase completeEventUseCase,
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IAdvanceRoundUseCase advanceRoundUseCase,
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase verifyJudgeStationByStationUseCase,
-        CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase correctResultUseCase)
+        CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase correctResultUseCase,
+        CubeNexus.Application.Interfaces.Repositories.IUnitOfWork unitOfWork)
     {
         _operationService = operationService;
         _checkInUseCase = checkInUseCase;
@@ -42,6 +45,7 @@ public class TournamentOperationController : ControllerBase
         _advanceRoundUseCase = advanceRoundUseCase;
         _verifyJudgeStationByStationUseCase = verifyJudgeStationByStationUseCase;
         _correctResultUseCase = correctResultUseCase;
+        _unitOfWork = unitOfWork;
     }
 
     /// <summary>
@@ -340,6 +344,42 @@ public class TournamentOperationController : ControllerBase
 
 
     /// <summary>
+    /// Lấy mã QR ticket của competitor đã đăng ký giải đấu (COMPETITOR, JUDGE, MANAGER, ADMIN).
+    /// </summary>
+    [HttpGet("api/tournament-operation/competitor/qr-ticket")]
+    [Authorize]
+    public async Task<IActionResult> GetCompetitorQrTicket([FromQuery] Guid tournamentId, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!Guid.TryParse(userIdString, out var userId))
+                return Unauthorized(new { message = "Invalid user token." });
+
+            var registration = await _unitOfWork.Registrations.FirstOrDefaultAsync(
+                r => r.TournamentId == tournamentId && r.UserId == userId,
+                ct
+            );
+
+            if (registration == null)
+                return NotFound(new { message = "You are not registered for this tournament." });
+
+            return Ok(new
+            {
+                RegistrationId = registration.Id,
+                QrToken = registration.QrToken,
+                CheckedInAt = registration.CheckedInAt,
+                StatusCode = registration.StatusCode
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+
+    /// <summary>
     /// Xác thực thông tin đấu thủ qua mã QR và tự động resolve GroupId theo trạm của trọng tài (JUDGE, MANAGER, ADMIN).
     /// </summary>
     [HttpPost("api/tournament-operation/judge/verify-by-station")]
@@ -358,6 +398,37 @@ public class TournamentOperationController : ControllerBase
         catch (Exception ex)
         {
             return StatusCode(500, new { message = "An error occurred while verifying the competitor at the station.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Load roster assigned to a specific Group/Station for station judge flow (JUDGE, MANAGER, ADMIN).
+    /// </summary>
+    [HttpGet("api/tournament-operation/judge/station-roster")]
+    [Authorize(Roles = "JUDGE,MANAGER,ADMIN")]
+    public async Task<IActionResult> GetJudgeStationRoster(
+        [FromQuery] Guid eventId,
+        [FromQuery] int roundNumber,
+        [FromQuery] int groupNumber,
+        [FromQuery] int stationNumber,
+        CancellationToken ct)
+    {
+        try
+        {
+            var result = await _operationService.GetJudgeStationRosterAsync(eventId, roundNumber, groupNumber, stationNumber, ct);
+            return Ok(result);
+        }
+        catch (CubeNexus.Application.Exceptions.CustomException ex)
+        {
+            return HandleCustomException(ex);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while loading station roster.", detail = ex.Message });
         }
     }
 
@@ -454,11 +525,66 @@ public class TournamentOperationController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Lấy danh sách các loại Penalty (JUDGE, MANAGER, ADMIN, COMPETITOR).
+    /// </summary>
+    [HttpGet("api/tournament-operation/penalty-types")]
+    [Authorize]
+    public async Task<IActionResult> GetPenaltyTypes(CancellationToken ct)
+    {
+        try
+        {
+            var penaltyTypes = await _unitOfWork.PenaltyTypes.GetAllAsync(ct);
+            return Ok(penaltyTypes);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while fetching penalty types.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Lấy danh sách Scramble của một Group cụ thể (MANAGER, ADMIN, JUDGE).
+    /// </summary>
+    [HttpGet("api/tournament-operation/groups/{groupId:guid}/scrambles")]
+    [Authorize(Roles = "MANAGER,ADMIN,JUDGE")]
+    public async Task<IActionResult> GetGroupScrambles(Guid groupId, CancellationToken ct)
+    {
+        try
+        {
+            var scrambleSet = await _unitOfWork.ScrambleSets.FirstOrDefaultAsync(ss => ss.GroupId == groupId, ct);
+            if (scrambleSet == null)
+            {
+                return NotFound(new { message = "Scramble set not found for this group." });
+            }
+
+            var scrambles = await _unitOfWork.Scrambles.FindAsync(s => s.ScrambleSetId == scrambleSet.Id, ct);
+            var sortedScrambles = scrambles
+                .OrderBy(s => s.SortOrder)
+                .Select(s => new
+                {
+                    id = s.Id,
+                    solveNumber = s.SolveNumber,
+                    puzzleTypeId = s.PuzzleTypeId,
+                    sequence = s.Sequence,
+                    sortOrder = s.SortOrder
+                })
+                .ToList();
+
+            return Ok(sortedScrambles);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while fetching group scrambles.", detail = ex.Message });
+        }
+    }
+
     private IActionResult HandleCustomException(CubeNexus.Application.Exceptions.CustomException ex)
     {
         var response = new Dictionary<string, object>
         {
             { "code", ex.ErrorCode },
+            { "errorCode", ex.ErrorCode },
             { "message", ex.Message }
         };
         if (ex.ExtraData is Dictionary<string, object> dict)

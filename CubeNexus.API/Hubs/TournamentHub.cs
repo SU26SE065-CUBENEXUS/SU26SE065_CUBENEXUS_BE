@@ -41,4 +41,24 @@ public class TournamentHub : Hub
             CompetitorName = competitorName
         });
     }
+
+    // Register a judge station to its specific station group for commands (e.g. LOCK_STATION)
+    public async Task RegisterJudgeStation(string eventId, int roundNumber, int stationNumber)
+    {
+        await Groups.AddToGroupAsync(Context.ConnectionId, $"station:{eventId}:round:{roundNumber}:station:{stationNumber}");
+    }
+
+    // Broadcast station state updates to the event group (Live Board, Manager, Admin)
+    public async Task UpdateStationState(string eventId, int roundNumber, int stationNumber, string state, string competitorName)
+    {
+        await Clients.Group($"event:{eventId}:round:{roundNumber}")
+            .SendAsync("ReceiveStationStateUpdate", new
+            {
+                EventId = eventId,
+                RoundNumber = roundNumber,
+                StationNumber = stationNumber,
+                State = state,
+                CompetitorName = competitorName
+            });
+    }
 }

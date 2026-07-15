@@ -123,6 +123,7 @@ public class VerifyJudgeStationByStationDto
     public string QrToken { get; set; } = string.Empty;
     public Guid EventId { get; set; }
     public int RoundNumber { get; set; }
+    public int GroupNumber { get; set; }
     public int StationNumber { get; set; }
 }
 
@@ -137,11 +138,36 @@ public class VerifyJudgeStationResponseDto
     public int? RoundNumber { get; set; }
     public Guid? GroupId { get; set; }
     public string GroupName { get; set; } = string.Empty;
+    public string CompetitorName { get; set; } = string.Empty;
     public int? StationNumber { get; set; }
     public int? NextSolveNumber { get; set; }
     public int? SolveCount { get; set; }
     public bool CanSubmit { get; set; }
     public ScrambleInfoDto? CurrentScramble { get; set; }
+}
+
+public class JudgeStationRosterItemDto
+{
+    public Guid GroupCompetitorId { get; set; }
+    public Guid GroupId { get; set; }
+    public string GroupName { get; set; } = string.Empty;
+    public string CompetitorName { get; set; } = string.Empty;
+    public Guid EventId { get; set; }
+    public string EventName { get; set; } = string.Empty;
+    public int RoundNumber { get; set; }
+    public int StationNumber { get; set; }
+    public int SolveCount { get; set; }
+    public int SubmittedCount { get; set; }
+    public int? NextSolveNumber { get; set; }
+    public bool CanSubmit { get; set; }
+    public string Status { get; set; } = string.Empty;
+}
+
+public class JudgeStationRosterResponseDto
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public List<JudgeStationRosterItemDto> Competitors { get; set; } = new();
 }
 
 public class ResultCorrectionDto
@@ -190,4 +216,3 @@ public class PenaltyTypeDto
     public int TimeAdditionMs { get; set; }
     public bool IsDisqualified { get; set; }
 }
-

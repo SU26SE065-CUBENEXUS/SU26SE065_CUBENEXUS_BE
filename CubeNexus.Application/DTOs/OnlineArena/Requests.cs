@@ -28,6 +28,16 @@ public class SubmitOnlineResultRequest
     public bool IsDnf { get; set; }
 }
 
+public class SubmitSolveTimeRequest
+{
+    public Guid MatchId { get; set; }
+    public Guid MobileTimerSessionId { get; set; }
+    public string DeviceSessionToken { get; set; } = string.Empty;
+    public int? TimeMs { get; set; }
+    public bool IsDnf { get; set; }
+    public DateTime StoppedAt { get; set; }
+}
+
 public class OnlineArenaScannerObserveRequest
 {
     public string ScanSessionId { get; set; } = string.Empty;

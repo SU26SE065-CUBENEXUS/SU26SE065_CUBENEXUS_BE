@@ -123,6 +123,75 @@ public class TournamentManagementController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// GET /api/tournament-management/tournaments/{tournamentId}/registrations
+    /// Lấy danh sách toàn bộ đăng ký của giải đấu (ADMIN, MANAGER).
+    /// </summary>
+    [HttpGet("api/tournament-management/tournaments/{tournamentId:guid}/registrations")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> GetTournamentRegistrations(Guid tournamentId, System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            var result = await _registrationService.GetTournamentRegistrationsAsync(tournamentId, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while fetching registrations.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// PATCH /api/tournament-management/registrations/{registrationId}/status
+    /// Phê duyệt hoặc hủy đăng ký của competitor (ADMIN, MANAGER).
+    /// </summary>
+    [HttpPatch("api/tournament-management/registrations/{registrationId:guid}/status")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> UpdateRegistrationStatus(Guid registrationId, [FromBody] UpdateRegistrationStatusDto dto, System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            var result = await _registrationService.UpdateRegistrationStatusAsync(registrationId, dto.Status, ct);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while updating status.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// POST /api/tournament-management/registrations/{registrationId}/check-in
+    /// Điểm danh thủ công tại quầy cho competitor (ADMIN, MANAGER).
+    /// </summary>
+    [HttpPost("api/tournament-management/registrations/{registrationId:guid}/check-in")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> ManuallyCheckIn(Guid registrationId, System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            var result = await _registrationService.ManuallyCheckInAsync(registrationId, ct);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while performing check-in.", detail = ex.Message });
+        }
+    }
+
     private IActionResult HandleCustomException(CubeNexus.Application.Exceptions.CustomException ex)
     {
         var response = new Dictionary<string, object>
