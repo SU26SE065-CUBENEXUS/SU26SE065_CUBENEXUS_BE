@@ -35,6 +35,7 @@ public class EventDetailDto
     public int SolveCount { get; set; }
     public int? SortOrder { get; set; }
     public int? MaxCapacity { get; set; }
+    public string RegistrationStatusCode { get; set; } = string.Empty;
     
     public List<MedleyPuzzleDetailDto> MedleyPuzzles { get; set; } = new();
 }
