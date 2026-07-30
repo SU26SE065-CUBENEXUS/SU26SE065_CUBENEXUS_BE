@@ -19,6 +19,7 @@ public class ApplicationDbContext : DbContext
     // 2. Offline Tournament
     public DbSet<Tournament> Tournaments => Set<Tournament>();
     public DbSet<TournamentManager> TournamentManagers => Set<TournamentManager>();
+    public DbSet<TournamentJudge> TournamentJudges => Set<TournamentJudge>();
     public DbSet<Event> Events => Set<Event>();
     public DbSet<MedleyEventPuzzle> MedleyEventPuzzles => Set<MedleyEventPuzzle>();
     public DbSet<Registration> Registrations => Set<Registration>();
@@ -70,6 +71,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<EloConfig>().ToTable("elo_config");
         modelBuilder.Entity<Tournament>().ToTable("tournaments");
         modelBuilder.Entity<TournamentManager>().ToTable("tournament_managers");
+        modelBuilder.Entity<TournamentJudge>().ToTable("tournament_judges");
         modelBuilder.Entity<Event>().ToTable("events");
         modelBuilder.Entity<MedleyEventPuzzle>().ToTable("medley_event_puzzles");
         modelBuilder.Entity<Registration>().ToTable("registrations");
@@ -112,10 +114,18 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.Tournament).WithMany().HasForeignKey(e => e.TournamentId);
         });
 
-        modelBuilder.Entity<Registration>(entity =>
+        modelBuilder.Entity<TournamentJudge>(entity =>
         {
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
             entity.HasOne(e => e.Tournament).WithMany().HasForeignKey(e => e.TournamentId);
+        });
+
+        modelBuilder.Entity<Registration>(entity =>
+        {
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+            entity.HasOne(e => e.Tournament).WithMany(t => t.Registrations).HasForeignKey(e => e.TournamentId);
+            // Index to speed up participant count queries per tournament
+            entity.HasIndex(e => new { e.TournamentId, e.StatusCode }).HasDatabaseName("ix_registrations_tournament_status");
         });
 
         modelBuilder.Entity<OfflineRegistrationEvent>(entity =>

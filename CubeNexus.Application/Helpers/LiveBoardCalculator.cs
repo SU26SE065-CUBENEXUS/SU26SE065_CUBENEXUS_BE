@@ -40,7 +40,9 @@ public static class LiveBoardCalculator
                 PenaltyCode = res.PenaltyTypeId.HasValue && penaltyTypeMap.TryGetValue(res.PenaltyTypeId.Value, out var pt) ? pt.Code : "NONE",
                 IsDnf = res.IsDnf,
                 IsLocked = res.IsLocked,
-                SubmittedAt = res.SubmittedAt
+                SubmittedAt = res.SubmittedAt,
+                EsignatureData = res.EsignatureData,
+                EvidencePhotoUrl = res.EvidencePhotoUrl
             }).ToList();
 
             int completedSolves = compResults.Count;

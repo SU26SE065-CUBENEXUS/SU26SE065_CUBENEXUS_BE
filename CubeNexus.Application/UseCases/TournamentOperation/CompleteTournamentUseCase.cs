@@ -27,13 +27,18 @@ public class CompleteTournamentUseCase : ICompleteTournamentUseCase
 
         if (tournament.StatusCode == "COMPLETED")
         {
-            throw new CustomException("TOURNAMENT_ALREADY_COMPLETED", "This tournament is already completed.", 409);
+            return new OperationResultDto
+            {
+                Success = true,
+                Message = "This tournament is already completed."
+            };
         }
 
         var events = await _unitOfWork.Events.FindAsync(e => e.TournamentId == tournamentId);
-        if (events.Any(e => e.RegistrationStatusCode != "CLOSED"))
+        foreach (var ev in events)
         {
-            throw new CustomException("TOURNAMENT_NOT_READY_TO_COMPLETE", "Cannot complete tournament because some events are not completed yet.", 409);
+            ev.RegistrationStatusCode = "CLOSED";
+            _unitOfWork.Events.Update(ev);
         }
 
         tournament.StatusCode = "COMPLETED";

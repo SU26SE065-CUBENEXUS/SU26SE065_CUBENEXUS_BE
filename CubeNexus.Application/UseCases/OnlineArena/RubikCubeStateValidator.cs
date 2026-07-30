@@ -18,6 +18,14 @@ internal sealed class CubeStateComparisonResult
     public List<CubeScanStickerMismatchDto> Mismatches { get; init; } = [];
 }
 
+internal sealed class BatchScrambleValidationResult
+{
+    public bool IsValid { get; init; }
+    public bool IsMatchAll { get; init; }
+    public string? Reason { get; init; }
+    public List<string> MismatchedCenterColors { get; init; } = [];
+}
+
 internal static class RubikCubeStateValidator
 {
     private static readonly string[] Faces = ["U", "R", "F", "D", "L", "B"];
@@ -31,6 +39,151 @@ internal static class RubikCubeStateValidator
         ["L"] = "orange",
         ["B"] = "blue"
     };
+
+    private static readonly Dictionary<string, string> ColorToFaceMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["white"] = "U",
+        ["yellow"] = "D",
+        ["green"] = "F",
+        ["blue"] = "B",
+        ["red"] = "R",
+        ["orange"] = "L"
+    };
+
+    public static BatchScrambleValidationResult ValidateScrambleBatch(
+        string scrambleSequence,
+        List<ScrambleCheckBatchFaceDto> faces)
+    {
+        if (faces == null || faces.Count != 5)
+        {
+            return new BatchScrambleValidationResult
+            {
+                IsValid = false,
+                Reason = "Scramble check requires exactly 5 scanned faces."
+            };
+        }
+
+        var validColorSet = Colors.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var centers = faces.Select(f => (f.CenterColor ?? string.Empty).Trim().ToLowerInvariant()).ToList();
+
+        if (centers.Any(c => !validColorSet.Contains(c)))
+        {
+            return new BatchScrambleValidationResult
+            {
+                IsValid = false,
+                Reason = "Batch contains an invalid center color."
+            };
+        }
+
+        if (centers.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 5)
+        {
+            return new BatchScrambleValidationResult
+            {
+                IsValid = false,
+                Reason = "Faces in batch must have 5 distinct center colors."
+            };
+        }
+
+        var expectedState = BuildExpectedCubeStateForScramble(scrambleSequence);
+        var mismatchedCenters = new List<string>();
+
+        foreach (var faceDto in faces)
+        {
+            var centerColor = (faceDto.CenterColor ?? string.Empty).Trim().ToLowerInvariant();
+
+            List<string> observedStickers = [];
+            if (faceDto.Grid3x3 != null && faceDto.Grid3x3.Count == 3 && faceDto.Grid3x3.All(r => r.Count == 3))
+            {
+                observedStickers = faceDto.Grid3x3.SelectMany(r => r).Select(c => c.Trim().ToLowerInvariant()).ToList();
+            }
+            else if (faceDto.Stickers != null && faceDto.Stickers.Count == 9)
+            {
+                observedStickers = faceDto.Stickers.Select(c => c.Trim().ToLowerInvariant()).ToList();
+            }
+            else
+            {
+                return new BatchScrambleValidationResult
+                {
+                    IsValid = false,
+                    Reason = $"Face with center '{centerColor}' does not contain exactly 9 stickers."
+                };
+            }
+
+            if (observedStickers.Any(c => !validColorSet.Contains(c)))
+            {
+                return new BatchScrambleValidationResult
+                {
+                    IsValid = false,
+                    Reason = $"Face with center '{centerColor}' contains an invalid sticker color."
+                };
+            }
+
+            if (!string.Equals(observedStickers[4], centerColor, StringComparison.OrdinalIgnoreCase))
+            {
+                return new BatchScrambleValidationResult
+                {
+                    IsValid = false,
+                    Reason = $"Center sticker (index 4) of face '{centerColor}' must match its center color."
+                };
+            }
+
+            if (!ColorToFaceMap.TryGetValue(centerColor, out var logicalFace))
+            {
+                return new BatchScrambleValidationResult
+                {
+                    IsValid = false,
+                    Reason = $"Center color '{centerColor}' cannot be mapped to a logical face."
+                };
+            }
+
+            var expectedStickers = expectedState[logicalFace]
+                .SelectMany(row => row)
+                .Select(c => c.Trim().ToLowerInvariant())
+                .ToList();
+
+            if (!MatchesAnyRotation(observedStickers, expectedStickers))
+            {
+                mismatchedCenters.Add(centerColor.ToUpperInvariant());
+            }
+        }
+
+        return new BatchScrambleValidationResult
+        {
+            IsValid = true,
+            IsMatchAll = mismatchedCenters.Count == 0,
+            Reason = mismatchedCenters.Count == 0 ? "Scramble check passed." : "Some faces do not match scramble.",
+            MismatchedCenterColors = mismatchedCenters
+        };
+    }
+
+    private static bool MatchesAnyRotation(List<string> s, List<string> e)
+    {
+        if (SequenceEquals(s, e)) return true;
+
+        // 90 deg clockwise: [s6, s3, s0, s7, s4, s1, s8, s5, s2]
+        var r90 = new List<string> { s[6], s[3], s[0], s[7], s[4], s[1], s[8], s[5], s[2] };
+        if (SequenceEquals(r90, e)) return true;
+
+        // 180 deg: [s8, s7, s6, s5, s4, s3, s2, s1, s0]
+        var r180 = new List<string> { s[8], s[7], s[6], s[5], s[4], s[3], s[2], s[1], s[0] };
+        if (SequenceEquals(r180, e)) return true;
+
+        // 270 deg clockwise: [s2, s5, s8, s1, s4, s7, s0, s3, s6]
+        var r270 = new List<string> { s[2], s[5], s[8], s[1], s[4], s[7], s[0], s[3], s[6] };
+        if (SequenceEquals(r270, e)) return true;
+
+        return false;
+    }
+
+    private static bool SequenceEquals(List<string> a, List<string> b)
+    {
+        for (var i = 0; i < 9; i++)
+        {
+            if (!string.Equals(a[i], b[i], StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        return true;
+    }
 
     public static CubeStateBasicValidation ValidateBasicCubeState(Dictionary<string, List<List<string>>> cubeState)
     {

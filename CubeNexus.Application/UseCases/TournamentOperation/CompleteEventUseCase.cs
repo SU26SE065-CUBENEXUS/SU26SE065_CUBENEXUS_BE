@@ -24,8 +24,8 @@ public class CompleteEventUseCase : ICompleteEventUseCase
         if (ev == null)
             throw new CustomException("EVENT_NOT_FOUND", "Event not found.", 404);
 
-        // Check if already completed (using CLOSED registration status code as event-completion indicator)
-        if (ev.RegistrationStatusCode == "CLOSED")
+        // Check if already completed
+        if (ev.RegistrationStatusCode == "COMPLETED")
         {
             throw new CustomException("EVENT_ALREADY_COMPLETED", "This event is already completed.", 409);
         }

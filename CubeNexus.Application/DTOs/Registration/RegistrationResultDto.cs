@@ -29,7 +29,7 @@ public class RegisteredEventDetailDto
     public int? SeedTimeMs { get; set; }
     public string? SeedSourceCode { get; set; }
     public DateTime? SeedGeneratedAt { get; set; }
-    public CompetitorAssignmentDto? Assignment { get; set; }
+    public List<CompetitorAssignmentDto> Assignments { get; set; } = new();
 }
 
 public class CompetitorAssignmentDto

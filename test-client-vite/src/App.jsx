@@ -642,7 +642,7 @@ function App() {
         </div>
 
         <div className="panel panel-wide">
-          <OnlineArenaScannerPanel backendUrl={backendUrl} token={token} matchId={matchId} />
+          <OnlineArenaScannerPanel backendUrl={backendUrl} />
         </div>
 
         <div className="panel panel-wide">
@@ -714,7 +714,7 @@ function App() {
             <li>In both browsers, paste token, matchId, myUserId, targetUserId, then click Connect Hub and Join Match Room.</li>
             <li>Use REST endpoints for camera ready, timer connect, ready, start, submit result, and watch the realtime log.</li>
             <li>Use the standalone 6-Face AI Scanner Test panel to verify centralized AI scanning without JWT, match state, or production arena checks.</li>
-            <li>Use the OnlineArena AI Scanner Test panel to verify scramble and finish scanner APIs without manually looping requests in Swagger.</li>
+            <li>Use the OnlineArena AI Scanner Test panel as a JWT-free sandbox first, then port that stable scanner flow back into the real online match flow.</li>
             <li>When the match emits ScrambleRevealed, the recording hook auto-starts and records a single composite video of local + remote players.</li>
             <li>When MatchCompleted or MatchCancelled arrives, recording auto-stops, uploads to R2 with a presigned URL, then calls complete.</li>
             <li>If webcam is available on both sides, click Start Camera before Create Offer.</li>

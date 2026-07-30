@@ -156,6 +156,7 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IFraudRe
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.InitOnlineProfileUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMyOnlineProfilesUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetOnlineLeaderboardUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMyMatchHistoryUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.FindOnlineMatchUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CancelMatchmakingUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchmakingStatusUseCase>();
@@ -180,8 +181,10 @@ builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetOnlineM
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ObserveOnlineMatchScannerFrameUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.RetryOnlineMatchScannerFaceUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ResetOnlineMatchScannerSessionUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CompleteOnlineMatchScannerUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CreateMatchRecordingUploadUrlUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CompleteMatchRecordingUploadUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.UploadDirectMatchRecordingUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchRecordingPlaybackUrlUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.SubmitOnlineMatchResultUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CompleteOnlineMatchUseCase>();
@@ -195,6 +198,7 @@ builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ApplySolve
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.TransitionToSolvingUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.SubmitMobileTimerSolveTimeUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchRecoveryStateUseCase>();
+builder.Services.AddSingleton<CubeNexus.Application.UseCases.OnlineArena.IMatchTransitionScheduler, CubeNexus.API.Services.MatchTransitionSchedulerImpl>();
 
 // Background Services
 builder.Services.AddHostedService<CubeNexus.API.BackgroundServices.OnlineArenaBackgroundService>();
@@ -226,6 +230,10 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+
+// Initialize the MatchTransitionScheduler static helper for RAM-based timers
+CubeNexus.Application.UseCases.OnlineArena.MatchTransitionScheduler.Instance = 
+    app.Services.GetRequiredService<CubeNexus.Application.UseCases.OnlineArena.IMatchTransitionScheduler>();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

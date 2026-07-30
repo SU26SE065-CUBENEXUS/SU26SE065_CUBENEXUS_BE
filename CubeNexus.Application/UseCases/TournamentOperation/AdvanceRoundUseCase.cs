@@ -33,7 +33,7 @@ public class AdvanceRoundUseCase : IAdvanceRoundUseCase
         if (ev == null)
             throw new CustomException("EVENT_NOT_FOUND", "Event not found.", 404);
 
-        if (ev.RegistrationStatusCode == "CLOSED" || ev.RegistrationStatusCode == "COMPLETED")
+        if (ev.RegistrationStatusCode == "COMPLETED")
             throw new CustomException("EVENT_ALREADY_COMPLETED", "Cannot advance round because the event is already completed.", 409);
 
         var nextRoundGroups = await _unitOfWork.Groups.FindAsync(g => g.EventId == eventId && g.RoundNumber == dto.NextRoundNumber);

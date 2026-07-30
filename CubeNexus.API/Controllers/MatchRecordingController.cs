@@ -69,6 +69,29 @@ public class MatchRecordingController : ControllerBase
         }
     }
 
+    [HttpPost("{matchId:guid}/recording/upload-direct")]
+    [RequestSizeLimit(100 * 1024 * 1024)]
+    public async Task<IActionResult> UploadDirect(
+        Guid matchId,
+        IFormFile file,
+        [FromQuery] double? durationSeconds,
+        [FromServices] UploadDirectMatchRecordingUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
+        if (file == null || file.Length == 0) return BadRequest(new { code = "BAD_REQUEST", message = "No video file provided." });
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            return Ok(await useCase.ExecuteAsync(matchId, userId, stream, file.ContentType, durationSeconds, cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
     [HttpGet("{matchId:guid}/recording/playback-url")]
     public async Task<IActionResult> GetPlaybackUrls(
         Guid matchId,

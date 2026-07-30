@@ -74,6 +74,83 @@ public class ValidateScrambleCubeStateUseCase
         return response;
     }
 
+    public async Task<CubeScanValidationResponseDto> ExecuteBatchAsync(Guid matchId, Guid userId, ScrambleCheckBatchRequestDto request)
+    {
+        var match = await RequireParticipantMatchAsync(matchId, userId);
+        if (OnlineArenaFlowHelpers.IsTerminal(match.StatusCode))
+            throw new ConflictException($"Match is already terminal ({match.StatusCode}).");
+        if (match.StatusCode is not nameof(OnlineMatchStatus.CREATED) and not nameof(OnlineMatchStatus.READY))
+            throw new InvalidOperationException("Scramble validation is only allowed before match start.");
+
+        var batchResult = RubikCubeStateValidator.ValidateScrambleBatch(match.ScrambleSequence, request.Faces);
+
+        string status;
+        if (!batchResult.IsValid || !batchResult.IsMatchAll)
+        {
+            status = "MISMATCHED";
+        }
+        else
+        {
+            status = "PASSED";
+        }
+
+        if (status == "PASSED")
+        {
+            CubeStateValidationShared.ApplyPlayerStatus(match, userId, "PASSED", isFinish: false);
+            CubeStateValidationShared.ApplyLegacyPreCheckCompatibility(match, userId);
+            if (MarkPlayerReadyUseCase.AllReady(match))
+                match.StatusCode = OnlineMatchStatus.READY.ToString();
+
+            _matchRepo.Update(match);
+            await _auditRepo.AddAsync(OnlineArenaAuditFactory.BuildAudit(match.Id, userId, "SCRAMBLE_VALIDATION_COMPLETED", new
+            {
+                status,
+                matched = true,
+                batchResult,
+                request.ScanMetadata
+            }));
+            await _uow.SaveChangesAsync();
+        }
+        else
+        {
+            // Do NOT change player status to FAILED in DB. Keep PENDING so player can retry scanning.
+            await _auditRepo.AddAsync(OnlineArenaAuditFactory.BuildAudit(match.Id, userId, "SCRAMBLE_VALIDATION_MISMATCHED", new
+            {
+                status = "MISMATCHED",
+                matched = false,
+                batchResult,
+                request.ScanMetadata
+            }));
+            await _uow.SaveChangesAsync();
+        }
+
+        var response = new CubeScanValidationResponseDto
+        {
+            Message = status == "PASSED" ? "SCRAMBLE_CHECK passed." : "SCRAMBLE_CHECK mismatched.",
+            MatchId = match.Id,
+            PlayerId = userId,
+            ValidationType = "SCRAMBLE_CHECK",
+            Status = status,
+            MatchStatus = match.StatusCode,
+            IsValidCubeState = batchResult.IsValid,
+            IsScrambleMatched = batchResult.IsMatchAll,
+            IsSolved = null,
+            Reason = batchResult.Reason,
+            MismatchedCenterColors = batchResult.MismatchedCenterColors,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        await _notifier.NotifyScrambleCheckUpdatedAsync(match.Id, response);
+        if (status == "PASSED")
+        {
+            await _notifier.NotifyReadyStateUpdatedAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, response.Message));
+            if (match.StatusCode == OnlineMatchStatus.READY.ToString())
+                await _notifier.NotifyMatchReadyAsync(match.Id, OnlineArenaFlowHelpers.BuildReadinessResponse(match, "Match ready."));
+        }
+
+        return response;
+    }
+
     private async Task<OnlineMatch> RequireParticipantMatchAsync(Guid matchId, Guid userId)
     {
         var match = await _matchRepo.GetByIdAsync(matchId);
@@ -172,6 +249,8 @@ public class ValidateFinishCubeStateUseCase
         return match;
     }
 }
+
+
 
 internal static class CubeScanValidationResponseFactory
 {

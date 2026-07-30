@@ -33,6 +33,8 @@ public interface IOnlineMatchRepository
     Task<bool> HasActiveMatchAsync(Guid userId, Guid puzzleTypeId);
     /// <summary>Fetch all non-terminal matches for BackgroundService reconciliation.</summary>
     Task<List<OnlineMatch>> GetActiveMatchesForReconcileAsync(CancellationToken ct = default);
+    Task<(List<OnlineMatch> Items, int TotalCount)> GetUserMatchHistoryAsync(Guid userId, Guid? puzzleTypeId, int page, int pageSize);
+    Task<bool> MarkRecordingStartedAsync(Guid matchId, Guid playerId, DateTime recordingStartedAt);
     Task AddAsync(OnlineMatch match);
     void Update(OnlineMatch match);
 }

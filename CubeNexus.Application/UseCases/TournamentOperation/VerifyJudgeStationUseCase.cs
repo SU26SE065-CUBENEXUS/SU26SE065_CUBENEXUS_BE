@@ -83,25 +83,42 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationByStationUseCase
         if (ev == null)
             throw new CustomException("EVENT_NOT_FOUND", "Event not found.", 404);
 
-        var expectedGroupName = $"Group {dto.GroupNumber}";
-        var group = await _unitOfWork.Groups.FirstOrDefaultAsync(
-            g => g.EventId == dto.EventId && g.RoundNumber == dto.RoundNumber && g.GroupName != null && g.GroupName.ToLower() == expectedGroupName.ToLower(),
-            ct
-        );
+        Group? group = null;
+        GroupCompetitor? comp = null;
 
-        if (group == null)
-            throw new CustomException("GROUP_NOT_FOUND", $"Group {dto.GroupNumber} is not available for this round.", 404);
+        if (dto.GroupNumber > 0)
+        {
+            var expectedGroupName = $"Group {dto.GroupNumber}";
+            group = await _unitOfWork.Groups.FirstOrDefaultAsync(
+                g => g.EventId == dto.EventId && g.RoundNumber == dto.RoundNumber && g.GroupName != null && g.GroupName.ToLower() == expectedGroupName.ToLower(),
+                ct
+            );
 
-        var groupCompetitors = await _unitOfWork.GroupCompetitors.FindAsync(gc => gc.GroupId == group.Id && gc.RegistrationEventId == offlineRegEvent.Id, ct);
-        var groupCompetitorsList = groupCompetitors.ToList();
+            if (group == null)
+                throw new CustomException("GROUP_NOT_FOUND", $"Group {dto.GroupNumber} is not available for this round.", 404);
 
-        if (groupCompetitorsList.Count == 0)
+            var groupCompetitors = await _unitOfWork.GroupCompetitors.FindAsync(gc => gc.GroupId == group.Id && gc.RegistrationEventId == offlineRegEvent.Id, ct);
+            comp = groupCompetitors.FirstOrDefault();
+        }
+        else
+        {
+            // Auto-resolve Group from competitor's assignment in this Event & Round
+            var allRoundGroups = await _unitOfWork.Groups.FindAsync(g => g.EventId == dto.EventId && g.RoundNumber == dto.RoundNumber, ct);
+            var roundGroupIds = allRoundGroups.Select(g => g.Id).ToList();
+
+            var groupCompetitors = await _unitOfWork.GroupCompetitors.FindAsync(
+                gc => roundGroupIds.Contains(gc.GroupId) && gc.RegistrationEventId == offlineRegEvent.Id,
+                ct
+            );
+            comp = groupCompetitors.FirstOrDefault();
+            if (comp != null)
+            {
+                group = allRoundGroups.FirstOrDefault(g => g.Id == comp.GroupId);
+            }
+        }
+
+        if (group == null || comp == null)
             throw new CustomException("COMPETITOR_NOT_ASSIGNED_TO_ROUND", "Competitor is not assigned to any group in this round.", 400);
-        
-        if (groupCompetitorsList.Count > 1)
-            throw new CustomException("AMBIGUOUS_ASSIGNMENT", "Ambiguous group assignments found for this round.", 400);
-
-        var comp = groupCompetitorsList.First();
 
         if (comp.StationNumber != dto.StationNumber)
             throw new CustomException("STATION_MISMATCH", $"Competitor is assigned to station {comp.StationNumber}, but scanned at station {dto.StationNumber}.", 400);
@@ -123,7 +140,17 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationByStationUseCase
         CancellationToken ct)
     {
         if (group.StatusCode != "ONGOING")
-            throw new CustomException("GROUP_NOT_ONGOING", "This group is not currently ongoing.", 400);
+        {
+            if (group.StatusCode == "PENDING")
+            {
+                throw new CustomException("GROUP_NOT_ONGOING", $"Nhóm thi đấu ở Vòng {group.RoundNumber} chưa được Ban Tổ Chức kích hoạt 'Bắt Đầu Vòng' (Start Active Round). Vui lòng mở trang Quản lý giải -> Tab Vòng {group.RoundNumber} -> chọn 'Bắt Đầu Vòng'!", 400);
+            }
+            if (group.StatusCode == "COMPLETED" || group.StatusCode == "LOCKED")
+            {
+                throw new CustomException("GROUP_NOT_ONGOING", $"Nhóm thi đấu ở Vòng {group.RoundNumber} đã kết thúc hoặc đã bị khóa kết quả.", 400);
+            }
+            throw new CustomException("GROUP_NOT_ONGOING", $"Nhóm thi đấu ở Vòng {group.RoundNumber} hiện không ở trạng thái đang diễn ra (Trạng thái hiện tại: {group.StatusCode}).", 400);
+        }
 
         if (comp.StatusCode == GroupCompetitorStatus.NO_SHOW)
             throw new CustomException("COMPETITOR_NO_SHOW", "This competitor was marked as NO_SHOW and cannot compete.", 400);

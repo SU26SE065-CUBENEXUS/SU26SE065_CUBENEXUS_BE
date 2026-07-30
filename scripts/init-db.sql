@@ -114,6 +114,9 @@ CREATE TABLE IF NOT EXISTS tournaments (
     description TEXT,
     location VARCHAR(255),
 
+    max_participants INTEGER,
+    banner_url TEXT,
+
     registration_open_at TIMESTAMPTZ NOT NULL,
     registration_close_at TIMESTAMPTZ NOT NULL,
 
@@ -125,7 +128,7 @@ CREATE TABLE IF NOT EXISTS tournaments (
     updated_at TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT ck_tournaments_status
-        CHECK (status_code IN ('DRAFT', 'PUBLISHED', 'ONGOING', 'COMPLETED', 'CANCELLED')),
+        CHECK (status_code IN ('DRAFT', 'PUBLISHED', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'ONGOING', 'COMPLETED', 'CANCELLED')),
 
     CONSTRAINT ck_tournaments_date
         CHECK (end_date > start_date),
@@ -162,6 +165,25 @@ CREATE TABLE IF NOT EXISTS tournament_managers (
 
 CREATE INDEX IF NOT EXISTS idx_tournament_managers_user
 ON tournament_managers(user_id);
+
+
+CREATE TABLE IF NOT EXISTS tournament_judges (
+    id UUID PRIMARY KEY,
+    tournament_id UUID NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_code VARCHAR(50) NOT NULL DEFAULT 'STATION_JUDGE',
+    assigned_station_number INT NULL,
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_tournament_judges_tournament_user
+        UNIQUE (tournament_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tournament_judges_tournament
+ON tournament_judges(tournament_id);
+
+CREATE INDEX IF NOT EXISTS idx_tournament_judges_user
+ON tournament_judges(user_id);
 
 
 CREATE TABLE IF NOT EXISTS events (
@@ -250,6 +272,10 @@ ON registrations(tournament_id);
 
 CREATE INDEX IF NOT EXISTS idx_registrations_status
 ON registrations(status_code);
+
+-- Composite index: speeds up COUNT(*) per tournament filtered by status_code (participant count query)
+CREATE INDEX IF NOT EXISTS ix_registrations_tournament_status
+ON registrations(tournament_id, status_code);
 
 
 CREATE TABLE IF NOT EXISTS offline_registration_events (
@@ -383,6 +409,7 @@ CREATE TABLE IF NOT EXISTS results (
     penalty_type_id UUID REFERENCES penalty_types(id),
     is_dnf BOOLEAN NOT NULL DEFAULT false,
     esignature_data TEXT,
+    evidence_photo_url TEXT,
     signed_at TIMESTAMPTZ,
     submitted_at TIMESTAMPTZ NOT NULL,
     is_locked BOOLEAN NOT NULL DEFAULT false,
@@ -626,8 +653,6 @@ CREATE TABLE IF NOT EXISTS online_matches (
     player2_scramble_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
     player1_finish_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
     player2_finish_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
-    player1_scramble_sequence TEXT,
-    player2_scramble_sequence TEXT,
     player1_expected_state_json TEXT,
     player2_expected_state_json TEXT,
     player1_observed_state_json TEXT,
@@ -890,10 +915,8 @@ ON elo_history(match_id);
 CREATE TABLE IF NOT EXISTS fraud_reports (
     id UUID PRIMARY KEY,
     match_id UUID NOT NULL REFERENCES online_matches(id),
-    reported_by UUID NOT NULL REFERENCES users(id),
-    accused_user_id UUID NOT NULL REFERENCES users(id),
-    reporter_user_id UUID REFERENCES users(id),
-    reported_user_id UUID REFERENCES users(id),
+    reporter_user_id UUID NOT NULL REFERENCES users(id),
+    reported_user_id UUID NOT NULL REFERENCES users(id),
     description TEXT,
     evidence_url TEXT,
     status_code VARCHAR(20) NOT NULL,
@@ -916,7 +939,7 @@ CREATE TABLE IF NOT EXISTS fraud_reports (
         CHECK (verdict_code IS NULL OR verdict_code IN ('GUILTY', 'INNOCENT', 'INCONCLUSIVE')),
 
     CONSTRAINT ck_fraud_reports_users
-        CHECK (reported_by <> accused_user_id)
+        CHECK (reporter_user_id <> reported_user_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_fraud_reports_match
@@ -926,7 +949,7 @@ CREATE INDEX IF NOT EXISTS idx_fraud_reports_status
 ON fraud_reports(status_code);
 
 CREATE INDEX IF NOT EXISTS idx_fraud_reports_accused
-ON fraud_reports(accused_user_id);
+ON fraud_reports(reported_user_id);
 
 
 -- =========================================================

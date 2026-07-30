@@ -281,7 +281,20 @@ public partial class AuthService : IAuthService
 
     private async Task<LoginResponseDto> GenerateTokenResponseAsync(User user)
     {
-        var accessToken = GenerateAccessToken(user.Id, user.Email, user.DisplayName, user.UserRole.ToUpperInvariant());
+        Guid? assignedTournamentId = null;
+        string? judgeRoleCode = null;
+        int? assignedStationNumber = null;
+
+        if (string.Equals(user.UserRole, "JUDGE", StringComparison.OrdinalIgnoreCase))
+        {
+            var judgeAssoc = await _context.TournamentJudges
+                .FirstOrDefaultAsync(tj => tj.UserId == user.Id);
+            assignedTournamentId = judgeAssoc?.TournamentId;
+            judgeRoleCode = judgeAssoc?.RoleCode;
+            assignedStationNumber = judgeAssoc?.AssignedStationNumber;
+        }
+
+        var accessToken = GenerateAccessToken(user.Id, user.Email, user.DisplayName, user.UserRole.ToUpperInvariant(), assignedTournamentId, assignedStationNumber, judgeRoleCode);
         var refreshToken = GenerateRefreshToken(user.Id);
 
         await _context.RefreshTokens.AddAsync(refreshToken);
@@ -293,16 +306,20 @@ public partial class AuthService : IAuthService
             RefreshToken = refreshToken.Token,
             AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenExpirationInMinutes),
             DisplayName = user.DisplayName,
-            Email = user.Email
+            Email = user.Email,
+            UserRole = user.UserRole.ToUpperInvariant(),
+            AssignedTournamentId = assignedTournamentId,
+            JudgeRoleCode = judgeRoleCode,
+            AssignedStationNumber = assignedStationNumber
         };
     }
 
-    private string GenerateAccessToken(Guid userId, string email, string displayName, string userRole)
+    private string GenerateAccessToken(Guid userId, string email, string displayName, string userRole, Guid? tournamentId = null, int? stationNumber = null, string? judgeRoleCode = null)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-        var claims = new[]
+        var claimsList = new List<Claim>
         {
             new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
             new Claim(JwtRegisteredClaimNames.Email, email),
@@ -311,10 +328,23 @@ public partial class AuthService : IAuthService
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
+        if (tournamentId.HasValue)
+        {
+            claimsList.Add(new Claim("tournament_id", tournamentId.Value.ToString()));
+        }
+        if (stationNumber.HasValue)
+        {
+            claimsList.Add(new Claim("station_number", stationNumber.Value.ToString()));
+        }
+        if (!string.IsNullOrEmpty(judgeRoleCode))
+        {
+            claimsList.Add(new Claim("judge_role", judgeRoleCode));
+        }
+
         var token = new JwtSecurityToken(
             issuer: _jwtSettings.Issuer,
             audience: _jwtSettings.Audience,
-            claims: claims,
+            claims: claimsList,
             expires: DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenExpirationInMinutes),
             signingCredentials: credentials
         );

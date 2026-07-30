@@ -10,8 +10,8 @@ public interface IAiRubikClient
     Task<AiRubikCheckResultDto> FinishCheckAsync(AiRubikCheckRequestDto request, CancellationToken cancellationToken = default);
     Task<AiRubikScannerSessionDto> StartScannerTestSessionAsync(CancellationToken cancellationToken = default);
     Task<AiRubikScannerSessionDto> GetScannerTestSessionAsync(string sessionId, CancellationToken cancellationToken = default);
-    Task<AiRubikScannerPreviewDto> PreviewScannerTestFrameAsync(string sessionId, string imageBase64, Dictionary<string, object?> metadata, CancellationToken cancellationToken = default);
-    Task<AiRubikScannerPreviewDto> ObserveScannerTestFrameAsync(string sessionId, string imageBase64, Dictionary<string, object?> metadata, CancellationToken cancellationToken = default);
+    Task<AiRubikScannerPreviewDto> PreviewScannerTestFrameAsync(string sessionId, byte[] imageBytes, string fileName, string? contentType, Dictionary<string, object?> metadata, CancellationToken cancellationToken = default);
+    Task<AiRubikScannerPreviewDto> ObserveScannerTestFrameAsync(string sessionId, byte[] imageBytes, string fileName, string? contentType, Dictionary<string, object?> metadata, CancellationToken cancellationToken = default);
     Task<AiRubikScannerSessionDto> ScanScannerTestFaceAsync(string sessionId, IReadOnlyCollection<string> framesBase64, CancellationToken cancellationToken = default);
     Task<AiRubikScannerSessionDto> RetryScannerTestFaceAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<AiRubikScannerSessionDto> ResetScannerTestSessionAsync(string sessionId, CancellationToken cancellationToken = default);

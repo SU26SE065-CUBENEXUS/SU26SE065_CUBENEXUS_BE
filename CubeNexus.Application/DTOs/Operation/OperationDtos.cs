@@ -23,6 +23,8 @@ public class SubmitTraditionalResultDto
     public Guid? PenaltyTypeId { get; set; }
     public Guid ScrambleId { get; set; }
     public string? EsignatureData { get; set; }
+    public string? EvidencePhotoData { get; set; }
+    public string? EvidencePhotoUrl { get; set; }
 }
 
 public class SubmitMedleyResultDto
@@ -30,6 +32,8 @@ public class SubmitMedleyResultDto
     public Guid GroupCompetitorId { get; set; }
     public int SolveNumber { get; set; }
     public string? EsignatureData { get; set; }
+    public string? EvidencePhotoData { get; set; }
+    public string? EvidencePhotoUrl { get; set; }
     public List<MedleyDetailSubmissionDto> Details { get; set; } = new();
 }
 

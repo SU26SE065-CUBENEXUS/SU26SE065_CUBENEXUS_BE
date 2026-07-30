@@ -48,6 +48,8 @@ public class LiveBoardResultDto
     public bool IsDnf { get; set; }
     public bool IsLocked { get; set; }
     public DateTime SubmittedAt { get; set; }
+    public string? EsignatureData { get; set; }
+    public string? EvidencePhotoUrl { get; set; }
 }
 
 public class LiveBoardProgressDto

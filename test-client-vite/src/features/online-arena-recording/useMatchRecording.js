@@ -1,3 +1,8 @@
+/**
+ * @deprecated Client-side HTML5 canvas compositing is deprecated.
+ * System architecture has evolved to Single Local Stream Capture + Asynchronous Cloud Split-Screen Stitching.
+ * Production implementation resides in web/SU26SE065_CUBENEXUS_FE/features/online-arena/contexts/MatchLocalRecordingContext.tsx
+ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   completeMatchRecordingUpload,

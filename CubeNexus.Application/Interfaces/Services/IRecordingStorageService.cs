@@ -14,6 +14,12 @@ public interface IRecordingStorageService
     Task<RecordingObjectMetadataResult?> GetObjectMetadataAsync(
         string objectKey,
         CancellationToken cancellationToken = default);
+
+    Task UploadStreamAsync(
+        string objectKey,
+        Stream contentStream,
+        string contentType,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class RecordingUploadUrlResult

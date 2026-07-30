@@ -62,9 +62,11 @@ public class OnlineArenaScannerSessionResponseDto
     public double PreprocessMs { get; set; }
     public double PostprocessMs { get; set; }
     public double TotalMs { get; set; }
+    public string ModelVersion { get; set; } = string.Empty;
     public string? Reason { get; set; }
     public string? ObservedCenterColor { get; set; }
     public List<List<string>>? Grid3x3 { get; set; }
+    public List<AiRubikScannerStickerDto> Stickers { get; set; } = [];
     public List<OnlineArenaScannerAcceptedFaceDto> Faces { get; set; } = [];
     public OnlineArenaScannerValidationDto? Validation { get; set; }
 }
@@ -95,6 +97,22 @@ public class CubeScanValidationResponseDto
     public bool? IsSolved { get; set; }
     public string? Reason { get; set; }
     public List<string> Missing { get; set; } = [];
+    public List<string> MismatchedCenterColors { get; set; } = [];
     public Dictionary<string, int> ColorCounts { get; set; } = [];
     public DateTime CreatedAt { get; set; }
+}
+
+public class ScrambleCheckBatchFaceDto
+{
+    public string CenterColor { get; set; } = string.Empty;
+    public List<string> Stickers { get; set; } = [];
+    public List<List<string>>? Grid3x3 { get; set; }
+}
+
+public class ScrambleCheckBatchRequestDto
+{
+    public Guid MatchId { get; set; }
+    public string SessionId { get; set; } = string.Empty;
+    public List<ScrambleCheckBatchFaceDto> Faces { get; set; } = [];
+    public CubeScanMetadataDto ScanMetadata { get; set; } = new();
 }

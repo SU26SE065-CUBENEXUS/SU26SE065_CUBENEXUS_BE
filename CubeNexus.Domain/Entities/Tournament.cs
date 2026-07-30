@@ -6,6 +6,8 @@ public class Tournament
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? Location { get; set; }
+    public int? MaxParticipants { get; set; }
+    public string? BannerUrl { get; set; }
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
     public DateTime RegistrationOpenAt { get; set; }
@@ -17,4 +19,5 @@ public class Tournament
 
     public User CreatedByUser { get; set; } = null!;
     public ICollection<Event> Events { get; set; } = new List<Event>();
+    public ICollection<Registration> Registrations { get; set; } = new List<Registration>();
 }

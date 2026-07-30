@@ -8,6 +8,9 @@ public class CreateTournamentDto
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? Location { get; set; }
+    public int? MaxParticipants { get; set; }
+    public string? BannerUrl { get; set; }
+    public string? BannerPhotoData { get; set; }
     
     [Required]
     public DateTime StartDate { get; set; }
@@ -38,6 +41,7 @@ public class CreateEventDto
     
     public int SolveCount { get; set; } = 5;
     public int? SortOrder { get; set; }
+    public int? MaxCapacity { get; set; }
 
     public List<CreateMedleyPuzzleDto> MedleyPuzzles { get; set; } = new();
 }

@@ -31,7 +31,7 @@ public class OnlineArenaBackgroundService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<OnlineArenaBackgroundService> _logger;
-    private static readonly TimeSpan _interval = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan _interval = TimeSpan.FromSeconds(15);
 
     public OnlineArenaBackgroundService(
         IServiceProvider serviceProvider,

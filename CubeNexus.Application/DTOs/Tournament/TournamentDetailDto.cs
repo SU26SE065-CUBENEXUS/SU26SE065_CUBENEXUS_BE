@@ -6,6 +6,9 @@ public class TournamentDetailDto
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? Location { get; set; }
+    public int? MaxParticipants { get; set; }
+    public int CurrentParticipants { get; set; }
+    public string? BannerUrl { get; set; }
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
     public DateTime RegistrationOpenAt { get; set; }
@@ -26,6 +29,7 @@ public class EventDetailDto
     public string PuzzleTypeName { get; set; } = string.Empty;
     public string PuzzleTypeCode { get; set; } = string.Empty;
     public string EventFormatCode { get; set; } = string.Empty;
+    public string RegistrationStatusCode { get; set; } = "OPEN";
     public int? TimeLimitMs { get; set; }
     public int? CutoffTimeMs { get; set; }
     public int SolveCount { get; set; }

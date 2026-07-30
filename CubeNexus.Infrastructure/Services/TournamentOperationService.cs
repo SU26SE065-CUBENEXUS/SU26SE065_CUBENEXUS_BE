@@ -9,6 +9,8 @@ using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Domain.Entities;
 using CubeNexus.Domain.Services;
+using CubeNexus.Infrastructure.Options;
+using Microsoft.Extensions.Options;
 
 namespace CubeNexus.Infrastructure.Services;
 
@@ -19,17 +21,109 @@ public class TournamentOperationService : ITournamentOperationService
     private readonly IScrambleGeneratorService _scrambleGenerator;
     private readonly GroupAssignmentDomainService _groupAssignmentService;
     private readonly PenaltyCalculationDomainService _penaltyCalculationService;
+    private readonly IRecordingStorageService? _storageService;
+    private readonly R2Options? _r2Options;
 
     public TournamentOperationService(
         IUnitOfWork unitOfWork,
         IRealtimeNotifier realtimeNotifier,
-        IScrambleGeneratorService scrambleGenerator)
+        IScrambleGeneratorService scrambleGenerator,
+        IRecordingStorageService? storageService = null,
+        IOptions<R2Options>? r2Options = null)
     {
         _unitOfWork = unitOfWork;
         _realtimeNotifier = realtimeNotifier;
         _scrambleGenerator = scrambleGenerator;
+        _storageService = storageService;
+        _r2Options = r2Options?.Value;
         _groupAssignmentService = new GroupAssignmentDomainService();
         _penaltyCalculationService = new PenaltyCalculationDomainService();
+    }
+
+    private async Task<string?> UploadEvidencePhotoAsync(Guid groupCompetitorId, int solveNumber, string? photoData, string? photoUrl, CancellationToken ct)
+    {
+        Console.WriteLine($"[Evidence Upload Debug] GroupCompetitorId={groupCompetitorId}, Solve={solveNumber}, photoData len={photoData?.Length ?? 0}, photoUrl={photoUrl ?? "null"}, StorageService={(_storageService != null ? "Available" : "NULL")}, R2PublicUrl={_r2Options?.PublicUrl ?? "NULL"}");
+
+        if (!string.IsNullOrWhiteSpace(photoUrl))
+        {
+            // Reject device-local paths that cannot be accessed from the web
+            if (photoUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase) ||
+                photoUrl.StartsWith("ph://", StringComparison.OrdinalIgnoreCase) ||
+                photoUrl.StartsWith("content://", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"[Evidence Upload] Ignoring local device path (not accessible from web): {photoUrl.Substring(0, Math.Min(80, photoUrl.Length))}");
+                // Don't return it — fall through to try photoData instead
+            }
+            else
+            {
+                return photoUrl;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(photoData))
+        {
+            Console.WriteLine("[Evidence Upload Debug] photoData is null or whitespace. Skipping upload.");
+            return null;
+        }
+
+        // Reject device-local paths in photoData as well (safety guard)
+        if (photoData.StartsWith("file://", StringComparison.OrdinalIgnoreCase) ||
+            photoData.StartsWith("ph://", StringComparison.OrdinalIgnoreCase) ||
+            photoData.StartsWith("content://", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"[Evidence Upload] Rejecting local device path in photoData: {photoData.Substring(0, Math.Min(80, photoData.Length))}");
+            return null;
+        }
+
+        if (_storageService == null)
+        {
+            Console.WriteLine("[Evidence Upload Warning] StorageService is NULL! Cannot upload to R2.");
+            return null; // No storage service — don't save unverifiable data
+        }
+
+        try
+        {
+            var base64Parts = photoData.Split(',');
+            var header = base64Parts.Length > 1 ? base64Parts[0].ToLowerInvariant() : string.Empty;
+            var base64String = base64Parts.Length > 1 ? base64Parts[1] : base64Parts[0];
+
+            string contentType = "image/jpeg";
+            string extension = "jpg";
+
+            if (header.Contains("image/png"))
+            {
+                contentType = "image/png";
+                extension = "png";
+            }
+            else if (header.Contains("image/webp"))
+            {
+                contentType = "image/webp";
+                extension = "webp";
+            }
+            else if (header.Contains("image/gif"))
+            {
+                contentType = "image/gif";
+                extension = "gif";
+            }
+
+            var bytes = Convert.FromBase64String(base64String.Trim());
+            var objectKey = $"evidence/tournaments/gc_{groupCompetitorId}_solve_{solveNumber}_{Guid.NewGuid():N}.{extension}";
+
+            using var ms = new System.IO.MemoryStream(bytes);
+            await _storageService.UploadStreamAsync(objectKey, ms, contentType, ct);
+
+            // If a public CDN URL is configured, return the full public URL (accessible from Web browsers).
+            // Otherwise fall back to returning the objectKey (web will try to resolve it).
+            var publicUrl = _r2Options?.GetPublicUrl(objectKey);
+            Console.WriteLine($"[Evidence Upload] Uploaded to R2. Key={objectKey}, PublicUrl={publicUrl ?? "(no public URL configured)"}" );
+            return publicUrl ?? objectKey;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Evidence Upload Warning] Failed to upload evidence to R2: {ex.Message}");
+            // Return null instead of bad data — better to show 'no photo' than a broken path
+            return null;
+        }
     }
 
     public async Task<OperationResultDto> CloseEventRegistrationAsync(Guid eventId, CancellationToken ct = default)
@@ -71,17 +165,56 @@ public class TournamentOperationService : ITournamentOperationService
                 }
             }
 
-            throw new InvalidOperationException($"Groups for event {eventId} round {dto.RoundNumber} already exist.");
+            if (existingGroups.All(g => g.StatusCode == "PENDING"))
+            {
+                var scrambleSets = await _unitOfWork.ScrambleSets.FindAsync(ss => groupIds.Contains(ss.GroupId), ct);
+                if (scrambleSets.Any())
+                {
+                    var scrambleSetIds = scrambleSets.Select(ss => ss.Id).ToList();
+                    var scrambles = await _unitOfWork.Scrambles.FindAsync(s => scrambleSetIds.Contains(s.ScrambleSetId), ct);
+                    _unitOfWork.Scrambles.RemoveRange(scrambles);
+                    _unitOfWork.ScrambleSets.RemoveRange(scrambleSets);
+                }
+                _unitOfWork.GroupCompetitors.RemoveRange(competitors);
+                _unitOfWork.Groups.RemoveRange(existingGroups);
+                await _unitOfWork.SaveChangesAsync(ct);
+            }
+            else
+            {
+                throw new InvalidOperationException($"Groups for event {eventId} round {dto.RoundNumber} already exist.");
+            }
         }
 
-        // Get registered events
-        var registeredEvents = await _unitOfWork.OfflineRegistrationEvents.FindAsync(
-            re => re.EventId == eventId && re.StatusCode == "REGISTERED",
-            ct
-        );
+        // Get registered events: Round 1 uses all registered competitors. Round > 1 uses ONLY the advanced competitors.
+        List<OfflineRegistrationEvent> registeredEvents;
+        if (dto.RoundNumber == 1)
+        {
+            var allRegEvents = await _unitOfWork.OfflineRegistrationEvents.FindAsync(
+                re => re.EventId == eventId && re.StatusCode == "REGISTERED",
+                ct
+            );
+            registeredEvents = allRegEvents.ToList();
+        }
+        else
+        {
+            // For Round > 1: preserve the qualified competitors assigned to this round
+            if (existingGroups.Any())
+            {
+                var existingGroupIds = existingGroups.Select(g => g.Id).ToList();
+                var existingCompList = await _unitOfWork.GroupCompetitors.FindAsync(gc => existingGroupIds.Contains(gc.GroupId), ct);
+                var existingRegEventIds = existingCompList.Select(gc => gc.RegistrationEventId).Distinct().ToList();
+
+                var regEventsForRound = await _unitOfWork.OfflineRegistrationEvents.FindAsync(ore => existingRegEventIds.Contains(ore.Id), ct);
+                registeredEvents = regEventsForRound.ToList();
+            }
+            else
+            {
+                throw new InvalidOperationException($"Cannot generate groups for Round {dto.RoundNumber} directly. Please use 'Advance Round' to select qualified competitors from Round {dto.RoundNumber - 1}.");
+            }
+        }
 
         if (!registeredEvents.Any())
-            throw new InvalidOperationException("No registered competitors found for this event.");
+            throw new InvalidOperationException("No eligible competitors found to generate groups for this round.");
 
         // Fetch display names for competitors
         var regIds = registeredEvents.Select(re => re.RegistrationId).Distinct().ToList();
@@ -359,6 +492,7 @@ public class TournamentOperationService : ITournamentOperationService
         result.RawTimeMs = dto.RawTimeMs;
         result.PenaltyTypeId = dto.PenaltyTypeId;
         result.EsignatureData = dto.EsignatureData;
+        result.EvidencePhotoUrl = await UploadEvidencePhotoAsync(dto.GroupCompetitorId, dto.SolveNumber, dto.EvidencePhotoData, dto.EvidencePhotoUrl, ct);
         result.SignedAt = dto.EsignatureData != null ? DateTime.UtcNow : null;
         result.SubmittedAt = DateTime.UtcNow;
 
@@ -565,6 +699,7 @@ public class TournamentOperationService : ITournamentOperationService
         result.RawTimeMs = null; // RawTimeMs on parent is null, computed from details
         result.PenaltyTypeId = null;
         result.EsignatureData = dto.EsignatureData;
+        result.EvidencePhotoUrl = await UploadEvidencePhotoAsync(dto.GroupCompetitorId, dto.SolveNumber, dto.EvidencePhotoData, dto.EvidencePhotoUrl, ct);
         result.SignedAt = dto.EsignatureData != null ? DateTime.UtcNow : null;
         result.SubmittedAt = DateTime.UtcNow;
 
@@ -837,17 +972,40 @@ public class TournamentOperationService : ITournamentOperationService
         var puzzle = await _unitOfWork.PuzzleTypes.GetByIdAsync(ev.PuzzleTypeId, ct);
         var eventName = puzzle?.Name ?? "Unknown Event";
 
-        var expectedGroupName = $"Group {groupNumber}";
-        var group = await _unitOfWork.Groups.FirstOrDefaultAsync(
-            g => g.EventId == eventId && g.RoundNumber == roundNumber && g.GroupName != null && g.GroupName.ToLower() == expectedGroupName.ToLower(),
-            ct
-        );
+        List<CubeNexus.Domain.Entities.Group> groups;
+        if (groupNumber > 0)
+        {
+            var expectedGroupName = $"Group {groupNumber}";
+            var singleGroup = await _unitOfWork.Groups.FirstOrDefaultAsync(
+                g => g.EventId == eventId && g.RoundNumber == roundNumber && g.GroupName != null && g.GroupName.ToLower() == expectedGroupName.ToLower(),
+                ct
+            );
+            groups = singleGroup != null ? new List<CubeNexus.Domain.Entities.Group> { singleGroup } : new List<CubeNexus.Domain.Entities.Group>();
+        }
+        else
+        {
+            var allGroups = await _unitOfWork.Groups.FindAsync(
+                g => g.EventId == eventId && g.RoundNumber == roundNumber,
+                ct
+            );
+            groups = allGroups.ToList();
+        }
 
-        if (group == null)
-            throw new KeyNotFoundException($"Group {groupNumber} not found for event {eventId} and round {roundNumber}.");
+        if (!groups.Any())
+        {
+            return new JudgeStationRosterResponseDto
+            {
+                Success = true,
+                Message = $"No groups found for event {eventId} and round {roundNumber}.",
+                Competitors = new List<JudgeStationRosterItemDto>()
+            };
+        }
+
+        var groupMap = groups.ToDictionary(g => g.Id, g => g);
+        var groupIds = groups.Select(g => g.Id).ToList();
 
         var groupCompetitors = await _unitOfWork.GroupCompetitors.FindAsync(
-            gc => gc.GroupId == group.Id && gc.StationNumber == stationNumber,
+            gc => groupIds.Contains(gc.GroupId) && gc.StationNumber == stationNumber,
             ct
         );
 
@@ -855,6 +1013,9 @@ public class TournamentOperationService : ITournamentOperationService
 
         foreach (var gc in groupCompetitors)
         {
+            var grp = groupMap.GetValueOrDefault(gc.GroupId);
+            if (grp == null) continue;
+
             var offlineRegEvent = await _unitOfWork.OfflineRegistrationEvents.GetByIdAsync(gc.RegistrationEventId, ct);
             if (offlineRegEvent == null) continue;
 
@@ -870,7 +1031,7 @@ public class TournamentOperationService : ITournamentOperationService
 
             int? nextSolveNumber = submittedCount < ev.SolveCount ? submittedCount + 1 : null;
             bool canSubmit = gc.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW &&
-                             group.StatusCode == "ONGOING" &&
+                             grp.StatusCode == "ONGOING" &&
                              registration.CheckedInAt != null &&
                              registration.StatusCode == "CHECKED_IN" &&
                              submittedCount < ev.SolveCount;
@@ -878,8 +1039,8 @@ public class TournamentOperationService : ITournamentOperationService
             list.Add(new JudgeStationRosterItemDto
             {
                 GroupCompetitorId = gc.Id,
-                GroupId = group.Id,
-                GroupName = group.GroupName ?? string.Empty,
+                GroupId = grp.Id,
+                GroupName = grp.GroupName ?? string.Empty,
                 CompetitorName = competitorName,
                 EventId = ev.Id,
                 EventName = eventName,

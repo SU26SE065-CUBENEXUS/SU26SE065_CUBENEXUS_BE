@@ -158,6 +158,9 @@ public class ConfirmOnlineMatchUseCase
 
             // Create the OnlineMatch
             var setupDeadline = DateTime.UtcNow.AddMinutes(5);
+            var expectedState = RubikCubeStateValidator.BuildExpectedCubeStateForScramble(scramble);
+            var expectedStateJson = System.Text.Json.JsonSerializer.Serialize(expectedState);
+
             var match = new OnlineMatch
             {
                 Id = Guid.NewGuid(),
@@ -167,6 +170,8 @@ public class ConfirmOnlineMatchUseCase
                 Player1ProfileId = p1Profile.Id,
                 Player2ProfileId = p2Profile.Id,
                 ScrambleSequence = scramble,
+                Player1ExpectedStateJson = expectedStateJson,
+                Player2ExpectedStateJson = expectedStateJson,
                 RoomToken = Guid.NewGuid().ToString("N"),
                 QrSessionCode = GenerateQrCode(),
                 StatusCode = OnlineMatchStatus.CREATED.ToString(),
