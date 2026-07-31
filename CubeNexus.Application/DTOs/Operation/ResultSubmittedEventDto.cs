@@ -35,4 +35,5 @@ public class SubmittedResultSummaryDto
     public int? BestTimeMs { get; set; }
     public int? AverageTimeMs { get; set; }
     public int? Rank { get; set; }
+    public bool IsCutoffReached { get; set; }
 }

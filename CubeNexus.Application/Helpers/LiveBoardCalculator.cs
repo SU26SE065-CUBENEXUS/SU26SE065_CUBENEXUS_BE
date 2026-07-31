@@ -15,7 +15,8 @@ public static class LiveBoardCalculator
         Dictionary<Guid, User> userMap,
         Dictionary<Guid, Registration> regMap,
         Dictionary<Guid, OfflineRegistrationEvent> offlineRegEventMap,
-        Dictionary<Guid, PenaltyType> penaltyTypeMap)
+        Dictionary<Guid, PenaltyType> penaltyTypeMap,
+        int? cutoffTimeMs = null)
     {
         var resultsByCompetitor = results
             .GroupBy(r => r.GroupCompetitorId)
@@ -46,6 +47,7 @@ public static class LiveBoardCalculator
             }).ToList();
 
             int completedSolves = compResults.Count;
+            bool isCutoffReached = CutoffEvaluator.IsCutoffStopped(solveCount, cutoffTimeMs, compResults);
 
             // Calculate Best Time
             int? bestTimeMs = null;
@@ -103,7 +105,8 @@ public static class LiveBoardCalculator
                 Results = resultDtos,
                 BestTimeMs = bestTimeMs == int.MaxValue ? null : bestTimeMs,
                 AverageTimeMs = averageTimeMs == int.MaxValue ? null : averageTimeMs,
-                CompletedSolves = completedSolves
+                CompletedSolves = completedSolves,
+                IsCutoffReached = isCutoffReached
             });
         }
 

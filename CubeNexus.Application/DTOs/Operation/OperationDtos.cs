@@ -74,6 +74,7 @@ public class SubmitProgressDto
     public int SolveCount { get; set; }
     public int? NextSolveNumber { get; set; }
     public bool CanSubmitNext { get; set; }
+    public bool IsCutoffReached { get; set; }
 }
 
 public class SolveProgressDto
@@ -90,6 +91,7 @@ public class SolveProgressDto
     public int SubmittedCount { get; set; }
     public int? NextSolveNumber { get; set; }
     public bool CanSubmit { get; set; }
+    public bool IsCutoffReached { get; set; }
     public string? Reason { get; set; }
     public ScrambleInfoDto? CurrentScramble { get; set; }
 }
@@ -147,6 +149,7 @@ public class VerifyJudgeStationResponseDto
     public int? NextSolveNumber { get; set; }
     public int? SolveCount { get; set; }
     public bool CanSubmit { get; set; }
+    public bool IsCutoffReached { get; set; }
     public ScrambleInfoDto? CurrentScramble { get; set; }
 }
 
@@ -164,6 +167,7 @@ public class JudgeStationRosterItemDto
     public int SubmittedCount { get; set; }
     public int? NextSolveNumber { get; set; }
     public bool CanSubmit { get; set; }
+    public bool IsCutoffReached { get; set; }
     public string Status { get; set; } = string.Empty;
 }
 

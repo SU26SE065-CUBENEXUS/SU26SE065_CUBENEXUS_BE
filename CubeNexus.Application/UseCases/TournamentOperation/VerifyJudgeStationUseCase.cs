@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CubeNexus.Application.DTOs.Operation;
 using CubeNexus.Application.Exceptions;
+using CubeNexus.Application.Helpers;
 using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.UseCases.TournamentOperation;
 using CubeNexus.Domain.Entities;
@@ -161,8 +162,17 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationByStationUseCase
         if (resultsList.Any() && resultsList.All(r => r.IsLocked))
             throw new CustomException("RESULTS_LOCKED", "Results for this competitor are already locked.", 400);
 
-        if (comp.StatusCode == GroupCompetitorStatus.COMPLETED || resultsList.Count >= ev.SolveCount)
+        bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, resultsList);
+
+        if (isCutoffStopped || comp.StatusCode == GroupCompetitorStatus.COMPLETED || resultsList.Count >= ev.SolveCount)
+        {
+            if (isCutoffStopped)
+            {
+                var cutoffDisplay = ev.CutoffTimeMs.HasValue ? $"{ev.CutoffTimeMs.Value / 1000.0:0.##}s" : "mốc quy định";
+                throw new CustomException("CUTOFF_NOT_PASSED", $"Thí sinh đã dừng thi đấu do không đạt mốc Cutoff Time ({cutoffDisplay}).", 400);
+            }
             throw new CustomException("COMPETITOR_COMPLETED", "This competitor has already completed all solves for this round.", 400);
+        }
 
         int nextSolveNumber = resultsList.Count + 1;
 

@@ -36,6 +36,7 @@ public class LiveBoardCompetitorDto
     public int? AverageTimeMs { get; set; }
     public int? Rank { get; set; }
     public int CompletedSolves { get; set; }
+    public bool IsCutoffReached { get; set; }
 }
 
 public class LiveBoardResultDto

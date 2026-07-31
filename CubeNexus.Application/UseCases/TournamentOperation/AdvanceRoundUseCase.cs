@@ -78,12 +78,13 @@ public class AdvanceRoundUseCase : IAdvanceRoundUseCase
             userMap,
             regMap,
             offlineRegEventMap,
-            penaltyTypeMap
+            penaltyTypeMap,
+            ev.CutoffTimeMs
         );
 
         // Exclude NO_SHOW and non-COMPLETED competitors
         var eligibleCompetitors = calculatedCompetitors
-            .Where(c => c.CompetitorStatus == "COMPLETED" && c.CompletedSolves >= ev.SolveCount)
+            .Where(c => c.CompetitorStatus == "COMPLETED" && (c.CompletedSolves >= ev.SolveCount || c.IsCutoffReached))
             .ToList();
 
         // Advanced Tie-Break Logic

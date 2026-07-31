@@ -500,11 +500,14 @@ public class TournamentOperationService : ITournamentOperationService
 
         _unitOfWork.Results.Add(result);
 
+        // Include current result in list to evaluate cutoff
+        existingResultsList.Add(result);
+        bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
+
         // Check if completed
         var resultCount = existingResultsList.Count;
-        resultCount++; // Since the new result is not yet in the DB
 
-        if (resultCount >= ev.SolveCount && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED)
+        if ((resultCount >= ev.SolveCount || isCutoffStopped) && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED)
         {
             groupCompetitor.StatusCode = CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED;
             _unitOfWork.GroupCompetitors.Update(groupCompetitor);
@@ -545,7 +548,8 @@ public class TournamentOperationService : ITournamentOperationService
                 userMap,
                 regMap,
                 offlineRegEventMap,
-                penaltyTypeMap
+                penaltyTypeMap,
+                ev.CutoffTimeMs
             );
 
             var calculatedComp = calculatedCompetitors.FirstOrDefault(cc => cc.GroupCompetitorId == groupCompetitor.Id);
@@ -578,7 +582,8 @@ public class TournamentOperationService : ITournamentOperationService
                     SolveCount = ev.SolveCount,
                     BestTimeMs = calculatedComp?.BestTimeMs,
                     AverageTimeMs = calculatedComp?.AverageTimeMs,
-                    Rank = calculatedComp?.Rank
+                    Rank = calculatedComp?.Rank,
+                    IsCutoffReached = isCutoffStopped
                 }
             };
 
@@ -591,8 +596,8 @@ public class TournamentOperationService : ITournamentOperationService
         }
 
         int submittedCount = resultCount;
-        int? nextSolveNumber = submittedCount < ev.SolveCount ? submittedCount + 1 : null;
-        bool canSubmitNext = nextSolveNumber.HasValue && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW && group.StatusCode == "ONGOING";
+        int? nextSolveNumber = (!isCutoffStopped && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
+        bool canSubmitNext = !isCutoffStopped && nextSolveNumber.HasValue && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW && group.StatusCode == "ONGOING";
 
         ScrambleInfoDto? nextScramble = null;
         if (canSubmitNext && nextSolveNumber.HasValue)
@@ -621,7 +626,8 @@ public class TournamentOperationService : ITournamentOperationService
                 SubmittedCount = submittedCount,
                 SolveCount = ev.SolveCount,
                 NextSolveNumber = nextSolveNumber,
-                CanSubmitNext = canSubmitNext
+                CanSubmitNext = canSubmitNext,
+                IsCutoffReached = isCutoffStopped
             },
             NextScramble = nextScramble
         };
@@ -756,14 +762,16 @@ public class TournamentOperationService : ITournamentOperationService
         _penaltyCalculationService.CalculateMedleyResult(result, detailList);
 
         _unitOfWork.Results.Add(result);
-
         _unitOfWork.MedleyResultDetails.AddRange(detailsToInsert);
 
-        // Check if completed
-        var resultCount = await _unitOfWork.Results.CountAsync(r => r.GroupCompetitorId == groupCompetitor.Id, ct);
-        resultCount++; // Since the new result is not yet in the DB
+        // Include current result in list to evaluate cutoff
+        existingResultsList.Add(result);
+        bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
 
-        if (resultCount >= ev.SolveCount && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED)
+        // Check if completed
+        var resultCount = existingResultsList.Count;
+
+        if ((resultCount >= ev.SolveCount || isCutoffStopped) && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED)
         {
             groupCompetitor.StatusCode = CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED;
             _unitOfWork.GroupCompetitors.Update(groupCompetitor);
@@ -804,7 +812,8 @@ public class TournamentOperationService : ITournamentOperationService
                 userMap,
                 regMap,
                 offlineRegEventMap,
-                penaltyTypeMap
+                penaltyTypeMap,
+                ev.CutoffTimeMs
             );
 
             var calculatedComp = calculatedCompetitors.FirstOrDefault(cc => cc.GroupCompetitorId == groupCompetitor.Id);
@@ -837,7 +846,8 @@ public class TournamentOperationService : ITournamentOperationService
                     SolveCount = ev.SolveCount,
                     BestTimeMs = calculatedComp?.BestTimeMs,
                     AverageTimeMs = calculatedComp?.AverageTimeMs,
-                    Rank = calculatedComp?.Rank
+                    Rank = calculatedComp?.Rank,
+                    IsCutoffReached = isCutoffStopped
                 }
             };
 
@@ -850,8 +860,8 @@ public class TournamentOperationService : ITournamentOperationService
         }
 
         int submittedCount = resultCount;
-        int? nextSolveNumber = submittedCount < ev.SolveCount ? submittedCount + 1 : null;
-        bool canSubmitNext = nextSolveNumber.HasValue && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW && group.StatusCode == "ONGOING";
+        int? nextSolveNumber = (!isCutoffStopped && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
+        bool canSubmitNext = !isCutoffStopped && nextSolveNumber.HasValue && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW && group.StatusCode == "ONGOING";
 
         return new SubmitResultResponseDto
         {
@@ -864,7 +874,8 @@ public class TournamentOperationService : ITournamentOperationService
                 SubmittedCount = submittedCount,
                 SolveCount = ev.SolveCount,
                 NextSolveNumber = nextSolveNumber,
-                CanSubmitNext = canSubmitNext
+                CanSubmitNext = canSubmitNext,
+                IsCutoffReached = isCutoffStopped
             },
             NextScramble = null
         };
