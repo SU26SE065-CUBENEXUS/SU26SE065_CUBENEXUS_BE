@@ -512,15 +512,15 @@ public class TournamentOperationController : ControllerBase
     }
 
     /// <summary>
-    /// Lấy danh sách thuật toán trộn (Scrambles) của một nhóm đấu.
+    /// Lấy danh sách Scramble của một Group cụ thể (MANAGER, ADMIN, JUDGE).
     /// </summary>
     [HttpGet("api/tournament-operation/groups/{groupId:guid}/scrambles")]
-    [Authorize]
-    public async Task<IActionResult> GetGroupScrambles(Guid groupId)
+    [Authorize(Roles = "MANAGER,ADMIN,JUDGE")]
+    public async Task<IActionResult> GetGroupScrambles(Guid groupId, CancellationToken ct)
     {
         try
         {
-            var scrambles = await _operationService.GetGroupScramblesAsync(groupId);
+            var scrambles = await _operationService.GetGroupScramblesAsync(groupId, ct);
             return Ok(scrambles);
         }
         catch (KeyNotFoundException ex)
@@ -534,23 +534,6 @@ public class TournamentOperationController : ControllerBase
     }
 
     /// <summary>
-    /// Lấy danh sách các Penalty Type.
-    /// </summary>
-    [HttpGet("api/tournament-operation/penalty-types")]
-    public async Task<IActionResult> GetPenaltyTypes()
-    {
-        try
-        {
-            var penaltyTypes = await _operationService.GetPenaltyTypesAsync();
-            return Ok(penaltyTypes);
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { message = "An error occurred while fetching penalty types.", detail = ex.Message });
-        }
-    }
-
-    /// <summary>
     /// Lấy danh sách các loại Penalty (JUDGE, MANAGER, ADMIN, COMPETITOR).
     /// </summary>
     [HttpGet("api/tournament-operation/penalty-types")]
@@ -559,48 +542,12 @@ public class TournamentOperationController : ControllerBase
     {
         try
         {
-            var penaltyTypes = await _unitOfWork.PenaltyTypes.GetAllAsync(ct);
+            var penaltyTypes = await _operationService.GetPenaltyTypesAsync(ct);
             return Ok(penaltyTypes);
         }
         catch (Exception ex)
         {
             return StatusCode(500, new { message = "An error occurred while fetching penalty types.", detail = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// Lấy danh sách Scramble của một Group cụ thể (MANAGER, ADMIN, JUDGE).
-    /// </summary>
-    [HttpGet("api/tournament-operation/groups/{groupId:guid}/scrambles")]
-    [Authorize(Roles = "MANAGER,ADMIN,JUDGE")]
-    public async Task<IActionResult> GetGroupScrambles(Guid groupId, CancellationToken ct)
-    {
-        try
-        {
-            var scrambleSet = await _unitOfWork.ScrambleSets.FirstOrDefaultAsync(ss => ss.GroupId == groupId, ct);
-            if (scrambleSet == null)
-            {
-                return NotFound(new { message = "Scramble set not found for this group." });
-            }
-
-            var scrambles = await _unitOfWork.Scrambles.FindAsync(s => s.ScrambleSetId == scrambleSet.Id, ct);
-            var sortedScrambles = scrambles
-                .OrderBy(s => s.SortOrder)
-                .Select(s => new
-                {
-                    id = s.Id,
-                    solveNumber = s.SolveNumber,
-                    puzzleTypeId = s.PuzzleTypeId,
-                    sequence = s.Sequence,
-                    sortOrder = s.SortOrder
-                })
-                .ToList();
-
-            return Ok(sortedScrambles);
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { message = "An error occurred while fetching group scrambles.", detail = ex.Message });
         }
     }
 

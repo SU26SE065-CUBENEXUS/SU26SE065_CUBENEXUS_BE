@@ -9,6 +9,7 @@ using CubeNexus.Domain.Entities;
 using CubeNexus.Domain.Enums;
 using CubeNexus.Infrastructure.Email;
 using CubeNexus.Infrastructure.Identity;
+using CubeNexus.Infrastructure.Options;
 using CubeNexus.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -19,33 +20,57 @@ namespace CubeNexus.Infrastructure.Identity;
 
 public partial class AuthService : IAuthService
 {
+    private const long MaxAvatarBytes = 5 * 1024 * 1024; // 5 MB
+
     private readonly ApplicationDbContext _context;
     private readonly IEmailService _emailService;
     private readonly IHostEnvironment _environment;
     private readonly IOnlineProfileInitService _profileInitService;
+    private readonly IRecordingStorageService _storageService;
     private readonly JwtSettings _jwtSettings;
     private readonly EmailSettings _emailSettings;
+    private readonly R2Options _r2Options;
 
     public AuthService(
         ApplicationDbContext context,
         IEmailService emailService,
         IHostEnvironment environment,
         IOnlineProfileInitService profileInitService,
+        IRecordingStorageService storageService,
         IOptions<JwtSettings> jwtSettings,
-        IOptions<EmailSettings> emailSettings)
+        IOptions<EmailSettings> emailSettings,
+        IOptions<R2Options> r2Options)
     {
         _context = context;
         _emailService = emailService;
         _environment = environment;
         _profileInitService = profileInitService;
+        _storageService = storageService;
         _jwtSettings = jwtSettings.Value;
         _emailSettings = emailSettings.Value;
+        _r2Options = r2Options.Value;
     }
 
-    public async Task<RegisterResponseDto> RegisterAsync(RegisterRequestDto request)
+    public async Task<RegisterResponseDto> RegisterAsync(
+        RegisterRequestDto request,
+        Stream? avatarStream = null,
+        string? avatarContentType = null,
+        string? avatarFileName = null,
+        CancellationToken cancellationToken = default)
     {
+        ValidateProfileFields(request.DisplayName, request.Phone, request.Address);
+
+        if (string.IsNullOrWhiteSpace(request.Email))
+            throw new InvalidOperationException("Email không được để trống.");
+
+        if (string.IsNullOrWhiteSpace(request.Password))
+            throw new InvalidOperationException("Mật khẩu không được để trống.");
+
+        if (avatarStream != null && avatarStream.CanSeek && avatarStream.Length > MaxAvatarBytes)
+            throw new InvalidOperationException("Ảnh đại diện không được vượt quá 5MB.");
+
         var existingUser = await _context.Users
-            .FirstOrDefaultAsync(u => u.Email == request.Email);
+            .FirstOrDefaultAsync(u => u.Email == request.Email, cancellationToken);
 
         if (existingUser != null)
             throw new InvalidOperationException("Email đã được sử dụng.");
@@ -57,10 +82,12 @@ public partial class AuthService : IAuthService
         {
             Id = Guid.NewGuid(),
             UserCode = userCode,
-            Email = request.Email,
+            Email = request.Email.Trim(),
             PasswordHash = HashPassword(request.Password),
-            DisplayName = request.DisplayName,
-            AvatarUrl = request.AvatarUrl,
+            DisplayName = request.DisplayName.Trim(),
+            Phone = request.Phone.Trim(),
+            Address = request.Address.Trim(),
+            AvatarUrl = null,
             UserRole = "COMPETITOR",
             IsActive = true,
             IsBanned = false,
@@ -70,16 +97,144 @@ public partial class AuthService : IAuthService
             UpdatedAt = now
         };
 
-        await _context.Users.AddAsync(user);
+        await _context.Users.AddAsync(user, cancellationToken);
         await _profileInitService.EnsureStandardProfileAsync(user.Id);
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(cancellationToken);
+
+        if (avatarStream != null)
+        {
+            user.AvatarUrl = await UploadAvatarToR2Async(
+                user.Id, avatarStream, avatarContentType, avatarFileName, cancellationToken);
+            user.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
 
         return new RegisterResponseDto
         {
             Id = user.Id,
             Email = user.Email,
-            DisplayName = user.DisplayName
+            DisplayName = user.DisplayName,
+            Phone = user.Phone,
+            Address = user.Address,
+            AvatarUrl = user.AvatarUrl
         };
+    }
+
+    public async Task<UserProfileDto> GetProfileAsync(Guid userId)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new InvalidOperationException("Người dùng không tồn tại.");
+
+        return ToProfileDto(user);
+    }
+
+    public async Task<UserProfileDto> UpdateProfileAsync(Guid userId, UpdateProfileRequestDto request)
+    {
+        var hasAnyField =
+            request.DisplayName != null ||
+            request.Phone != null ||
+            request.Address != null ||
+            request.AvatarUrl != null;
+
+        if (!hasAnyField)
+            throw new InvalidOperationException("Không có thông tin nào để cập nhật.");
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new InvalidOperationException("Người dùng không tồn tại.");
+
+        if (request.DisplayName != null)
+        {
+            if (string.IsNullOrWhiteSpace(request.DisplayName))
+                throw new InvalidOperationException("Tên hiển thị không được để trống.");
+            user.DisplayName = request.DisplayName.Trim();
+        }
+
+        if (request.Phone != null)
+        {
+            if (string.IsNullOrWhiteSpace(request.Phone))
+                throw new InvalidOperationException("Số điện thoại không được để trống.");
+
+            var phone = request.Phone.Trim();
+            if (phone.Length < 9 || phone.Length > 20)
+                throw new InvalidOperationException("Số điện thoại không hợp lệ.");
+
+            user.Phone = phone;
+        }
+
+        if (request.Address != null)
+        {
+            if (string.IsNullOrWhiteSpace(request.Address))
+                throw new InvalidOperationException("Địa chỉ không được để trống.");
+            user.Address = request.Address.Trim();
+        }
+
+        if (request.AvatarUrl != null)
+        {
+            user.AvatarUrl = string.IsNullOrWhiteSpace(request.AvatarUrl)
+                ? null
+                : request.AvatarUrl.Trim();
+        }
+
+        user.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return ToProfileDto(user);
+    }
+
+    public async Task<UserProfileDto> UploadAvatarAsync(
+        Guid userId,
+        Stream contentStream,
+        string? contentType,
+        string? fileName = null,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken)
+            ?? throw new InvalidOperationException("Người dùng không tồn tại.");
+
+        user.AvatarUrl = await UploadAvatarToR2Async(userId, contentStream, contentType, fileName, cancellationToken);
+        user.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return ToProfileDto(user);
+    }
+
+    private async Task<string> UploadAvatarToR2Async(
+        Guid userId,
+        Stream contentStream,
+        string? contentType,
+        string? fileName,
+        CancellationToken cancellationToken)
+    {
+        if (contentStream == null || !contentStream.CanRead)
+            throw new InvalidOperationException("File không hợp lệ.");
+
+        var extension = ResolveFileExtension(fileName);
+        var normalizedContentType = string.IsNullOrWhiteSpace(contentType)
+            ? "application/octet-stream"
+            : contentType.Split(';', 2)[0].Trim();
+
+        if (contentStream.CanSeek && contentStream.Length > MaxAvatarBytes)
+            throw new InvalidOperationException("Ảnh đại diện không được vượt quá 5MB.");
+
+        await using var buffer = new MemoryStream();
+        await contentStream.CopyToAsync(buffer, cancellationToken);
+
+        if (buffer.Length == 0)
+            throw new InvalidOperationException("File không được để trống.");
+
+        if (buffer.Length > MaxAvatarBytes)
+            throw new InvalidOperationException("Ảnh đại diện không được vượt quá 5MB.");
+
+        buffer.Position = 0;
+        var objectKey = string.IsNullOrEmpty(extension)
+            ? $"avatars/{userId:D}/{Guid.NewGuid():N}"
+            : $"avatars/{userId:D}/{Guid.NewGuid():N}.{extension}";
+        await _storageService.UploadStreamAsync(objectKey, buffer, normalizedContentType, cancellationToken);
+
+        var publicUrl = _r2Options.GetPublicUrl(objectKey);
+        if (string.IsNullOrWhiteSpace(publicUrl))
+            throw new InvalidOperationException("R2 PublicUrl chưa được cấu hình. Không thể tạo URL ảnh đại diện.");
+
+        return publicUrl;
     }
 
     public async Task<LoginResponseDto> LoginAsync(LoginRequestDto request)
@@ -442,6 +597,48 @@ public partial class AuthService : IAuthService
 
         return $"{iterations}.{Convert.ToBase64String(salt)}.{Convert.ToBase64String(hash)}";
     }
+
+    private static void ValidateProfileFields(string displayName, string phone, string address)
+    {
+        if (string.IsNullOrWhiteSpace(displayName))
+            throw new InvalidOperationException("Tên hiển thị không được để trống.");
+
+        if (string.IsNullOrWhiteSpace(phone))
+            throw new InvalidOperationException("Số điện thoại không được để trống.");
+
+        var normalizedPhone = phone.Trim();
+        if (normalizedPhone.Length < 9 || normalizedPhone.Length > 20)
+            throw new InvalidOperationException("Số điện thoại không hợp lệ.");
+
+        if (string.IsNullOrWhiteSpace(address))
+            throw new InvalidOperationException("Địa chỉ không được để trống.");
+    }
+
+    private static string ResolveFileExtension(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+            return string.Empty;
+
+        var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(extension))
+            return string.Empty;
+
+        // Keep only safe extension characters (a-z, 0-9) so object keys stay valid.
+        var cleaned = new string(extension.Where(char.IsLetterOrDigit).ToArray());
+        return cleaned.Length > 20 ? cleaned[..20] : cleaned;
+    }
+
+    private static UserProfileDto ToProfileDto(User user) => new()
+    {
+        Id = user.Id,
+        UserCode = user.UserCode,
+        Email = user.Email,
+        DisplayName = user.DisplayName,
+        AvatarUrl = user.AvatarUrl,
+        Phone = user.Phone,
+        Address = user.Address,
+        UserRole = user.UserRole.ToUpperInvariant()
+    };
 
     [GeneratedRegex(@"^\d{6}$")]
     private static partial Regex OtpPattern();

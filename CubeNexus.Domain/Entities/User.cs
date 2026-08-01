@@ -8,6 +8,8 @@ public class User
     public string PasswordHash { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string? AvatarUrl { get; set; }
+    public string Phone { get; set; } = string.Empty;
+    public string Address { get; set; } = string.Empty;
     public string UserRole { get; set; } = "COMPETITOR";
     public bool IsActive { get; set; } = true;
     public bool IsBanned { get; set; } = false;
