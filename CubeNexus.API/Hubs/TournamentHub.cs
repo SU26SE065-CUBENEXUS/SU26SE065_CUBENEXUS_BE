@@ -25,23 +25,6 @@ public class TournamentHub : Hub
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"event:{eventId}:round:{roundNumber}");
     }
 
-    public async Task RegisterJudgeStation(string eventId, int roundNumber, int stationNumber)
-    {
-        var groupName = $"event:{eventId}:round:{roundNumber}:station:{stationNumber}";
-        await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
-        await Clients.Group($"event:{eventId}:round:{roundNumber}").SendAsync("StationOnlineStatusChanged", stationNumber, true);
-    }
-
-    public async Task UpdateStationState(string eventId, int roundNumber, int stationNumber, string state, string? competitorName)
-    {
-        var roundGroupName = $"event:{eventId}:round:{roundNumber}";
-        await Clients.Group(roundGroupName).SendAsync("StationStateChanged", new {
-            StationNumber = stationNumber,
-            State = state,
-            CompetitorName = competitorName
-        });
-    }
-
     // Register a judge station to its specific station group for commands (e.g. LOCK_STATION)
     public async Task RegisterJudgeStation(string eventId, int roundNumber, int stationNumber)
     {
