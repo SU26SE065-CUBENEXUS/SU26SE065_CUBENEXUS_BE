@@ -7,6 +7,9 @@ public class AiRubikCheckRequestDto
     public string CheckType { get; set; } = string.Empty;
     public string? ScrambleSequence { get; set; }
     public string? ImageBase64 { get; set; }
+    public byte[]? ImageBytes { get; set; }
+    public string? ImageFileName { get; set; }
+    public string? ImageContentType { get; set; }
     public string? ImageUrl { get; set; }
     public Dictionary<string, object?> Metadata { get; set; } = [];
 }

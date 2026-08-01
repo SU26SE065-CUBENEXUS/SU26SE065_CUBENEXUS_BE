@@ -151,6 +151,7 @@ public class ReviewFraudReportUseCase
         if (decision == FraudVerdict.GUILTY.ToString())
         {
             match.StatusCode = OnlineMatchStatus.COMPLETED.ToString();
+            match.Phase = "COMPLETED";
             match.Outcome = report.ReportedUserId == match.Player1Id
                 ? OnlineMatchOutcome.PLAYER2_WIN.ToString()
                 : OnlineMatchOutcome.PLAYER1_WIN.ToString();

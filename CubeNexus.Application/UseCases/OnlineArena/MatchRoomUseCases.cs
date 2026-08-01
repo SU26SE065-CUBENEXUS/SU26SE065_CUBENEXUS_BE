@@ -61,7 +61,7 @@ public class MarkCameraReadyUseCase
     /// If checklist passes for this player, sets playerReady = true immediately.
     /// If both players become ready, transitions to COUNTDOWN immediately (event-driven, no polling).
     /// </summary>
-    internal static async Task AutoReadyIfChecklistPassedAsync(
+    public static async Task AutoReadyIfChecklistPassedAsync(
         CubeNexus.Domain.Entities.OnlineMatch match,
         Guid userId,
         IOnlineMatchRepository matchRepo,
@@ -89,6 +89,9 @@ public class MarkCameraReadyUseCase
 
             var countdownPayload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Both players ready. Countdown started.");
             await notifier.NotifyCountdownStartedAsync(match.Id, countdownPayload);
+
+            // Schedule transition to inspection in 5 seconds
+            MatchTransitionScheduler.ScheduleInspectionTransition(match.Id, TimeSpan.FromSeconds(5));
         }
         else
         {
@@ -228,6 +231,13 @@ public class StartOnlineMatchUseCase
 
     public async Task TransitionToInspectionAsync(CubeNexus.Domain.Entities.OnlineMatch match)
     {
+        // Idempotency guard: if already in INSPECTION or past it, skip.
+        // Without this, the BackgroundService AND the in-memory scheduler can both call this,
+        // resulting in duplicate ScheduleSolvingTransition timers firing at different times.
+        if (match.Phase == "INSPECTION" || match.Phase == "SOLVING"
+            || match.StatusCode == nameof(OnlineMatchStatus.ONGOING))
+            return;
+
         var now = DateTime.UtcNow;
         match.StatusCode = nameof(OnlineMatchStatus.ONGOING);
         match.Phase = "INSPECTION";
@@ -248,6 +258,9 @@ public class StartOnlineMatchUseCase
             inspectionDeadlineAt = match.InspectionDeadlineAt,
             phase = match.Phase
         });
+
+        // Schedule transition to solving in 15 seconds (only once, guarded by idempotency above)
+        MatchTransitionScheduler.ScheduleSolvingTransition(match.Id, TimeSpan.FromSeconds(15));
     }
 }
 
@@ -313,8 +326,8 @@ public class ReconcileOnlineMatchStatusUseCase
             match.Player1ResultStatus != PlayerResultStatus.PENDING.ToString()
             && match.Player2ResultStatus != PlayerResultStatus.PENDING.ToString();
         var bothFinishPassed =
-            match.Player1FinishCheckStatus == "PASSED"
-            && match.Player2FinishCheckStatus == "PASSED";
+            (match.Player1FinishCheckStatus == "PASSED" || match.Player1FinishCheckStatus == "NOT_REQUIRED" || match.Player1ResultStatus == PlayerResultStatus.DNF.ToString())
+            && (match.Player2FinishCheckStatus == "PASSED" || match.Player2FinishCheckStatus == "NOT_REQUIRED" || match.Player2ResultStatus == PlayerResultStatus.DNF.ToString());
         var requiresReview =
             match.Player1ScrambleCheckStatus is "FAILED" or "NEEDS_REVIEW"
             || match.Player2ScrambleCheckStatus is "FAILED" or "NEEDS_REVIEW"
@@ -387,8 +400,38 @@ public class MockOnlineMatchFinishPassUseCase
         if (match.StatusCode is not nameof(OnlineMatchStatus.ONGOING) and not nameof(OnlineMatchStatus.PENDING_EVIDENCE))
             throw new InvalidOperationException("Mock finish pass is only allowed after the match has started.");
 
-        if (match.Player1Id == requestingUserId) match.Player1FinishCheckStatus = "PASSED";
-        else match.Player2FinishCheckStatus = "PASSED";
+        if (match.Player1Id == requestingUserId)
+        {
+            match.Player1FinishCheckStatus = "PASSED";
+            if (match.Player1ResultStatus == CubeNexus.Domain.Enums.PlayerResultStatus.PENDING.ToString())
+            {
+                match.Player1TimeMs = 12500 + Random.Shared.Next(3000);
+                match.Player1IsDnf = false;
+                match.Player1ResultStatus = CubeNexus.Domain.Enums.PlayerResultStatus.VALID.ToString();
+                match.Player1FinishedAt = DateTime.UtcNow;
+            }
+        }
+        else
+        {
+            match.Player2FinishCheckStatus = "PASSED";
+            if (match.Player2ResultStatus == CubeNexus.Domain.Enums.PlayerResultStatus.PENDING.ToString())
+            {
+                match.Player2TimeMs = 12500 + Random.Shared.Next(3000);
+                match.Player2IsDnf = false;
+                match.Player2ResultStatus = CubeNexus.Domain.Enums.PlayerResultStatus.VALID.ToString();
+                match.Player2FinishedAt = DateTime.UtcNow;
+            }
+        }
+
+        var bothResultsSubmitted =
+            match.Player1ResultStatus != CubeNexus.Domain.Enums.PlayerResultStatus.PENDING.ToString()
+            && match.Player2ResultStatus != CubeNexus.Domain.Enums.PlayerResultStatus.PENDING.ToString();
+
+        if (bothResultsSubmitted && match.StatusCode == nameof(OnlineMatchStatus.ONGOING))
+        {
+            match.StatusCode = OnlineMatchStatus.PENDING_EVIDENCE.ToString();
+            match.VideoEvidenceUploadDeadlineAt = DateTime.UtcNow.AddMinutes(2);
+        }
 
         _matchRepo.Update(match);
         await _uow.SaveChangesAsync();
@@ -396,12 +439,9 @@ public class MockOnlineMatchFinishPassUseCase
         await _notifier.NotifyFinishCheckUpdatedAsync(match.Id,
             OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Mock finish pass applied."));
 
-        var bothResultsSubmitted =
-            match.Player1ResultStatus != PlayerResultStatus.PENDING.ToString()
-            && match.Player2ResultStatus != PlayerResultStatus.PENDING.ToString();
         var bothFinishPassed =
-            match.Player1FinishCheckStatus == "PASSED"
-            && match.Player2FinishCheckStatus == "PASSED";
+            (match.Player1FinishCheckStatus == "PASSED" || match.Player1FinishCheckStatus == "NOT_REQUIRED" || match.Player1ResultStatus == PlayerResultStatus.DNF.ToString())
+            && (match.Player2FinishCheckStatus == "PASSED" || match.Player2FinishCheckStatus == "NOT_REQUIRED" || match.Player2ResultStatus == PlayerResultStatus.DNF.ToString());
 
         if (bothResultsSubmitted && bothFinishPassed
             && match.StatusCode is nameof(OnlineMatchStatus.PENDING_EVIDENCE) or nameof(OnlineMatchStatus.NEEDS_REVIEW))

@@ -41,11 +41,7 @@ public class TournamentManagementController : ControllerBase
             }
 
             var result = await _tournamentService.CreateTournamentAsync(dto, managerId);
-            return CreatedAtAction(
-                actionName: "GetById",
-                controllerName: "Tournament",
-                routeValues: new { id = result.Id },
-                value: result);
+            return StatusCode(201, result);
         }
         catch (InvalidOperationException ex)
         {
@@ -53,7 +49,37 @@ public class TournamentManagementController : ControllerBase
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { message = "An error occurred while creating the tournament.", detail = ex.Message });
+            Console.WriteLine($"[CreateTournament 500 ERROR] {ex}");
+            return StatusCode(500, new { 
+                message = "An error occurred while creating the tournament.", 
+                detail = ex.Message,
+                inner = ex.InnerException?.Message 
+            });
+        }
+    }
+
+    /// <summary>
+    /// Đóng cổng đăng ký giải đấu thủ công tức thì (MANAGER, ADMIN).
+    /// </summary>
+    [HttpPost("api/tournament-management/tournaments/{tournamentId:guid}/close-registration")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> CloseRegistration(Guid tournamentId)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            Guid.TryParse(userIdString, out var managerId);
+
+            var result = await _tournamentService.CloseRegistrationAsync(tournamentId, managerId);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while closing registration.", detail = ex.Message });
         }
     }
 
@@ -110,8 +136,9 @@ public class TournamentManagementController : ControllerBase
     {
         try
         {
-            var result = await _completeTournamentUseCase.ExecuteAsync(tournamentId);
-            return Ok(result);
+            await _completeTournamentUseCase.ExecuteAsync(tournamentId);
+            var updatedTournament = await _tournamentService.GetTournamentByIdAsync(tournamentId);
+            return Ok(updatedTournament);
         }
         catch (CubeNexus.Application.Exceptions.CustomException ex)
         {
@@ -189,6 +216,190 @@ public class TournamentManagementController : ControllerBase
         catch (Exception ex)
         {
             return StatusCode(500, new { message = "An error occurred while performing check-in.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Lấy danh sách Trọng tài thuộc Giải đấu.
+    /// </summary>
+    [HttpGet("api/tournament-management/tournaments/{tournamentId:guid}/judges")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> GetTournamentJudges(Guid tournamentId, CancellationToken ct)
+    {
+        try
+        {
+            var result = await _tournamentService.GetTournamentJudgesAsync(tournamentId, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while fetching judges.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Tạo 1 tài khoản Trọng tài đơn lẻ cho Giải đấu.
+    /// </summary>
+    [HttpPost("api/tournament-management/tournaments/{tournamentId:guid}/judges")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> CreateTournamentJudge(Guid tournamentId, [FromBody] CreateTournamentJudgeDto dto, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            Guid.TryParse(userIdString, out var managerId);
+
+            var result = await _tournamentService.CreateTournamentJudgeAsync(tournamentId, dto, managerId, ct);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while creating judge.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Tạo HÀNG LOẠT tài khoản Trọng tài trong 1-click cho Giải đấu.
+    /// </summary>
+    [HttpPost("api/tournament-management/tournaments/{tournamentId:guid}/judges/batch")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> BatchCreateTournamentJudges(Guid tournamentId, [FromBody] BatchCreateTournamentJudgeDto dto, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            Guid.TryParse(userIdString, out var managerId);
+
+            var result = await _tournamentService.BatchCreateTournamentJudgesAsync(tournamentId, dto, managerId, ct);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while batch creating judges.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Đổi vị trí / Tráo ngẫu nhiên vai trò & bàn thi của Trọng tài trong Giải đấu.
+    /// </summary>
+    [HttpPost("api/tournament-management/tournaments/{tournamentId:guid}/judges/shuffle")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> ShuffleTournamentJudges(Guid tournamentId, [FromBody] ShuffleTournamentJudgesDto dto, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            Guid.TryParse(userIdString, out var managerId);
+
+            var result = await _tournamentService.ShuffleTournamentJudgesAsync(tournamentId, dto, managerId, ct);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while shuffling judges.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Cập nhật thông tin (DisplayName, RoleCode, AssignedStationNumber) của Trọng tài.
+    /// </summary>
+    [HttpPut("api/tournament-management/tournaments/{tournamentId:guid}/judges/{judgeUserId:guid}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> UpdateTournamentJudge(Guid tournamentId, Guid judgeUserId, [FromBody] UpdateTournamentJudgeDto dto, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            Guid.TryParse(userIdString, out var managerId);
+
+            var result = await _tournamentService.UpdateTournamentJudgeAsync(tournamentId, judgeUserId, dto, managerId, ct);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while updating judge.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Đặt lại mật khẩu mới cho Trọng tài.
+    /// </summary>
+    [HttpPost("api/tournament-management/tournaments/{tournamentId:guid}/judges/{judgeUserId:guid}/reset-password")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> ResetTournamentJudgePassword(Guid tournamentId, Guid judgeUserId, [FromBody] ResetJudgePasswordDto dto, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            Guid.TryParse(userIdString, out var managerId);
+
+            var result = await _tournamentService.ResetTournamentJudgePasswordAsync(tournamentId, judgeUserId, dto, managerId, ct);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while resetting judge password.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Xóa/gỡ Trọng tài khỏi Giải đấu.
+    /// </summary>
+    [HttpDelete("api/tournament-management/tournaments/{tournamentId:guid}/judges/{judgeUserId:guid}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> DeleteTournamentJudge(Guid tournamentId, Guid judgeUserId, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            Guid.TryParse(userIdString, out var managerId);
+
+            await _tournamentService.DeleteTournamentJudgeAsync(tournamentId, judgeUserId, managerId, ct);
+            return Ok(new { message = "Judge removed successfully." });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while deleting judge.", detail = ex.Message });
         }
     }
 

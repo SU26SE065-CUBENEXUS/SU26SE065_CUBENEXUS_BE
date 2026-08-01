@@ -23,6 +23,8 @@ public class SubmitTraditionalResultDto
     public Guid? PenaltyTypeId { get; set; }
     public Guid ScrambleId { get; set; }
     public string? EsignatureData { get; set; }
+    public string? EvidencePhotoData { get; set; }
+    public string? EvidencePhotoUrl { get; set; }
 }
 
 public class SubmitMedleyResultDto
@@ -30,6 +32,8 @@ public class SubmitMedleyResultDto
     public Guid GroupCompetitorId { get; set; }
     public int SolveNumber { get; set; }
     public string? EsignatureData { get; set; }
+    public string? EvidencePhotoData { get; set; }
+    public string? EvidencePhotoUrl { get; set; }
     public List<MedleyDetailSubmissionDto> Details { get; set; } = new();
 }
 
@@ -70,6 +74,7 @@ public class SubmitProgressDto
     public int SolveCount { get; set; }
     public int? NextSolveNumber { get; set; }
     public bool CanSubmitNext { get; set; }
+    public bool IsCutoffReached { get; set; }
 }
 
 public class SolveProgressDto
@@ -86,6 +91,7 @@ public class SolveProgressDto
     public int SubmittedCount { get; set; }
     public int? NextSolveNumber { get; set; }
     public bool CanSubmit { get; set; }
+    public bool IsCutoffReached { get; set; }
     public string? Reason { get; set; }
     public ScrambleInfoDto? CurrentScramble { get; set; }
 }
@@ -143,6 +149,7 @@ public class VerifyJudgeStationResponseDto
     public int? NextSolveNumber { get; set; }
     public int? SolveCount { get; set; }
     public bool CanSubmit { get; set; }
+    public bool IsCutoffReached { get; set; }
     public ScrambleInfoDto? CurrentScramble { get; set; }
 }
 
@@ -160,6 +167,7 @@ public class JudgeStationRosterItemDto
     public int SubmittedCount { get; set; }
     public int? NextSolveNumber { get; set; }
     public bool CanSubmit { get; set; }
+    public bool IsCutoffReached { get; set; }
     public string Status { get; set; } = string.Empty;
 }
 

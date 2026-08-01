@@ -27,8 +27,17 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         if (now < tournament.RegistrationOpenAt || now > tournament.RegistrationCloseAt)
             throw new InvalidOperationException("Registration is currently closed for this tournament.");
 
-        if (tournament.StatusCode != "PUBLISHED" && tournament.StatusCode != "REGISTRATION_OPEN" && tournament.StatusCode != "ONGOING")
+        if (tournament.StatusCode == "REGISTRATION_CLOSED" || (tournament.StatusCode != "DRAFT" && tournament.StatusCode != "PUBLISHED" && tournament.StatusCode != "REGISTRATION_OPEN" && tournament.StatusCode != "ONGOING"))
             throw new InvalidOperationException("This tournament is not open for registration.");
+
+        if (tournament.MaxParticipants.HasValue && tournament.MaxParticipants.Value > 0)
+        {
+            var currentCount = await _unitOfWork.Registrations.CountAsync(r => r.TournamentId == tournamentId && r.StatusCode != "CANCELLED", ct);
+            if (currentCount >= tournament.MaxParticipants.Value)
+            {
+                throw new InvalidOperationException($"Tournament registration is full (Limit: {tournament.MaxParticipants.Value} competitors).");
+            }
+        }
 
         if (await _unitOfWork.Registrations.HasUserRegisteredAsync(tournamentId, userId, ct))
             throw new InvalidOperationException("User is already registered for this tournament.");
@@ -68,6 +77,20 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             var eventEntity = tournament.Events.FirstOrDefault(e => e.Id == evDto.EventId);
             if (eventEntity == null)
                 throw new InvalidOperationException($"Event ID {evDto.EventId} is not part of this tournament.");
+
+            // Validate per-event MaxCapacity if configured
+            if (eventEntity.MaxCapacity.HasValue && eventEntity.MaxCapacity.Value > 0)
+            {
+                var eventRegCount = await _unitOfWork.OfflineRegistrationEvents.CountAsync(
+                    ore => ore.EventId == evDto.EventId && ore.StatusCode != "WITHDRAWN",
+                    ct
+                );
+                if (eventRegCount >= eventEntity.MaxCapacity.Value)
+                {
+                    var puzzleName = eventEntity.PuzzleType?.Name ?? "Hạng mục";
+                    throw new InvalidOperationException($"Hạng mục '{puzzleName}' đã đạt giới hạn đăng ký tối đa ({eventEntity.MaxCapacity.Value} thí sinh).");
+                }
+            }
 
             var puzzleTypeId = eventEntity.PuzzleTypeId;
 
@@ -184,20 +207,28 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             TournamentEndDate = r.Tournament?.EndDate,
             TournamentStatusCode = r.Tournament?.StatusCode ?? string.Empty,
             RegisteredEvents = r.OfflineRegistrationEvents.Select(ore => {
-                var gc = gcList.FirstOrDefault(c => c.RegistrationEventId == ore.Id);
-                CompetitorAssignmentDto? assignment = null;
-                if (gc != null && groupMap.TryGetValue(gc.GroupId, out var group))
-                {
-                    assignment = new CompetitorAssignmentDto
-                    {
-                        RoundNumber = group.RoundNumber,
-                        GroupId = group.Id,
-                        GroupName = group.GroupName ?? string.Empty,
-                        StationNumber = gc.StationNumber,
-                        GroupStatusCode = group.StatusCode,
-                        IsPublished = group.StatusCode != "PENDING"
-                    };
-                }
+                // Collect ALL GroupCompetitor records for this registration event (one per round)
+                var gcsForOre = gcList
+                    .Where(c => c.RegistrationEventId == ore.Id)
+                    .ToList();
+
+                var assignments = gcsForOre
+                    .Where(gc => groupMap.TryGetValue(gc.GroupId, out _))
+                    .Select(gc => {
+                        groupMap.TryGetValue(gc.GroupId, out var grp);
+                        return new CompetitorAssignmentDto
+                        {
+                            RoundNumber = grp!.RoundNumber,
+                            GroupId = grp.Id,
+                            GroupName = grp.GroupName ?? string.Empty,
+                            StationNumber = gc.StationNumber,
+                            GroupStatusCode = grp.StatusCode,
+                            IsPublished = grp.StatusCode != "PENDING"
+                        };
+                    })
+                    .OrderBy(a => a.RoundNumber)
+                    .ToList();
+
                 return new RegisteredEventDetailDto
                 {
                     RegistrationEventId = ore.Id,
@@ -208,7 +239,7 @@ public class TournamentRegistrationService : ITournamentRegistrationService
                     SeedTimeMs = ore.SeedTimeMs,
                     SeedSourceCode = ore.SeedSourceCode,
                     SeedGeneratedAt = ore.SeedGeneratedAt,
-                    Assignment = assignment
+                    Assignments = assignments
                 };
             }).ToList()
         };

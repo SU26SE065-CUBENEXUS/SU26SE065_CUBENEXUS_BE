@@ -10,7 +10,6 @@ namespace CubeNexus.API.Controllers;
 [ApiController]
 [Route("api/dev/ai/scanner-test")]
 [AllowAnonymous]
-[EnableRateLimiting("AiRubikScannerTest")]
 public class AiScannerTestController : ControllerBase
 {
     private readonly IWebHostEnvironment _environment;
@@ -78,8 +77,8 @@ public class AiScannerTestController : ControllerBase
         if (gate is not null)
             return gate;
 
-        var imageBase64 = await ReadAsBase64Async(request.Snapshot, cancellationToken);
-        return Ok(await aiRubikClient.PreviewScannerTestFrameAsync(sessionId, imageBase64, BuildScannerMetadata(request), cancellationToken));
+        var imageBytes = await ReadAsBytesAsync(request.Snapshot, cancellationToken);
+        return Ok(await aiRubikClient.PreviewScannerTestFrameAsync(sessionId, imageBytes, request.Snapshot.FileName, request.Snapshot.ContentType, BuildScannerMetadata(request), cancellationToken));
     }
 
     [HttpPost("sessions/{sessionId}/observe")]
@@ -94,8 +93,8 @@ public class AiScannerTestController : ControllerBase
         if (gate is not null)
             return gate;
 
-        var imageBase64 = await ReadAsBase64Async(request.Snapshot, cancellationToken);
-        return Ok(await aiRubikClient.ObserveScannerTestFrameAsync(sessionId, imageBase64, BuildScannerMetadata(request), cancellationToken));
+        var imageBytes = await ReadAsBytesAsync(request.Snapshot, cancellationToken);
+        return Ok(await aiRubikClient.ObserveScannerTestFrameAsync(sessionId, imageBytes, request.Snapshot.FileName, request.Snapshot.ContentType, BuildScannerMetadata(request), cancellationToken));
     }
 
     [HttpPost("sessions/{sessionId}/scan-face")]
@@ -160,6 +159,17 @@ public class AiScannerTestController : ControllerBase
         using var memory = new MemoryStream();
         await stream.CopyToAsync(memory, cancellationToken);
         return Convert.ToBase64String(memory.ToArray());
+    }
+
+    private static async Task<byte[]> ReadAsBytesAsync(IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0)
+            throw new ArgumentException("Uploaded file is required.");
+
+        await using var stream = file.OpenReadStream();
+        using var memory = new MemoryStream();
+        await stream.CopyToAsync(memory, cancellationToken);
+        return memory.ToArray();
     }
 
     private static Dictionary<string, object?> BuildScannerMetadata(ScannerFrameFormRequest request)

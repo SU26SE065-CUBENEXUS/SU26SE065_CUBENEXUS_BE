@@ -13,14 +13,14 @@ public class TournamentRepository : Repository<Tournament>, ITournamentRepositor
 
     public async Task<List<Tournament>> GetPublicTournamentsAsync(CancellationToken ct = default)
     {
-        var publicStatuses = new[] { "DRAFT", "REGISTRATION_OPEN", "PUBLISHED", "ONGOING", "COMPLETED" };
+        var publicStatuses = new[] { "DRAFT", "REGISTRATION_OPEN", "REGISTRATION_CLOSED", "PUBLISHED", "ONGOING", "COMPLETED" };
         return await _set
+            .Include(t => t.CreatedByUser)
             .Include(t => t.Events)
                 .ThenInclude(e => e.PuzzleType)
             .Include(t => t.Events)
                 .ThenInclude(e => e.MedleyPuzzles)
                     .ThenInclude(mp => mp.PuzzleType)
-            .Include(t => t.CreatedByUser)
             .Where(t => publicStatuses.Contains(t.StatusCode))
             .OrderByDescending(t => t.StartDate)
             .ToListAsync(ct);

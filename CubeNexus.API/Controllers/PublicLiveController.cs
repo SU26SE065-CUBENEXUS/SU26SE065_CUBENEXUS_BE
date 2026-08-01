@@ -34,7 +34,10 @@ public class PublicLiveController : ControllerBase
     {
         try
         {
-            var publicStatuses = new[] { "REGISTRATION_OPEN", "PUBLISHED", "ONGOING", "COMPLETED" };
+            var publicStatuses = new[] { 
+                "DRAFT", "PUBLISHED", "REGISTRATION_OPEN", "REGISTRATION_CLOSED", "ONGOING", "COMPLETED", "CANCELLED",
+                "draft", "published", "registration_open", "registration_closed", "ongoing", "completed", "cancelled" 
+            };
             
             // 1. Fetch public tournaments
             var tournaments = await _unitOfWork.Tournaments.FindAsync(t => publicStatuses.Contains(t.StatusCode), ct);
@@ -50,7 +53,7 @@ public class PublicLiveController : ControllerBase
             var eventIds = events.Select(e => e.Id).ToList();
 
             // 3. Fetch ongoing groups to compute isLive
-            var ongoingGroups = await _unitOfWork.Groups.FindAsync(g => g.StatusCode == "ONGOING", ct);
+            var ongoingGroups = await _unitOfWork.Groups.FindAsync(g => g.StatusCode.ToUpper() == "ONGOING", ct);
             var ongoingEventIds = ongoingGroups.Select(g => g.EventId).ToHashSet();
 
             // 4. Map to DTOs
@@ -58,7 +61,8 @@ public class PublicLiveController : ControllerBase
             {
                 var tourEvents = events.Where(e => e.TournamentId == t.Id).ToList();
                 var hasActiveGroups = tourEvents.Any(e => ongoingEventIds.Contains(e.Id));
-                var isLive = t.StatusCode == "ONGOING" && hasActiveGroups;
+                var codeUpper = (t.StatusCode ?? string.Empty).ToUpperInvariant();
+                var isLive = codeUpper == "ONGOING" && hasActiveGroups;
 
                 return new PublicLiveTournamentDto
                 {
@@ -68,7 +72,7 @@ public class PublicLiveController : ControllerBase
                     Location = t.Location,
                     StartTime = t.StartDate,
                     EndTime = t.EndDate,
-                    Status = t.StatusCode,
+                    Status = codeUpper,
                     EventsCount = tourEvents.Count,
                     IsLive = isLive
                 };
@@ -108,7 +112,10 @@ public class PublicLiveController : ControllerBase
                 return NotFound(new { message = $"Tournament with ID {tournamentId} not found." });
             }
 
-            var publicStatuses = new[] { "REGISTRATION_OPEN", "PUBLISHED", "ONGOING", "COMPLETED" };
+            var publicStatuses = new[] { 
+                "DRAFT", "PUBLISHED", "REGISTRATION_OPEN", "REGISTRATION_CLOSED", "ONGOING", "COMPLETED", "CANCELLED",
+                "draft", "published", "registration_open", "registration_closed", "ongoing", "completed", "cancelled"
+            };
             if (!publicStatuses.Contains(tournament.StatusCode))
             {
                 return NotFound(new { message = "Tournament is not public." });
@@ -117,7 +124,7 @@ public class PublicLiveController : ControllerBase
             // 2. Fetch groups for all events in this tournament to compute active/latest round details
             var eventIds = tournament.Events.Select(e => e.Id).ToList();
             var groups = await _unitOfWork.Groups.FindAsync(g => eventIds.Contains(g.EventId), ct);
-            var ongoingGroups = groups.Where(g => g.StatusCode == "ONGOING").ToList();
+            var ongoingGroups = groups.Where(g => (g.StatusCode ?? string.Empty).ToUpper() == "ONGOING").ToList();
             var ongoingEventIds = ongoingGroups.Select(g => g.EventId).ToHashSet();
 
             var eventDtos = new List<PublicLiveEventDto>();
@@ -133,7 +140,7 @@ public class PublicLiveController : ControllerBase
                 if (evGroups.Any())
                 {
                     // Find if there is an ongoing round
-                    var ongoingGroup = evGroups.FirstOrDefault(g => g.StatusCode == "ONGOING");
+                    var ongoingGroup = evGroups.FirstOrDefault(g => (g.StatusCode ?? string.Empty).ToUpper() == "ONGOING");
                     if (ongoingGroup != null)
                     {
                         currentRoundNumber = ongoingGroup.RoundNumber;
@@ -153,11 +160,11 @@ public class PublicLiveController : ControllerBase
                         var roundGroups = evGroups.Where(g => g.RoundNumber == maxRound).ToList();
                         currentRoundNumber = maxRound;
                         
-                        if (roundGroups.All(g => g.StatusCode == "COMPLETED"))
+                        if (roundGroups.All(g => (g.StatusCode ?? string.Empty).ToUpper() == "COMPLETED"))
                         {
                             roundStatus = "COMPLETED";
                         }
-                        else if (roundGroups.Any(g => g.StatusCode == "LOCKED"))
+                        else if (roundGroups.Any(g => (g.StatusCode ?? string.Empty).ToUpper() == "LOCKED"))
                         {
                             roundStatus = "LOCKED";
                         }
@@ -203,8 +210,9 @@ public class PublicLiveController : ControllerBase
                 }
             }
 
+            var codeUpper = (tournament.StatusCode ?? string.Empty).ToUpperInvariant();
             var hasActiveGroups = tournament.Events.Any(e => ongoingEventIds.Contains(e.Id));
-            var isLive = tournament.StatusCode == "ONGOING" && hasActiveGroups;
+            var isLive = codeUpper == "ONGOING" && hasActiveGroups;
 
             var dto = new PublicLiveTournamentDetailDto
             {
@@ -214,7 +222,7 @@ public class PublicLiveController : ControllerBase
                 Location = tournament.Location,
                 StartTime = tournament.StartDate,
                 EndTime = tournament.EndDate,
-                Status = tournament.StatusCode,
+                Status = codeUpper,
                 IsLive = isLive,
                 Events = eventDtos.OrderBy(e => e.SortOrder).ToList(),
                 ActiveEventId = activeEventId,

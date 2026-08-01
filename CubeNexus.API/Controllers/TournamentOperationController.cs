@@ -7,6 +7,8 @@ using CubeNexus.Application.DTOs.Operation;
 using CubeNexus.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
+using CubeNexus.API.Hubs;
 
 namespace CubeNexus.API.Controllers;
 
@@ -23,6 +25,7 @@ public class TournamentOperationController : ControllerBase
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase _verifyJudgeStationByStationUseCase;
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase _correctResultUseCase;
     private readonly CubeNexus.Application.Interfaces.Repositories.IUnitOfWork _unitOfWork;
+    private readonly IHubContext<TournamentHub> _hubContext;
 
     public TournamentOperationController(
         ITournamentOperationService operationService,
@@ -34,7 +37,8 @@ public class TournamentOperationController : ControllerBase
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IAdvanceRoundUseCase advanceRoundUseCase,
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase verifyJudgeStationByStationUseCase,
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase correctResultUseCase,
-        CubeNexus.Application.Interfaces.Repositories.IUnitOfWork unitOfWork)
+        CubeNexus.Application.Interfaces.Repositories.IUnitOfWork unitOfWork,
+        IHubContext<TournamentHub> hubContext)
     {
         _operationService = operationService;
         _checkInUseCase = checkInUseCase;
@@ -46,6 +50,7 @@ public class TournamentOperationController : ControllerBase
         _verifyJudgeStationByStationUseCase = verifyJudgeStationByStationUseCase;
         _correctResultUseCase = correctResultUseCase;
         _unitOfWork = unitOfWork;
+        _hubContext = hubContext;
     }
 
     /// <summary>
@@ -150,6 +155,26 @@ public class TournamentOperationController : ControllerBase
         try
         {
             var result = await _checkInUseCase.ExecuteAsync(dto);
+
+            // Push real-time notification to competitor's mobile via SignalR
+            // The competitor listens on group "competitor:{registrationId}"
+            if (result.Success)
+            {
+                var competitorGroup = $"competitor:{result.RegistrationId}";
+                await _hubContext.Clients.Group(competitorGroup).SendAsync(
+                    "CompetitorCheckedIn",
+                    new
+                    {
+                        RegistrationId    = result.RegistrationId,
+                        PlayerName        = result.PlayerName,
+                        TournamentName    = result.TournamentName,
+                        AlreadyCheckedIn  = result.AlreadyCheckedIn,
+                        CheckedInAt       = result.CheckedInAt,
+                        Assignments       = result.Assignments   // includes GroupName + StationNumber per event
+                    },
+                    ct);
+            }
+
             return Ok(result);
         }
         catch (CubeNexus.Application.Exceptions.CustomException ex)
@@ -409,9 +434,9 @@ public class TournamentOperationController : ControllerBase
     public async Task<IActionResult> GetJudgeStationRoster(
         [FromQuery] Guid eventId,
         [FromQuery] int roundNumber,
-        [FromQuery] int groupNumber,
         [FromQuery] int stationNumber,
-        CancellationToken ct)
+        [FromQuery] int groupNumber = 0,
+        CancellationToken ct = default)
     {
         try
         {

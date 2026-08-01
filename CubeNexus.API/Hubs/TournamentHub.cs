@@ -61,4 +61,16 @@ public class TournamentHub : Hub
                 CompetitorName = competitorName
             });
     }
+
+    // Competitor subscribes to their own personal channel to receive check-in notification
+    // Group key: "competitor:{registrationId}"
+    public async Task RegisterCompetitor(string registrationId)
+    {
+        await Groups.AddToGroupAsync(Context.ConnectionId, $"competitor:{registrationId}");
+    }
+
+    public async Task LeaveCompetitorGroup(string registrationId)
+    {
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"competitor:{registrationId}");
+    }
 }

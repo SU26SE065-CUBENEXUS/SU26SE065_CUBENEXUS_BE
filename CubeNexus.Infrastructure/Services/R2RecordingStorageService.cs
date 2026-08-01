@@ -113,4 +113,23 @@ public class R2RecordingStorageService : IRecordingStorageService
             return null;
         }
     }
+
+    public async Task UploadStreamAsync(
+        string objectKey,
+        Stream contentStream,
+        string contentType,
+        CancellationToken cancellationToken = default)
+    {
+        var request = new PutObjectRequest
+        {
+            BucketName = _options.BucketName,
+            Key = objectKey,
+            InputStream = contentStream,
+            ContentType = contentType,
+            DisablePayloadSigning = true,
+            UseChunkEncoding = false
+        };
+
+        await _s3Client.PutObjectAsync(request, cancellationToken);
+    }
 }

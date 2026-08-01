@@ -64,6 +64,7 @@ public class SubmitOnlineMatchResultUseCase
             match.Player1TimeMs = isDnf ? null : timeMs;
             match.Player1ResultStatus = isDnf ? PlayerResultStatus.DNF.ToString() : PlayerResultStatus.VALID.ToString();
             match.Player1FinishedAt = DateTime.UtcNow;
+            match.Player1FinishCheckStatus = isDnf ? "NOT_REQUIRED" : "NOT_STARTED";
         }
         else
         {
@@ -71,6 +72,7 @@ public class SubmitOnlineMatchResultUseCase
             match.Player2TimeMs = isDnf ? null : timeMs;
             match.Player2ResultStatus = isDnf ? PlayerResultStatus.DNF.ToString() : PlayerResultStatus.VALID.ToString();
             match.Player2FinishedAt = DateTime.UtcNow;
+            match.Player2FinishCheckStatus = isDnf ? "NOT_REQUIRED" : "NOT_STARTED";
         }
 
         _matchRepo.Update(match);
@@ -99,6 +101,28 @@ public class SubmitOnlineMatchResultUseCase
                 PlayerResultStatus = isDnf ? PlayerResultStatus.DNF.ToString() : PlayerResultStatus.VALID.ToString(),
                 WinnerId = null,
                 IsMatchCompleted = false
+            };
+        }
+
+        var p1Done = match.Player1ResultStatus == PlayerResultStatus.DNF.ToString() || match.Player1FinishCheckStatus == "PASSED";
+        var p2Done = match.Player2ResultStatus == PlayerResultStatus.DNF.ToString() || match.Player2FinishCheckStatus == "PASSED";
+
+        if (p1Done && p2Done)
+        {
+            await _completeUseCase.ExecuteAsync(match.Id);
+            var refreshed = await _matchRepo.GetByIdAsync(match.Id) ?? match;
+            return new SubmitResultResponseDto
+            {
+                Message = "Match completed.",
+                MatchId = refreshed.Id,
+                MatchStatus = refreshed.StatusCode,
+                Outcome = refreshed.Outcome,
+                Player1ResultStatus = refreshed.Player1ResultStatus,
+                Player2ResultStatus = refreshed.Player2ResultStatus,
+                Player1TimeMs = refreshed.Player1TimeMs,
+                Player2TimeMs = refreshed.Player2TimeMs,
+                WinnerId = refreshed.WinnerId,
+                IsMatchCompleted = true
             };
         }
 
@@ -223,6 +247,7 @@ public class CompleteOnlineMatchUseCase
                 _ => null
             };
             existing.StatusCode = OnlineMatchStatus.COMPLETED.ToString();
+            existing.Phase = "COMPLETED";
             existing.EndedAt = DateTime.UtcNow;
 
             var player1Score = existing.Outcome == nameof(OnlineMatchOutcome.PLAYER1_WIN) ? 1.0m : existing.Outcome == nameof(OnlineMatchOutcome.DRAW) ? 0.5m : 0.0m;

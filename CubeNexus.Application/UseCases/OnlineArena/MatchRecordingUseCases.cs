@@ -220,6 +220,111 @@ public class CompleteMatchRecordingUploadUseCase
         };
 }
 
+public class UploadDirectMatchRecordingUseCase
+{
+    private readonly IOnlineMatchRepository _matchRepo;
+    private readonly IOnlineMatchVideoEvidenceRepository _videoRepo;
+    private readonly IOnlineMatchAuditLogRepository _auditRepo;
+    private readonly IOnlineArenaRealtimeNotifier _notifier;
+    private readonly IRecordingStorageService _storageService;
+    private readonly IUnitOfWork _uow;
+
+    public UploadDirectMatchRecordingUseCase(
+        IOnlineMatchRepository matchRepo,
+        IOnlineMatchVideoEvidenceRepository videoRepo,
+        IOnlineMatchAuditLogRepository auditRepo,
+        IOnlineArenaRealtimeNotifier notifier,
+        IRecordingStorageService storageService,
+        IUnitOfWork uow)
+    {
+        _matchRepo = matchRepo;
+        _videoRepo = videoRepo;
+        _auditRepo = auditRepo;
+        _notifier = notifier;
+        _storageService = storageService;
+        _uow = uow;
+    }
+
+    public async Task<MatchRecordingCompleteResponseDto> ExecuteAsync(
+        Guid matchId,
+        Guid userId,
+        Stream fileStream,
+        string contentType,
+        double? durationSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        var match = await MatchRecordingPolicy.RequireParticipantMatchAsync(_matchRepo, matchId, userId);
+
+        var normalizedContentType = MatchRecordingPolicy.NormalizeContentType(contentType);
+        var extension = MatchRecordingPolicy.NormalizeExtension(null, normalizedContentType);
+        var normDuration = MatchRecordingPolicy.NormalizeDurationSeconds(durationSeconds);
+
+        var current = await _videoRepo.GetLatestAsync(matchId, userId);
+        var isNewEvidence = current == null;
+        if (isNewEvidence)
+        {
+            current = new OnlineMatchVideoEvidence
+            {
+                Id = Guid.NewGuid(),
+                MatchId = matchId,
+                PlayerId = userId,
+                RecordingStatus = nameof(MatchRecordingStatus.Pending),
+                Status = nameof(MatchRecordingStatus.Pending),
+                SourceType = "BACKEND_DIRECT_STREAM"
+            };
+            await _videoRepo.AddAsync(current);
+        }
+
+        var evidence = current!;
+        var objectKey = !string.IsNullOrWhiteSpace(evidence.ObjectKey)
+            ? evidence.ObjectKey!
+            : MatchRecordingPolicy.BuildObjectKey(matchId, extension);
+
+        await _storageService.UploadStreamAsync(objectKey, fileStream, normalizedContentType, cancellationToken);
+
+        evidence.ObjectKey = objectKey;
+        evidence.ContentType = normalizedContentType;
+        evidence.MimeType = normalizedContentType;
+        evidence.FileUrl = objectKey;
+        evidence.FileSizeBytes = fileStream.Length;
+        evidence.DurationSeconds = normDuration ?? evidence.DurationSeconds;
+        evidence.DurationMs = evidence.DurationSeconds.HasValue ? (long)Math.Round(evidence.DurationSeconds.Value * 1000d) : null;
+        evidence.RecordedAt ??= DateTime.UtcNow;
+        evidence.UploadedAt = DateTime.UtcNow;
+        evidence.RecordingStatus = nameof(MatchRecordingStatus.Ready);
+        evidence.Status = nameof(MatchRecordingStatus.Ready);
+
+        if (!isNewEvidence)
+            _videoRepo.Update(evidence);
+
+        await _auditRepo.AddAsync(OnlineArenaAuditFactory.BuildAudit(matchId, userId, "MATCH_RECORDING_UPLOAD_DIRECT_SUCCESS", new
+        {
+            evidence.Id,
+            evidence.ObjectKey,
+            evidence.FileSizeBytes
+        }));
+        await _uow.SaveChangesAsync();
+
+        var response = new MatchRecordingCompleteResponseDto
+        {
+            Message = "Direct upload complete.",
+            MatchId = evidence.MatchId,
+            PlayerId = evidence.PlayerId,
+            VideoEvidenceId = evidence.Id,
+            ObjectKey = evidence.ObjectKey,
+            ContentType = evidence.ContentType,
+            FileSizeBytes = evidence.FileSizeBytes ?? 0,
+            DurationSeconds = evidence.DurationSeconds,
+            RecordingStatus = evidence.RecordingStatus,
+            RecordedAt = evidence.RecordedAt,
+            UploadedAt = evidence.UploadedAt
+        };
+
+        await _notifier.NotifyVideoEvidenceUploadedAsync(matchId, response);
+        return response;
+    }
+}
+
 public class GetMatchRecordingPlaybackUrlUseCase
 {
     private readonly IOnlineMatchRepository _matchRepo;

@@ -84,6 +84,8 @@ public class OnlineArenaHub : Hub
         ValidateOpponentTarget(match, currentUserId, targetUserId);
         EnsureNonTerminal(match.StatusCode);
 
+        _logger.LogInformation("[WebRTC] SDP Offer: {From} → {To} (match {MatchId})", currentUserId, targetUserId, matchId);
+
         await Clients.Group(GetUserGroup(targetUserId)).SendAsync("WebRtcOfferReceived", new
         {
             matchId,
@@ -102,6 +104,8 @@ public class OnlineArenaHub : Hub
         var match = await RequireMatchAccessCachedAsync(matchId, currentUserId, allowAdmin: false);
         ValidateOpponentTarget(match, currentUserId, targetUserId);
         EnsureNonTerminal(match.StatusCode);
+
+        _logger.LogInformation("[WebRTC] SDP Answer: {From} → {To} (match {MatchId})", currentUserId, targetUserId, matchId);
 
         await Clients.Group(GetUserGroup(targetUserId)).SendAsync("WebRtcAnswerReceived", new
         {
@@ -122,12 +126,37 @@ public class OnlineArenaHub : Hub
         ValidateOpponentTarget(match, currentUserId, targetUserId);
         EnsureNonTerminal(match.StatusCode);
 
+        _logger.LogDebug("[WebRTC] ICE Candidate: {From} → {To} (match {MatchId})", currentUserId, targetUserId, matchId);
+
         await Clients.Group(GetUserGroup(targetUserId)).SendAsync("IceCandidateReceived", new
         {
             matchId,
             fromUserId = currentUserId,
             targetUserId,
             candidate
+        });
+    }
+
+    /// <summary>
+    /// P2 calls this when it mounts the WebRTC component and is ready to receive an offer.
+    /// The backend relays a "WebRtcRequestOffer" event to P1 so P1 can reset its PC
+    /// and send a fresh SDP offer — fixing the race condition where P1 sent an offer
+    /// BEFORE P2 was listening.
+    /// </summary>
+    public async Task SendWebRtcRequestOffer(Guid matchId, Guid targetUserId)
+    {
+        var currentUserId = RequireCurrentUserId();
+        var match = await RequireMatchAccessCachedAsync(matchId, currentUserId, allowAdmin: false);
+        ValidateOpponentTarget(match, currentUserId, targetUserId);
+        EnsureNonTerminal(match.StatusCode);
+
+        _logger.LogInformation("[WebRTC] RequestOffer: P2 {From} → P1 {To} (match {MatchId})", currentUserId, targetUserId, matchId);
+
+        await Clients.Group(GetUserGroup(targetUserId)).SendAsync("WebRtcRequestOffer", new
+        {
+            matchId,
+            fromUserId = currentUserId,
+            targetUserId
         });
     }
 

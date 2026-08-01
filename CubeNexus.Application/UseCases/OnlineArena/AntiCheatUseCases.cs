@@ -102,22 +102,25 @@ public class MarkVideoRecordingStartedUseCase
         if (OnlineArenaFlowHelpers.IsTerminal(match.StatusCode))
             throw new ConflictException($"Match is already terminal ({match.StatusCode}).");
 
-        // Recording is ONLY valid during COUNTDOWN phase (StatusCode == READY)
-        if (match.StatusCode != nameof(OnlineMatchStatus.READY) || match.Phase != "COUNTDOWN")
-            throw new InvalidOperationException("Video recording can only be started during the COUNTDOWN phase.");
+        // The frontend starts recording as soon as the countdown page appears,
+        // so a delayed signal is also accepted during the early active phases.
+        var isCountdownPhase = match.StatusCode == nameof(OnlineMatchStatus.READY) && match.Phase == "COUNTDOWN";
+        var isWebRtcConnectingPhase = match.StatusCode == nameof(OnlineMatchStatus.CREATED) && match.Phase == "WEBRTC_CONNECTING";
+        var isActiveMatchPhase = match.StatusCode == nameof(OnlineMatchStatus.ONGOING)
+            && match.Phase is "INSPECTION" or "SOLVING" or "FINISH_CHECKING";
+        if (!isCountdownPhase && !isWebRtcConnectingPhase && !isActiveMatchPhase)
+            throw new InvalidOperationException("Video recording can only be started during the countdown or active match phases.");
 
-        if (match.Player1Id == userId)
-        {
-            match.Player1RecordingStarted = true;
-            match.Player1RecordingStartedAt = request.RecordingStartedAt;
-        }
-        else
-        {
-            match.Player2RecordingStarted = true;
-            match.Player2RecordingStartedAt = request.RecordingStartedAt;
-        }
+        var marked = await _matchRepo.MarkRecordingStartedAsync(
+            matchId,
+            userId,
+            request.RecordingStartedAt.ToUniversalTime());
+        if (!marked)
+            throw new InvalidOperationException("Unable to mark recording as started for this player.");
 
-        _matchRepo.Update(match);
+        match = await _matchRepo.GetByIdAsync(matchId)
+            ?? throw new KeyNotFoundException("Match not found.");
+
         await _auditRepo.AddAsync(OnlineArenaAuditFactory.BuildAudit(match.Id, userId, "VIDEO_RECORDING_STARTED", request));
         await _uow.SaveChangesAsync();
 
@@ -133,12 +136,6 @@ public class MarkVideoRecordingStartedUseCase
         };
 
         await _notifier.NotifyVideoRecordingStartedAsync(match.Id, response);
-
-        // Event-driven: if both players have started recording, transition to INSPECTION immediately
-        if (OnlineArenaFlowHelpers.BothRecordingStarted(match))
-        {
-            await _startMatchUseCase.TransitionToInspectionAsync(match);
-        }
 
         return response;
     }
@@ -188,6 +185,9 @@ public class RunAiRubikCheckUseCase
         string checkType,
         string imageBase64,
         string? evidenceImageUrl,
+        string? imageFileName = null,
+        string? imageContentType = null,
+        byte[]? imageBytes = null,
         string? scrambleSequence = null,
         CancellationToken cancellationToken = default)
     {
@@ -209,6 +209,9 @@ public class RunAiRubikCheckUseCase
             CheckType = checkType,
             ScrambleSequence = scrambleSequence,
             ImageBase64 = imageBase64,
+            ImageBytes = imageBytes,
+            ImageFileName = imageFileName,
+            ImageContentType = imageContentType,
             ImageUrl = evidenceImageUrl
         };
 

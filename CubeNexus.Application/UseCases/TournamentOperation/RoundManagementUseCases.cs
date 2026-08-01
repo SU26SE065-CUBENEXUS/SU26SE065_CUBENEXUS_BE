@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CubeNexus.Application.DTOs.Operation;
 using CubeNexus.Application.Exceptions;
+using CubeNexus.Application.Helpers;
 using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Application.Interfaces.UseCases.TournamentOperation;
@@ -79,7 +80,8 @@ public class LockRoundResultsUseCase : ILockRoundResultsUseCase
             if (comp.StatusCode == GroupCompetitorStatus.COMPLETED)
             {
                 var compResults = resultsByCompetitor.TryGetValue(comp.Id, out var rList) ? rList : new List<Result>();
-                if (compResults.Count < ev.SolveCount)
+                bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, compResults);
+                if (compResults.Count < ev.SolveCount && !isCutoffStopped)
                 {
                     throw new CustomException("ROUND_NOT_READY_TO_LOCK", "Cannot lock results because some competitors have not completed their solves yet.", 409);
                 }

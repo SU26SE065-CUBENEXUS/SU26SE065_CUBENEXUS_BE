@@ -30,6 +30,7 @@ public class MobileTimerConnectResponseDto
     public Guid MatchId { get; set; }
     public string StatusCode { get; set; } = string.Empty;
     public Guid PlayerId { get; set; }
+    public Guid SessionId { get; set; }
     public bool Player1TimerReady { get; set; }
     public bool Player2TimerReady { get; set; }
     public string? DeviceInfo { get; set; }
@@ -306,3 +307,46 @@ public class OnlineMatchRecoveryStateDto
     public RecoveryPlayerStateDto Player2 { get; set; } = null!;
     public RecoveryMeStateDto Me { get; set; } = null!;
 }
+
+public class OnlineMatchHistoryItemDto
+{
+    public Guid MatchId { get; set; }
+    public Guid PuzzleTypeId { get; set; }
+    public string PuzzleTypeName { get; set; } = "3x3x3";
+    public string ScrambleSequence { get; set; } = string.Empty;
+    public string ModeName { get; set; } = "Ranked 1v1";
+
+    public Guid MeUserId { get; set; }
+    public string MeUsername { get; set; } = string.Empty;
+    public string? MeAvatarUrl { get; set; }
+    public int? MeTimeMs { get; set; }
+    public bool MeIsDnf { get; set; }
+    public int? MeEloBefore { get; set; }
+    public int? MeEloAfter { get; set; }
+    public int EloChange { get; set; }
+
+    public Guid OpponentUserId { get; set; }
+    public string OpponentUsername { get; set; } = string.Empty;
+    public string? OpponentAvatarUrl { get; set; }
+    public int? OpponentTimeMs { get; set; }
+    public bool OpponentIsDnf { get; set; }
+    public int? OpponentEloBefore { get; set; }
+    public int? OpponentEloAfter { get; set; }
+
+    public bool IsWinner { get; set; }
+    public bool IsDraw { get; set; }
+    public string StatusCode { get; set; } = string.Empty;
+    public string Outcome { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime? EndedAt { get; set; }
+    public bool HasVideoReplay { get; set; }
+}
+
+public class OnlineMatchHistoryResponseDto
+{
+    public List<OnlineMatchHistoryItemDto> Matches { get; set; } = [];
+    public int TotalCount { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+}
+

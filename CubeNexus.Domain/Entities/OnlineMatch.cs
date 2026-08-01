@@ -70,8 +70,8 @@ public class OnlineMatch
     // === Checklist / Readiness Fields ===
     // checklistPassed = camera + webRtc + recording + timer + scrambleCheck PASSED (all true)
     // playerReady = player explicitly clicked "Ready" after checklistPassed
-    public bool Player1CameraReady { get; set; } = false;
-    public bool Player2CameraReady { get; set; } = false;
+    public bool Player1CameraReady { get; set; } = true;
+    public bool Player2CameraReady { get; set; } = true;
     public bool Player1WebRtcConnected { get; set; } = false;
     public bool Player2WebRtcConnected { get; set; } = false;
     public bool Player1RecordingStarted { get; set; } = false;
@@ -88,8 +88,6 @@ public class OnlineMatch
     public string Player2FinishCheckStatus { get; set; } = "PENDING";
 
     // === Scramble state (shared — both players use same sequence) ===
-    public string? Player1ScrambleSequence { get; set; }
-    public string? Player2ScrambleSequence { get; set; }
     public string? Player1ExpectedStateJson { get; set; }
     public string? Player2ExpectedStateJson { get; set; }
     public string? Player1ObservedStateJson { get; set; }

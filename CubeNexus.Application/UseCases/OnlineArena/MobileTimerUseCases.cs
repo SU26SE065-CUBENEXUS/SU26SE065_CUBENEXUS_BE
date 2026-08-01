@@ -30,13 +30,32 @@ public class ConnectMobileTimerUseCase
         if (string.IsNullOrWhiteSpace(qrSessionCode))
             throw new ArgumentException("qrSessionCode is required.");
 
-        var match = await _matchRepo.GetByQrSessionCodeAsync(qrSessionCode);
+        var qrParts = qrSessionCode.Split(':');
+        var actualQrCode = qrParts[0].Trim();
+        var targetRole = qrParts.Length > 1 ? qrParts[1].Trim() : null;
+
+        var match = await _matchRepo.GetByQrSessionCodeAsync(actualQrCode);
         if (match == null)
             throw new KeyNotFoundException("Invalid QR code - no match found.");
         if (match.Player1Id != userId && match.Player2Id != userId)
             throw new UnauthorizedAccessException("Not a player in this match.");
+
         if (OnlineArenaFlowHelpers.IsTerminal(match.StatusCode))
             throw new ConflictException($"Match is already terminal ({match.StatusCode}).");
+
+        if (targetRole != null)
+        {
+            if (targetRole == "P1" && match.Player1Id != userId)
+                throw new UnauthorizedAccessException("This QR code belongs to the other player. Please scan your own QR code.");
+            if (targetRole == "P2" && match.Player2Id != userId)
+                throw new UnauthorizedAccessException("This QR code belongs to the other player. Please scan your own QR code.");
+        }
+
+        var latestActiveMatch = await _matchRepo.GetLatestActiveMatchAsync(userId, match.PuzzleTypeId);
+        if (latestActiveMatch != null && latestActiveMatch.Id != match.Id && latestActiveMatch.CreatedAt > match.CreatedAt)
+        {
+            throw new ConflictException("A newer active match exists. This pairing code has expired.");
+        }
 
         var session = await _sessionRepo.GetSessionAsync(match.Id, userId);
         if (session == null)
@@ -46,7 +65,7 @@ public class ConnectMobileTimerUseCase
                 Id = Guid.NewGuid(),
                 MatchId = match.Id,
                 UserId = userId,
-                QrSessionCode = qrSessionCode,
+                QrSessionCode = actualQrCode,
                 DeviceInfo = deviceInfo,
                 ConnectedAt = DateTime.UtcNow,
                 IsActive = true
@@ -55,7 +74,7 @@ public class ConnectMobileTimerUseCase
         }
         else
         {
-            session.QrSessionCode = qrSessionCode;
+            session.QrSessionCode = actualQrCode;
             session.DeviceInfo = deviceInfo;
             session.ConnectedAt = DateTime.UtcNow;
             session.IsActive = true;
@@ -75,6 +94,7 @@ public class ConnectMobileTimerUseCase
         {
             Message = "Mobile timer connected.",
             MatchId = match.Id,
+            SessionId = session.Id,
             StatusCode = match.StatusCode,
             PlayerId = userId,
             Player1TimerReady = match.Player1TimerReady,

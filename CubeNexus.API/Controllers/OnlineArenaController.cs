@@ -169,6 +169,25 @@ public class OnlineArenaController : ControllerBase
         }
     }
 
+    [HttpGet("matches/history")]
+    public async Task<IActionResult> GetMyMatchHistory(
+        [FromQuery] Guid? puzzleTypeId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 15,
+        [FromServices] GetMyMatchHistoryUseCase useCase = null!)
+    {
+        if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
+
+        try
+        {
+            return Ok(await useCase.ExecuteAsync(userId, puzzleTypeId, page, pageSize));
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
     [HttpGet("matches/{matchId:guid}")]
     public async Task<IActionResult> GetMatchDetail(Guid matchId, [FromServices] GetMatchDetailUseCase useCase)
     {
@@ -199,19 +218,11 @@ public class OnlineArenaController : ControllerBase
         }
     }
 
+    [Obsolete("Camera ready is obsolete. It is verified implicitly by the scramble scan.")]
     [HttpPost("matches/{matchId:guid}/camera-ready")]
-    public async Task<IActionResult> MarkCameraReady(Guid matchId, [FromServices] MarkCameraReadyUseCase useCase)
+    public IActionResult MarkCameraReady(Guid matchId)
     {
-        if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
-
-        try
-        {
-            return Ok(await useCase.ExecuteAsync(matchId, userId));
-        }
-        catch (Exception ex)
-        {
-            return MapException(ex);
-        }
+        return Ok(new { message = "Camera ready is obsolete. Implicitly ready." });
     }
 
     [HttpPost("matches/{matchId:guid}/webrtc-connected")]
@@ -282,6 +293,24 @@ public class OnlineArenaController : ControllerBase
         }
     }
 
+    [HttpPost("matches/{matchId:guid}/scramble-validation/batch")]
+    public async Task<IActionResult> ValidateScrambleBatch(
+        Guid matchId,
+        [FromBody] ScrambleCheckBatchRequestDto request,
+        [FromServices] ValidateScrambleCubeStateUseCase useCase)
+    {
+        if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
+
+        try
+        {
+            return Ok(await useCase.ExecuteBatchAsync(matchId, userId, request));
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
     [HttpPost("matches/{matchId:guid}/scanner/{validationType}/start")]
     public async Task<IActionResult> StartScannerSession(
         Guid matchId,
@@ -330,8 +359,8 @@ public class OnlineArenaController : ControllerBase
 
         try
         {
-            var base64 = await ReadAsBase64Async(request.Snapshot, HttpContext.RequestAborted);
-            return Ok(await useCase.ExecuteAsync(matchId, userId, validationType, base64, new OnlineArenaScannerObserveRequest
+            var snapshotBytes = await ReadAsBytesAsync(request.Snapshot, HttpContext.RequestAborted);
+            return Ok(await useCase.ExecuteAsync(matchId, userId, validationType, snapshotBytes, request.Snapshot.FileName, request.Snapshot.ContentType, new OnlineArenaScannerObserveRequest
             {
                 ScanSessionId = request.ScanSessionId,
                 ScanGeneration = request.ScanGeneration,
@@ -422,8 +451,6 @@ public class OnlineArenaController : ControllerBase
         [FromServices] MockOnlineMatchFinishPassUseCase useCase,
         [FromServices] IWebHostEnvironment environment)
     {
-        if (!environment.IsDevelopment())
-            return NotFound();
         if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
 
         try
@@ -624,6 +651,38 @@ public class OnlineArenaController : ControllerBase
         }
     }
 
+    [HttpPost("matches/{matchId:guid}/dev/mock-scramble-pass")]
+    public async Task<IActionResult> MockScramblePass(
+        Guid matchId,
+        [FromServices] CubeNexus.Application.Interfaces.OnlineArena.IOnlineMatchRepository matchRepo,
+        [FromServices] CubeNexus.Application.Interfaces.OnlineArena.IOnlineArenaRealtimeNotifier notifier,
+        [FromServices] CubeNexus.Application.Interfaces.IUnitOfWork uow,
+        [FromServices] IWebHostEnvironment environment)
+    {
+        if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
+
+        try
+        {
+            var match = await matchRepo.GetByIdAsync(matchId);
+            if (match == null)
+                return NotFound("Match not found.");
+
+            if (match.Player1Id == userId)
+                match.Player1ScrambleCheckStatus = "PASSED";
+            else if (match.Player2Id == userId)
+                match.Player2ScrambleCheckStatus = "PASSED";
+            else
+                return Unauthorized("Not a player in this match.");
+
+            await MarkCameraReadyUseCase.AutoReadyIfChecklistPassedAsync(match, userId, matchRepo, notifier, uow);
+            return Ok(OnlineArenaFlowHelpers.BuildMatchState(match, userId, false));
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
     private static async Task<StoredUpload> SaveUploadedFileAsync(IWebHostEnvironment environment, Guid matchId, Guid userId, string category, IFormFile file)
     {
         if (file == null || file.Length == 0)
@@ -659,6 +718,17 @@ public class OnlineArenaController : ControllerBase
         using var memory = new MemoryStream();
         await stream.CopyToAsync(memory, cancellationToken);
         return Convert.ToBase64String(memory.ToArray());
+    }
+
+    private static async Task<byte[]> ReadAsBytesAsync(IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0)
+            throw new ArgumentException("Uploaded file is required.");
+
+        await using var stream = file.OpenReadStream();
+        using var memory = new MemoryStream();
+        await stream.CopyToAsync(memory, cancellationToken);
+        return memory.ToArray();
     }
 
     public class AiImageCheckFormRequest

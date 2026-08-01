@@ -19,11 +19,20 @@ public class GroupAssignmentDomainService
         if (stationCount <= 0)
             throw new ArgumentException("Station count must be greater than zero.", nameof(stationCount));
 
-        // Sort seed_time_ms ASC NULLS LAST
-        var sorted = registeredEvents
-            .OrderBy(e => e.SeedTimeMs.HasValue ? 0 : 1)
-            .ThenBy(e => e.SeedTimeMs)
-            .ToList();
+        // For Round 1: Sort by SeedTimeMs ASC (NULLS LAST)
+        // For Round > 1: Preserve incoming rank order (do NOT re-sort by original pre-tournament SeedTimeMs!)
+        List<OfflineRegistrationEvent> sorted;
+        if (roundNumber == 1)
+        {
+            sorted = registeredEvents
+                .OrderBy(e => e.SeedTimeMs.HasValue ? 0 : 1)
+                .ThenBy(e => e.SeedTimeMs)
+                .ToList();
+        }
+        else
+        {
+            sorted = registeredEvents.ToList();
+        }
 
         var assignments = new List<GroupCompetitorAssignment>();
         int competitorIndex = 0;
@@ -34,11 +43,16 @@ public class GroupAssignmentDomainService
             var groupCompetitors = sorted.Skip(competitorIndex).Take(competitorsPerGroup).ToList();
             string groupName = $"Group {groupNumber}";
 
+            // Shuffle available station numbers (1..stationCount) randomly for fair and random station allocation
+            var randomStations = Enumerable.Range(1, stationCount)
+                .OrderBy(_ => Random.Shared.Next())
+                .ToList();
+
             for (int i = 0; i < groupCompetitors.Count; i++)
             {
                 var regEvent = groupCompetitors[i];
-                // Station number is round-robin: 1 -> stationCount
-                int stationNumber = (i % stationCount) + 1;
+                // Station number is assigned randomly from shuffled stations
+                int stationNumber = randomStations[i % randomStations.Count];
 
                 assignments.Add(new GroupCompetitorAssignment
                 {

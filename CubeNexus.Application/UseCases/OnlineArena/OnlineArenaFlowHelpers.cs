@@ -27,12 +27,10 @@ public static class OnlineArenaFlowHelpers
     /// </summary>
     public static bool IsChecklistPassed(OnlineMatch match, bool isPlayer1)
         => isPlayer1
-            ? match.Player1CameraReady
-              && match.Player1WebRtcConnected
+            ? match.Player1WebRtcConnected
               && match.Player1TimerReady
               && match.Player1ScrambleCheckStatus == "PASSED"
-            : match.Player2CameraReady
-              && match.Player2WebRtcConnected
+            : match.Player2WebRtcConnected
               && match.Player2TimerReady
               && match.Player2ScrambleCheckStatus == "PASSED";
 
@@ -97,9 +95,9 @@ public static class OnlineArenaFlowHelpers
         if (match.StatusCode == nameof(OnlineMatchStatus.CREATED))
         {
             // Xác định player nào còn thiếu gì (Recording KHÔNG nằm trong setup checklist)
-            var p1Checked = match.Player1CameraReady && match.Player1WebRtcConnected
+            var p1Checked = match.Player1WebRtcConnected
                             && match.Player1TimerReady;
-            var p2Checked = match.Player2CameraReady && match.Player2WebRtcConnected
+            var p2Checked = match.Player2WebRtcConnected
                             && match.Player2TimerReady;
 
             // Nếu ai đó thiếu timer
@@ -109,10 +107,6 @@ public static class OnlineArenaFlowHelpers
             // Nếu ai đó thiếu WebRTC
             if (!match.Player1WebRtcConnected || !match.Player2WebRtcConnected)
                 return "WEBRTC_CONNECTING";
-
-            // Nếu ai đó thiếu camera
-            if (!match.Player1CameraReady || !match.Player2CameraReady)
-                return "ROOM_SETUP";
 
             // Đang check scramble
             return "SCRAMBLE_CHECKING";
@@ -410,9 +404,7 @@ public static class OnlineArenaFlowHelpers
             ScrambleRevealedAt = match.ScrambleRevealedAt,
             EndedAt = match.EndedAt,
             ScrambleSequence = isParticipant ? match.ScrambleSequence : null,
-            PlayerScrambleSequence = isParticipant
-                ? (match.Player1Id == requestingUserId ? match.Player1ScrambleSequence : match.Player2ScrambleSequence)
-                : null,
+            PlayerScrambleSequence = isParticipant ? match.ScrambleSequence : null,
             TimeLimitMs = match.TimeLimitMs
         };
     }

@@ -115,10 +115,12 @@ public class ObserveOnlineMatchScannerFrameUseCase
         Guid matchId,
         Guid userId,
         string validationType,
-        string imageBase64,
+        byte[] imageBytes,
+        string imageFileName,
+        string? imageContentType,
         OnlineArenaScannerObserveRequest request)
     {
-        if (string.IsNullOrWhiteSpace(imageBase64))
+        if (imageBytes is not { Length: > 0 })
             throw new ArgumentException("Scanner snapshot is required.");
 
         var match = await OnlineArenaScannerFlow.RequireParticipantMatchAsync(_matchRepo, matchId, userId);
@@ -134,10 +136,67 @@ public class ObserveOnlineMatchScannerFrameUseCase
             ["targetFaceIndex"] = request.TargetFaceIndex
         };
 
-        var observation = await _aiRubikClient.ObserveScannerTestFrameAsync(state.AiSessionId, imageBase64, metadata);
-        if (!string.Equals(observation.ScanSessionId, state.AiSessionId, StringComparison.Ordinal)
-            || observation.ScanGeneration != state.ScanGeneration
-            || observation.TargetFaceIndex != request.TargetFaceIndex)
+        var observation = await _aiRubikClient.ObserveScannerTestFrameAsync(state.AiSessionId, imageBytes, imageFileName, imageContentType, metadata);
+        if (!OnlineArenaScannerFlow.MatchesObservationIdentity(state, request, observation))
+        {
+            throw new InvalidOperationException("Scanner response identity mismatch.");
+        }
+
+        return await ExecuteCommitAsync(matchId, userId, validationType, request, observation);
+    }
+
+    public async Task<AiRubikScannerPreviewDto> ExecutePreviewAsync(
+        Guid matchId,
+        Guid userId,
+        string validationType,
+        byte[] imageBytes,
+        string imageFileName,
+        string? imageContentType,
+        OnlineArenaScannerObserveRequest request)
+    {
+        if (imageBytes is not { Length: > 0 })
+            throw new ArgumentException("Scanner snapshot is required.");
+
+        var match = await OnlineArenaScannerFlow.RequireParticipantMatchAsync(_matchRepo, matchId, userId);
+        var state = OnlineArenaScannerFlow.RequireScannerState(match, userId, validationType);
+        OnlineArenaScannerFlow.EnsureRequestMatchesState(state, request);
+
+        var metadata = new Dictionary<string, object?>
+        {
+            ["source"] = "online-arena-preview",
+            ["scanSessionId"] = state.AiSessionId,
+            ["scanGeneration"] = state.ScanGeneration,
+            ["requestId"] = request.RequestId,
+            ["targetFaceIndex"] = request.TargetFaceIndex
+        };
+
+        var preview = await _aiRubikClient.PreviewScannerTestFrameAsync(
+            state.AiSessionId,
+            imageBytes,
+            imageFileName,
+            imageContentType,
+            metadata);
+
+        if (!OnlineArenaScannerFlow.MatchesObservationIdentity(state, request, preview))
+        {
+            throw new InvalidOperationException("Scanner response identity mismatch.");
+        }
+
+        return preview;
+    }
+
+    public async Task<object> ExecuteCommitAsync(
+        Guid matchId,
+        Guid userId,
+        string validationType,
+        OnlineArenaScannerObserveRequest request,
+        AiRubikScannerPreviewDto observation)
+    {
+        var match = await OnlineArenaScannerFlow.RequireParticipantMatchAsync(_matchRepo, matchId, userId);
+        var state = OnlineArenaScannerFlow.RequireScannerState(match, userId, validationType);
+        OnlineArenaScannerFlow.EnsureRequestMatchesState(state, request);
+
+        if (!OnlineArenaScannerFlow.MatchesObservationIdentity(state, request, observation))
         {
             throw new InvalidOperationException("Scanner response identity mismatch.");
         }
@@ -255,6 +314,11 @@ public class ObserveOnlineMatchScannerFrameUseCase
 
                 return completedResponse;
             }
+
+            // Every accepted face starts a new AI burst identity, matching the
+            // scanner test client and preventing observations from adjacent faces
+            // from sharing stability state.
+            state.ScanGeneration++;
         }
 
         OnlineArenaScannerFlow.ApplyScannerState(match, userId, validationType, state);
@@ -488,9 +552,11 @@ internal static class OnlineArenaScannerFlow
             PreprocessMs = observation.PreprocessMs,
             PostprocessMs = observation.PostprocessMs,
             TotalMs = observation.TotalMs,
+            ModelVersion = observation.ModelVersion,
             Reason = observation.Reason,
             ObservedCenterColor = observation.CenterColor,
-            Grid3x3 = observation.Grid3x3
+            Grid3x3 = observation.Grid3x3,
+            Stickers = observation.Stickers
         };
 
     public static void AcceptFace(OnlineArenaPlayerScannerState state, AiRubikScannerPreviewDto observation)
@@ -643,9 +709,11 @@ internal static class OnlineArenaScannerFlow
             PreprocessMs = state.LastObservation?.PreprocessMs ?? 0,
             PostprocessMs = state.LastObservation?.PostprocessMs ?? 0,
             TotalMs = state.LastObservation?.TotalMs ?? 0,
+            ModelVersion = state.LastObservation?.ModelVersion ?? string.Empty,
             Reason = state.LastObservation?.Reason,
             ObservedCenterColor = state.LastObservation?.ObservedCenterColor,
             Grid3x3 = state.LastObservation?.Grid3x3,
+            Stickers = state.LastObservation?.Stickers ?? [],
             Faces = state.Faces.Select(face => new OnlineArenaScannerAcceptedFaceDto
             {
                 FaceIndex = face.FaceIndex,
@@ -657,6 +725,29 @@ internal static class OnlineArenaScannerFlow
             }).ToList(),
             Validation = validation
         };
+    }
+
+    public static bool MatchesObservationIdentity(
+        OnlineArenaPlayerScannerState state,
+        OnlineArenaScannerObserveRequest request,
+        AiRubikScannerPreviewDto observation)
+    {
+        var scanSessionMatches =
+            string.Equals(observation.ScanSessionId, state.AiSessionId, StringComparison.Ordinal)
+            || string.Equals(observation.ScanSessionId, state.ScanSessionId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(observation.ScanSessionId);
+
+        var generationMatches =
+            observation.ScanGeneration == 0
+            || observation.ScanGeneration == state.ScanGeneration
+            || observation.ScanGeneration == request.ScanGeneration;
+
+        var targetMatches =
+            observation.TargetFaceIndex == 0
+            || observation.TargetFaceIndex == request.TargetFaceIndex
+            || observation.RequestedFaceIndex == request.TargetFaceIndex;
+
+        return scanSessionMatches && generationMatches && targetMatches;
     }
 
     public static async Task NotifyScannerUpdatedAsync(IOnlineArenaRealtimeNotifier notifier, Guid matchId, string validationType, object payload)
@@ -695,7 +786,7 @@ internal static class OnlineArenaScannerFlow
 
     private static void EnsurePlayerAssignment(OnlineMatch match, Guid userId)
     {
-        var scramble = match.Player1Id == userId ? match.Player1ScrambleSequence : match.Player2ScrambleSequence;
+        var scramble = match.ScrambleSequence;
         var expectedStateJson = match.Player1Id == userId ? match.Player1ExpectedStateJson : match.Player2ExpectedStateJson;
         if (string.IsNullOrWhiteSpace(scramble) || string.IsNullOrWhiteSpace(expectedStateJson))
             throw new InvalidOperationException("Player scramble assignment is missing.");
@@ -784,9 +875,11 @@ internal sealed class OnlineArenaScannerObservationState
     public double PreprocessMs { get; set; }
     public double PostprocessMs { get; set; }
     public double TotalMs { get; set; }
+    public string ModelVersion { get; set; } = string.Empty;
     public string? Reason { get; set; }
     public string? ObservedCenterColor { get; set; }
     public List<List<string>>? Grid3x3 { get; set; }
+    public List<AiRubikScannerStickerDto> Stickers { get; set; } = [];
 }
 
 internal sealed class OnlineArenaAcceptedFaceState

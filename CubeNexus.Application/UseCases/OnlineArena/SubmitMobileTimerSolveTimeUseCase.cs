@@ -13,19 +13,22 @@ public class SubmitMobileTimerSolveTimeUseCase
     private readonly IOnlineArenaRealtimeNotifier _notifier;
     private readonly IUnitOfWork _uow;
     private readonly CompleteOnlineMatchUseCase _completeUseCase;
+    private readonly IOnlineMatchAuditLogRepository _auditRepo;
 
     public SubmitMobileTimerSolveTimeUseCase(
         IOnlineMatchRepository matchRepo,
         IMobileTimerSessionRepository sessionRepo,
         IOnlineArenaRealtimeNotifier notifier,
         IUnitOfWork uow,
-        CompleteOnlineMatchUseCase completeUseCase)
+        CompleteOnlineMatchUseCase completeUseCase,
+        IOnlineMatchAuditLogRepository auditRepo)
     {
         _matchRepo = matchRepo;
         _sessionRepo = sessionRepo;
         _notifier = notifier;
         _uow = uow;
         _completeUseCase = completeUseCase;
+        _auditRepo = auditRepo;
     }
 
     public async Task<SubmitSolveTimeResponseDto> ExecuteAsync(Guid userId, SubmitSolveTimeRequest request)
@@ -40,15 +43,28 @@ public class SubmitMobileTimerSolveTimeUseCase
         if (OnlineArenaFlowHelpers.IsTerminal(match.StatusCode))
             throw new ConflictException($"Match is already terminal ({match.StatusCode}).");
 
-        if (match.StatusCode != OnlineMatchStatus.ONGOING.ToString() || match.Phase != "SOLVING")
-            throw new InvalidOperationException("Match must be ONGOING and in SOLVING phase to submit time.");
+        if (match.StatusCode != OnlineMatchStatus.ONGOING.ToString() || 
+            (match.Phase != "SOLVING" && match.Phase != "INSPECTION"))
+        {
+            throw new InvalidOperationException("Match must be ONGOING and in SOLVING or INSPECTION phase to submit time.");
+        }
+
+        // If a player starts/finishes their solve during the inspection phase, transition the match phase to SOLVING
+        if (match.Phase == "INSPECTION")
+        {
+            match.Phase = "SOLVING";
+            match.SolveDeadlineAt = DateTime.UtcNow.AddMinutes(60);
+        }
 
         // Verify mobile timer session
         var session = await _sessionRepo.GetSessionAsync(request.MatchId, userId);
         if (session == null || !session.IsActive || session.Id != request.MobileTimerSessionId)
             throw new InvalidOperationException("No active paired mobile timer session found.");
 
-        if (session.QrSessionCode != request.DeviceSessionToken)
+        // Strip the :P1/:P2 role suffix appended by the frontend QR code generator.
+        // The mobile app stores the full scanned string (e.g. "ABC123:P1") but DB stores only base code ("ABC123").
+        var submittedToken = request.DeviceSessionToken?.Split(':')[0].Trim() ?? string.Empty;
+        if (session.QrSessionCode != submittedToken)
             throw new AuthenticationException("Invalid device session token.");
 
         var isPlayer1 = match.Player1Id == userId;
@@ -64,6 +80,69 @@ public class SubmitMobileTimerSolveTimeUseCase
                 return BuildResponse(match, userId);
             }
             throw new ConflictException("Result already submitted with different data.");
+        }
+
+        // Calculate inspection penalty using server-side timestamps only.
+        // We compare InspectionDeadlineAt (when inspection officially ended on server)
+        // against the server's current time (when the submission arrived).
+        // This is 100% immune to mobile clock drift/timezone issues.
+        string penaltyDescription = "";
+        if (!request.IsDnf && match.InspectionDeadlineAt.HasValue && request.TimeMs.HasValue)
+        {
+            var serverReceiveTime = DateTime.UtcNow;
+            var inspectionDeadline = match.InspectionDeadlineAt.Value;
+
+            // How many seconds AFTER the inspection deadline did this submission arrive?
+            // If the player started solving before inspection ended, this will be negative or small.
+            // The solve start time from server's perspective:
+            // solveStartedAt = serverReceiveTime - TimeMs (time they were solving)
+            // elapsedAfterDeadline = solveStartedAt - inspectionDeadline
+            var solveStartedAtServer = serverReceiveTime - TimeSpan.FromMilliseconds(request.TimeMs.Value);
+            var elapsedAfterDeadlineSecs = (solveStartedAtServer - inspectionDeadline).TotalSeconds;
+
+            // WCA Rule: 15s inspection.
+            // We allow a generous 6.0-second buffer for page rendering, client transition, and network lag.
+            // If player started solving >= 2s after deadline + buffer: +2s penalty (total 23s).
+            // If player started solving >= 4s after deadline + buffer: DNF (total 25s).
+            var lagBufferSecs = 6.0;
+            var adjustedElapsedSecs = elapsedAfterDeadlineSecs - lagBufferSecs;
+
+            if (adjustedElapsedSecs >= 2.0)
+            {
+                if (adjustedElapsedSecs >= 4.0)
+                {
+                    request.IsDnf = true;
+                    request.TimeMs = null;
+                    penaltyDescription = " (Inspection timeout DNF)";
+
+                    await _auditRepo.AddAsync(OnlineArenaAuditFactory.BuildAudit(match.Id, userId, "INSPECTION_TIMEOUT_DNF", new
+                    {
+                        elapsedAfterDeadlineSecs,
+                        adjustedElapsedSecs,
+                        lagBufferSecs,
+                        solveStartedAtServer,
+                        inspectionDeadline,
+                        serverReceiveTime
+                    }));
+                }
+                else
+                {
+                    request.TimeMs += 2000;
+                    penaltyDescription = " (+2s inspection penalty)";
+
+                    await _auditRepo.AddAsync(OnlineArenaAuditFactory.BuildAudit(match.Id, userId, "INSPECTION_PENALTY_ADDED", new
+                    {
+                        elapsedAfterDeadlineSecs,
+                        adjustedElapsedSecs,
+                        lagBufferSecs,
+                        originalTimeMs = request.TimeMs - 2000,
+                        penalizedTimeMs = request.TimeMs,
+                        solveStartedAtServer,
+                        inspectionDeadline,
+                        serverReceiveTime
+                    }));
+                }
+            }
         }
 
         // Verify scramble check was PASSED if solving successfully
@@ -118,7 +197,7 @@ public class SubmitMobileTimerSolveTimeUseCase
         await _uow.SaveChangesAsync();
 
         // Notify result submitted
-        var signalRPayload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Result submitted.");
+        var signalRPayload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, $"Result submitted{penaltyDescription}.");
         await _notifier.NotifyResultSubmittedAsync(match.Id, signalRPayload);
 
         // If both submitted and all required finish checks are completed (e.g. both DNF), complete match immediately

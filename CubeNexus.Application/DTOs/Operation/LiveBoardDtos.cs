@@ -36,6 +36,7 @@ public class LiveBoardCompetitorDto
     public int? AverageTimeMs { get; set; }
     public int? Rank { get; set; }
     public int CompletedSolves { get; set; }
+    public bool IsCutoffReached { get; set; }
 }
 
 public class LiveBoardResultDto
@@ -48,6 +49,8 @@ public class LiveBoardResultDto
     public bool IsDnf { get; set; }
     public bool IsLocked { get; set; }
     public DateTime SubmittedAt { get; set; }
+    public string? EsignatureData { get; set; }
+    public string? EvidencePhotoUrl { get; set; }
 }
 
 public class LiveBoardProgressDto

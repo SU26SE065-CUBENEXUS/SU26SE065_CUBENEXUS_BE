@@ -47,33 +47,32 @@ public class GetMatchRecoveryStateUseCase
             "ROOM_SETUP" or "WEBRTC_CONNECTING" or "MOBILE_TIMER_PAIRING" or "SCRAMBLE_CHECKING" => "SETUP",
             "COUNTDOWN" => "COUNTDOWN",
             "INSPECTION" => "INSPECTION",
-            "SOLVING" => myResultStatus == PlayerResultStatus.PENDING.ToString() ? "SOLVING"
-                        : (myResultStatus == PlayerResultStatus.VALID.ToString() && myFinishStatus != "PASSED") ? "FINISH_SCANNING"
-                        : "WAITING_OPPONENT",
-            "FINISH_CHECKING" => "FINISH_SCANNING",
-            "PENDING_EVIDENCE" => "WAITING_OPPONENT",
+            "SOLVING" or "FINISH_CHECKING" or "PENDING_EVIDENCE" =>
+                myResultStatus == PlayerResultStatus.PENDING.ToString()
+                ? "SOLVING"
+                : (myResultStatus == PlayerResultStatus.VALID.ToString() && myFinishStatus != "PASSED")
+                    ? "FINISH_SCANNING"
+                    : "WAITING_OPPONENT",
             "NEEDS_REVIEW" => "NEEDS_REVIEW",
             "COMPLETED" or "CANCELLED" => "COMPLETED",
             _ => "SETUP"
         };
 
-        // For ROOM_SETUP: refine between SETUP and SCRAMBLE_CHECK based on per-player progress
         if (match.Phase is "ROOM_SETUP" or "WEBRTC_CONNECTING" or "MOBILE_TIMER_PAIRING" or "SCRAMBLE_CHECKING")
         {
-            var myChecklist = isP1 ? p1ChecklistPassed : p2ChecklistPassed;
             var myCamWeb = isP1
                 ? match.Player1CameraReady && match.Player1WebRtcConnected && match.Player1TimerReady
                 : match.Player2CameraReady && match.Player2WebRtcConnected && match.Player2TimerReady;
             var myScram = isP1 ? match.Player1ScrambleCheckStatus : match.Player2ScrambleCheckStatus;
 
-            if (myCamWeb && myScram != "PASSED")
+            if (myScram != "PASSED")
                 nextUiState = "SCRAMBLE_CHECK";
-            else if (!myChecklist)
+            else if (!myCamWeb)
                 nextUiState = "SETUP";
         }
 
         // Override for terminal statuses regardless of phase
-        if (match.StatusCode == nameof(OnlineMatchStatus.CANCELLED))
+        if (match.StatusCode is nameof(OnlineMatchStatus.CANCELLED) or nameof(OnlineMatchStatus.COMPLETED))
             nextUiState = "COMPLETED";
         if (match.StatusCode == nameof(OnlineMatchStatus.NEEDS_REVIEW))
             nextUiState = "NEEDS_REVIEW";
@@ -86,7 +85,7 @@ public class GetMatchRecoveryStateUseCase
             QrSessionCode = match.QrSessionCode,
             SetupDeadlineAt = match.SetupDeadlineAt,
             CountdownEndsAt = match.CountdownEndsAt,
-            ScrambleSequence = isP1 ? match.Player1ScrambleSequence : match.Player2ScrambleSequence,
+            ScrambleSequence = match.ScrambleSequence,
             InspectionDeadlineAt = match.InspectionDeadlineAt,
             SolveDeadlineAt = match.SolveDeadlineAt,
             Outcome = match.Outcome,

@@ -121,6 +121,56 @@ public class OnlineMatchRepository : IOnlineMatchRepository
             .Where(m => ActiveStatuses.Contains(m.StatusCode))
             .ToListAsync(ct);
 
+    public async Task<(List<OnlineMatch> Items, int TotalCount)> GetUserMatchHistoryAsync(Guid userId, Guid? puzzleTypeId, int page, int pageSize)
+    {
+        var query = _context.Set<OnlineMatch>()
+            .AsNoTracking()
+            .Include(m => m.PuzzleType)
+            .Include(m => m.Player1)
+            .Include(m => m.Player2)
+            .Include(m => m.VideoEvidences)
+            .Where(m => m.Player1Id == userId || m.Player2Id == userId);
+
+        if (puzzleTypeId.HasValue && puzzleTypeId.Value != Guid.Empty)
+        {
+            query = query.Where(m => m.PuzzleTypeId == puzzleTypeId.Value);
+        }
+
+        var total = await query.CountAsync();
+        var items = await query
+            .OrderByDescending(m => m.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return (items, total);
+    }
+
+    public async Task<bool> MarkRecordingStartedAsync(Guid matchId, Guid playerId, DateTime recordingStartedAt)
+    {
+        var query = _context.Set<OnlineMatch>().Where(match => match.Id == matchId);
+        var participant = await query.Select(match => new
+        {
+            IsPlayer1 = match.Player1Id == playerId,
+            IsPlayer2 = match.Player2Id == playerId
+        }).FirstOrDefaultAsync();
+
+        if (participant == null)
+            return false;
+
+        var affected = participant.IsPlayer1
+            ? await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(match => match.Player1RecordingStarted, true)
+                .SetProperty(match => match.Player1RecordingStartedAt, recordingStartedAt))
+            : participant.IsPlayer2
+                ? await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(match => match.Player2RecordingStarted, true)
+                .SetProperty(match => match.Player2RecordingStartedAt, recordingStartedAt))
+                : 0;
+
+        return affected == 1;
+    }
+
     public Task AddAsync(OnlineMatch match)
         => _context.Set<OnlineMatch>().AddAsync(match).AsTask();
 

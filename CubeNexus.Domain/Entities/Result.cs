@@ -12,6 +12,7 @@ public class Result
     public Guid? PenaltyTypeId { get; set; }
     public bool IsDnf { get; set; } = false;
     public string? EsignatureData { get; set; }
+    public string? EvidencePhotoUrl { get; set; }
     public DateTime? SignedAt { get; set; }
     public DateTime SubmittedAt { get; set; }
     public bool IsLocked { get; set; } = false;
