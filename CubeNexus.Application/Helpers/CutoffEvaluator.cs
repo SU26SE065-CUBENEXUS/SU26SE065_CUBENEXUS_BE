@@ -13,6 +13,8 @@ public static class CutoffEvaluator
     /// </summary>
     public static int GetRequiredCutoffAttempts(int solveCount)
     {
+        if (solveCount <= 2)
+            return 1;
         return (solveCount == 3) ? 1 : 2;
     }
 

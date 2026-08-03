@@ -82,9 +82,13 @@ public class AdvanceRoundUseCase : IAdvanceRoundUseCase
             ev.CutoffTimeMs
         );
 
-        // Exclude NO_SHOW and non-COMPLETED competitors
+        // Exclude NO_SHOW, non-COMPLETED, and cutoff-stopped competitors
+        // IsCutoffReached = true means the competitor FAILED to pass cutoff (was stopped early)
+        // → they must NOT advance to the next round
         var eligibleCompetitors = calculatedCompetitors
-            .Where(c => c.CompetitorStatus == "COMPLETED" && (c.CompletedSolves >= ev.SolveCount || c.IsCutoffReached))
+            .Where(c => c.CompetitorStatus == "COMPLETED"
+                     && c.CompletedSolves >= ev.SolveCount
+                     && !c.IsCutoffReached)
             .ToList();
 
         // Advanced Tie-Break Logic

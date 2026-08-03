@@ -7,7 +7,7 @@ namespace CubeNexus.Domain.Services;
 
 public class PenaltyCalculationDomainService
 {
-    public void CalculateTraditionalResult(Result result, PenaltyType? penaltyType)
+    public void CalculateTraditionalResult(Result result, PenaltyType? penaltyType, int? timeLimitMs = null)
     {
         if (penaltyType != null)
         {
@@ -26,6 +26,13 @@ public class PenaltyCalculationDomainService
         {
             result.IsDnf = false;
             result.FinalTimeMs = result.RawTimeMs;
+        }
+
+        // Auto DNF if FinalTime meets or exceeds TimeLimit
+        if (!result.IsDnf && timeLimitMs.HasValue && timeLimitMs.Value > 0 && result.FinalTimeMs.HasValue && result.FinalTimeMs.Value >= timeLimitMs.Value)
+        {
+            result.IsDnf = true;
+            result.FinalTimeMs = null;
         }
     }
 

@@ -119,7 +119,8 @@ public class CorrectResultUseCase : ICorrectResultUseCase
             userMap,
             regMap,
             offlineRegEventMap,
-            penaltyTypeMap
+            penaltyTypeMap,
+            ev.CutoffTimeMs
         );
 
         var calculatedComp = calculatedCompetitors.FirstOrDefault(cc => cc.GroupCompetitorId == groupCompetitor.Id);

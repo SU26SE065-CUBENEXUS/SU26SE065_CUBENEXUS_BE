@@ -85,7 +85,8 @@ public class LiveBoardController : ControllerBase
             userMap,
             regMap,
             offlineRegEventMap,
-            penaltyTypeMap
+            penaltyTypeMap,
+            ev.CutoffTimeMs
         );
 
         var progress = LiveBoardCalculator.CalculateProgress(ev.SolveCount, competitorDtos);
@@ -141,7 +142,8 @@ public class LiveBoardController : ControllerBase
             userMap,
             regMap,
             offlineRegEventMap,
-            penaltyTypeMap
+            penaltyTypeMap,
+            ev.CutoffTimeMs
         );
 
         var rankings = competitorDtos.Select(c => new LiveBoardRankingDto

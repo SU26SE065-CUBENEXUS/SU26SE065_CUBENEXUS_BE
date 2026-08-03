@@ -496,7 +496,7 @@ public class TournamentOperationService : ITournamentOperationService
         result.SignedAt = dto.EsignatureData != null ? DateTime.UtcNow : null;
         result.SubmittedAt = DateTime.UtcNow;
 
-        _penaltyCalculationService.CalculateTraditionalResult(result, penaltyType);
+        _penaltyCalculationService.CalculateTraditionalResult(result, penaltyType, ev.TimeLimitMs);
 
         _unitOfWork.Results.Add(result);
 
