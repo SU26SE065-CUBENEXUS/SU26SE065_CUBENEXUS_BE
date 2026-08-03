@@ -161,9 +161,16 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             ? await _unitOfWork.Groups.FindAsync(g => gcGroupIds.Contains(g.Id), ct)
             : new List<Group>();
         var groupMap = groups.ToDictionary(g => g.Id);
-        Console.WriteLine($"[DEBUG] Groups found: {groupMap.Count} -> [{string.Join(", ", groupMap.Values.Select(g => $"{g.GroupName}:{g.StatusCode}").Take(5))}]");
 
-        return registrations.Select(r => MapToDto(r, gcList, groupMap)).ToList();
+        var gcIds = gcList.Select(gc => gc.Id).ToList();
+        var results = gcIds.Any()
+            ? await _unitOfWork.Results.FindAsync(r => gcIds.Contains(r.GroupCompetitorId), ct)
+            : new List<Result>();
+        var resultMap = results
+            .GroupBy(r => r.GroupCompetitorId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(r => r.SolveNumber).ToList());
+
+        return registrations.Select(r => MapToDto(r, gcList, groupMap, resultMap)).ToList();
     }
 
     public async Task<RegistrationResultDto> GetUserRegistrationByIdAsync(Guid registrationId, Guid userId, CancellationToken ct = default)
@@ -184,15 +191,28 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             : new List<Group>();
         var groupMap = groups.ToDictionary(g => g.Id);
 
-        return MapToDto(reg, gcList, groupMap);
+        var gcIds = gcList.Select(gc => gc.Id).ToList();
+        var results = gcIds.Any()
+            ? await _unitOfWork.Results.FindAsync(r => gcIds.Contains(r.GroupCompetitorId), ct)
+            : new List<Result>();
+        var resultMap = results
+            .GroupBy(r => r.GroupCompetitorId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(r => r.SolveNumber).ToList());
+
+        return MapToDto(reg, gcList, groupMap, resultMap);
     }
 
     private RegistrationResultDto MapToDto(Registration r)
     {
-        return MapToDto(r, new List<GroupCompetitor>(), new Dictionary<Guid, Group>());
+        return MapToDto(r, new List<GroupCompetitor>(), new Dictionary<Guid, Group>(), new Dictionary<Guid, List<Result>>());
     }
 
-    private RegistrationResultDto MapToDto(Registration r, List<GroupCompetitor> gcList, Dictionary<Guid, Group> groupMap)
+    private RegistrationResultDto MapToDto(
+        Registration r, 
+        List<GroupCompetitor> gcList, 
+        Dictionary<Guid, Group> groupMap,
+        Dictionary<Guid, List<Result>> resultMap
+    )
     {
         return new RegistrationResultDto
         {
@@ -207,7 +227,6 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             TournamentEndDate = r.Tournament?.EndDate,
             TournamentStatusCode = r.Tournament?.StatusCode ?? string.Empty,
             RegisteredEvents = r.OfflineRegistrationEvents.Select(ore => {
-                // Collect ALL GroupCompetitor records for this registration event (one per round)
                 var gcsForOre = gcList
                     .Where(c => c.RegistrationEventId == ore.Id)
                     .ToList();
@@ -216,6 +235,17 @@ public class TournamentRegistrationService : ITournamentRegistrationService
                     .Where(gc => groupMap.TryGetValue(gc.GroupId, out _))
                     .Select(gc => {
                         groupMap.TryGetValue(gc.GroupId, out var grp);
+                        resultMap.TryGetValue(gc.Id, out var solvesList);
+                        var solves = solvesList?.Select(res => new SolveDetailDto
+                        {
+                            SolveNumber = res.SolveNumber,
+                            RawTimeMs = res.RawTimeMs,
+                            PenaltyTypeId = res.PenaltyTypeId,
+                            FinalTimeMs = res.FinalTimeMs,
+                            IsDnf = res.IsDnf,
+                            EvidencePhotoUrl = res.EvidencePhotoUrl
+                        }).ToList() ?? new List<SolveDetailDto>();
+
                         return new CompetitorAssignmentDto
                         {
                             RoundNumber = grp!.RoundNumber,
@@ -223,7 +253,9 @@ public class TournamentRegistrationService : ITournamentRegistrationService
                             GroupName = grp.GroupName ?? string.Empty,
                             StationNumber = gc.StationNumber,
                             GroupStatusCode = grp.StatusCode,
-                            IsPublished = grp.StatusCode != "PENDING"
+                            CompetitorStatusCode = gc.StatusCode.ToString(),
+                            IsPublished = grp.StatusCode != "PENDING",
+                            Solves = solves
                         };
                     })
                     .OrderBy(a => a.RoundNumber)

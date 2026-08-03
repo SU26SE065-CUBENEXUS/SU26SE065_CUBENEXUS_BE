@@ -39,8 +39,20 @@ public class CompetitorAssignmentDto
     public string GroupName { get; set; } = string.Empty;
     public int? StationNumber { get; set; }
     public string GroupStatusCode { get; set; } = string.Empty;
+    public string CompetitorStatusCode { get; set; } = string.Empty;
     public DateTime? ScheduledAt { get; set; }
     public bool IsPublished { get; set; }
+    public List<SolveDetailDto> Solves { get; set; } = new();
+}
+
+public class SolveDetailDto
+{
+    public int SolveNumber { get; set; }
+    public int? RawTimeMs { get; set; }
+    public Guid? PenaltyTypeId { get; set; }
+    public int? FinalTimeMs { get; set; }
+    public bool IsDnf { get; set; }
+    public string? EvidencePhotoUrl { get; set; }
 }
 
 public class RegistrationQrPayload
