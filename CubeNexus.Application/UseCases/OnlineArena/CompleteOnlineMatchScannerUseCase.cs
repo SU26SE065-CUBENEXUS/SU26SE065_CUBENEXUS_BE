@@ -40,9 +40,9 @@ public class CompleteOnlineMatchScannerUseCase
         string validationType,
         OnlineArenaScannerCompleteRequest request)
     {
-        if (request.Observations == null || request.Observations.Count != 6)
+        if (request.Observations == null || request.Observations.Count < 5)
         {
-            throw new ArgumentException("Request must contain exactly 6 observations.");
+            throw new ArgumentException("Request must contain at least 5 observations.");
         }
 
         var match = await OnlineArenaScannerFlow.RequireParticipantMatchAsync(_matchRepo, matchId, userId);
@@ -71,14 +71,14 @@ public class CompleteOnlineMatchScannerUseCase
             OnlineArenaScannerFlow.AcceptFace(state, observation);
         }
 
-        if (state.Faces.Count < 6)
+        if (state.Faces.Count < 5)
         {
-            throw new InvalidOperationException("Failed to register 6 distinct faces.");
+            throw new InvalidOperationException("Failed to register at least 5 distinct faces.");
         }
 
         state.ScanStatus = "COMPLETED";
         state.ScannerState = "ACCEPTED";
-        state.RequestedFaceIndex = 6;
+        state.RequestedFaceIndex = Math.Min(state.Faces.Count, 6);
         state.LastObservation = OnlineArenaScannerFlow.ToObservationState(request.Observations.Last());
 
         // 3. Complete validation checks

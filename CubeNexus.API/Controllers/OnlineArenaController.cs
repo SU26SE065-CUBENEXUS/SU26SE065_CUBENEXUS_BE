@@ -410,6 +410,25 @@ public class OnlineArenaController : ControllerBase
         }
     }
 
+    [HttpPost("matches/{matchId:guid}/scanner/{validationType}/complete")]
+    public async Task<IActionResult> CompleteScannerSession(
+        Guid matchId,
+        string validationType,
+        [FromBody] OnlineArenaScannerCompleteRequest request,
+        [FromServices] CompleteOnlineMatchScannerUseCase useCase)
+    {
+        if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
+
+        try
+        {
+            return Ok(await useCase.ExecuteAsync(matchId, userId, validationType, request));
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
     [HttpPost("matches/{matchId:guid}/finish-validation")]
     public async Task<IActionResult> ValidateFinishCubeState(
         Guid matchId,

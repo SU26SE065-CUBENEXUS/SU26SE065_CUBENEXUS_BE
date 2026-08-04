@@ -90,8 +90,12 @@ public class FraudReportDto
     public Guid ReporterUserId { get; set; }
     public Guid ReportedUserId { get; set; }
     public string? ReasonCode { get; set; }
+    public string FraudType { get; set; } = "OTHER";
+    public string TimestampText { get; set; } = "00:00";
+    public int TimestampSeconds { get; set; } = 0;
     public string? Description { get; set; }
     public string? EvidenceUrl { get; set; }
+    public string? EvidenceScreenshotUrl { get; set; }
     public string StatusCode { get; set; } = string.Empty;
     public string ReviewScope { get; set; } = string.Empty;
     public string? Decision { get; set; }

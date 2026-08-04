@@ -209,9 +209,9 @@ public class ObserveOnlineMatchScannerFrameUseCase
         if (observation.ScannerState == "ACCEPTED")
         {
             OnlineArenaScannerFlow.AcceptFace(state, observation);
-            state.RequestedFaceIndex = Math.Min(state.Faces.Count + 1, 6);
+            state.RequestedFaceIndex = Math.Min(state.Faces.Count + 1, 5);
 
-            if (state.Faces.Count >= 6)
+            if (state.Faces.Count >= 5)
             {
                 state.ScanStatus = "COMPLETED";
                 var validation = OnlineArenaScannerFlow.CompleteValidation(match, userId, validationType, state);
@@ -591,6 +591,12 @@ internal static class OnlineArenaScannerFlow
     {
         var observedState = state.Faces.OrderBy(face => face.FaceIndex)
             .ToDictionary(face => face.FaceCode, face => NormalizeCubeGrid(face.Grid3x3), StringComparer.OrdinalIgnoreCase);
+
+        if (observedState.Count == 5)
+        {
+            InferAndAddSixthFace(observedState);
+        }
+
         var basicValidation = RubikCubeStateValidator.ValidateBasicCubeState(observedState);
         if (!basicValidation.IsValid)
         {
@@ -675,10 +681,10 @@ internal static class OnlineArenaScannerFlow
         string message)
     {
         var requestedFaceCode = string.Empty;
-        var requestedCenterColor = state.Faces.Count >= 6 ? string.Empty : "any unscanned center";
-        var requestedFaceLabel = state.Faces.Count >= 6
+        var requestedCenterColor = state.Faces.Count >= 5 ? string.Empty : "any unscanned center";
+        var requestedFaceLabel = state.Faces.Count >= 5
             ? "Completed"
-            : $"Scan any remaining face ({state.Faces.Count + 1}/6)";
+            : $"Scan any remaining face ({state.Faces.Count + 1}/5)";
         var validation = state.ScanStatus == "COMPLETED"
             ? CompleteValidationSnapshot(match, userId, state.ValidationType)
             : null;
@@ -694,7 +700,7 @@ internal static class OnlineArenaScannerFlow
             ScanStatus = state.ScanStatus,
             ScannerState = state.ScannerState,
             MatchStatus = match.StatusCode,
-            RequestedFaceIndex = state.Faces.Count >= 6 ? 6 : state.RequestedFaceIndex,
+            RequestedFaceIndex = state.Faces.Count >= 5 ? 5 : state.RequestedFaceIndex,
             RequestedFaceCode = requestedFaceCode,
             RequestedFaceLabel = requestedFaceLabel,
             RequestedCenterColor = requestedCenterColor,
@@ -845,6 +851,72 @@ internal static class OnlineArenaScannerFlow
 
         if (match.Player1Id == userId) match.Player1FinishCheckStatus = status;
         else match.Player2FinishCheckStatus = status;
+    }
+
+    public static void InferAndAddSixthFace(Dictionary<string, List<List<string>>> observedState)
+    {
+        if (observedState.Count != 5) return;
+
+        var missingFace = FaceOrder.FirstOrDefault(f => !observedState.ContainsKey(f));
+        if (missingFace == null) return;
+
+        var missingCenterColor = FaceCenters[missingFace];
+
+        // Count existing colors on the 5 scanned faces
+        var colorCounts = FaceCenters.Values.ToDictionary(c => c, _ => 0, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var faceGrid in observedState.Values)
+        {
+            foreach (var row in faceGrid)
+            {
+                foreach (var color in row)
+                {
+                    var normColor = color.Trim().ToLowerInvariant();
+                    if (colorCounts.ContainsKey(normColor))
+                    {
+                        colorCounts[normColor]++;
+                    }
+                }
+            }
+        }
+
+        var remainingColors = new List<string>();
+        foreach (var (color, count) in colorCounts)
+        {
+            var needed = 9 - count;
+            if (needed < 0) return;
+            for (var i = 0; i < needed; i++)
+            {
+                remainingColors.Add(color);
+            }
+        }
+
+        if (remainingColors.Count != 9) return;
+
+        var grid3x3 = new List<List<string>>
+        {
+            new() { string.Empty, string.Empty, string.Empty },
+            new() { string.Empty, string.Empty, string.Empty },
+            new() { string.Empty, string.Empty, string.Empty }
+        };
+
+        if (remainingColors.Contains(missingCenterColor))
+        {
+            grid3x3[1][1] = missingCenterColor;
+            remainingColors.Remove(missingCenterColor);
+        }
+
+        var remIdx = 0;
+        for (var r = 0; r < 3; r++)
+        {
+            for (var c = 0; c < 3; c++)
+            {
+                if (r == 1 && c == 1) continue;
+                grid3x3[r][c] = remainingColors[remIdx++];
+            }
+        }
+
+        observedState[missingFace] = grid3x3;
     }
 }
 

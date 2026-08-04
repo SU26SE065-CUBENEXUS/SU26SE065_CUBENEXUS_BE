@@ -48,8 +48,12 @@ public class OnlineArenaScannerObserveRequest
 
 public class CreateFraudReportRequest
 {
+    public string FraudType { get; set; } = "OTHER";
+    public string TimestampText { get; set; } = "00:00";
+    public int TimestampSeconds { get; set; } = 0;
     public string Description { get; set; } = string.Empty;
     public string? EvidenceUrl { get; set; }
+    public string? EvidenceScreenshotUrl { get; set; }
 }
 
 public class ReviewFraudReportRequest

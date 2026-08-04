@@ -33,8 +33,24 @@ public class CreateFraudReportUseCase
         var match = await _matchRepo.GetByIdAsync(matchId);
         if (match == null)
             throw new KeyNotFoundException("Match not found.");
+
+        // 3.1 Kiểm tra Match đã hoàn thành
+        if (match.StatusCode != OnlineMatchStatus.COMPLETED.ToString())
+            throw new InvalidOperationException("Only completed matches can be reported.");
+
+        // 3.2 Kiểm tra quyền (phải là người chơi trong trận đấu)
         if (match.Player1Id != userId && match.Player2Id != userId)
-            throw new UnauthorizedAccessException("Not a participant in this match.");
+            throw new UnauthorizedAccessException("You are not a participant in this match.");
+
+        // 3.3 Kiểm tra Report Deadline (Trong vòng 24 giờ sau khi trận đấu kết thúc)
+        var matchCompletedAt = match.EndedAt ?? match.CreatedAt;
+        if (DateTime.UtcNow > matchCompletedAt.AddHours(24))
+            throw new InvalidOperationException("Fraud report deadline (24 hours after match completion) has expired.");
+
+        // 3.4 Kiểm tra chống Spam (Mỗi người chơi chỉ được gửi 1 report cho mỗi trận đấu)
+        var existingReports = await _fraudRepo.GetByMatchAsync(matchId);
+        if (existingReports.Any(r => r.ReporterUserId == userId))
+            throw new ConflictException("You have already submitted a fraud report for this match.");
 
         var accusedUserId = match.Player1Id == userId ? match.Player2Id : match.Player1Id;
         var report = new FraudReport
@@ -43,36 +59,42 @@ public class CreateFraudReportUseCase
             MatchId = matchId,
             ReporterUserId = userId,
             ReportedUserId = accusedUserId,
-            ReasonCode = "PLAYER_REPORT",
+            ReasonCode = req.FraudType,
+            FraudType = string.IsNullOrWhiteSpace(req.FraudType) ? "OTHER" : req.FraudType,
+            TimestampText = string.IsNullOrWhiteSpace(req.TimestampText) ? "00:00" : req.TimestampText,
+            TimestampSeconds = req.TimestampSeconds < 0 ? 0 : req.TimestampSeconds,
             Description = req.Description,
             EvidenceUrl = req.EvidenceUrl,
+            EvidenceScreenshotUrl = req.EvidenceScreenshotUrl,
             StatusCode = "OPEN",
             ReviewScope = "WHOLE_MATCH",
             CreatedAt = DateTime.UtcNow
         };
 
         await _fraudRepo.AddAsync(report);
-        match.StatusCode = OnlineMatchStatus.NEEDS_REVIEW.ToString();
-        match.ReviewReasonJson = OnlineArenaFlowHelpers.MergeReviewReason(match.ReviewReasonJson, new
-        {
-            code = "FRAUD_REPORT_CREATED",
-            reportId = report.Id,
-            reporterUserId = userId
-        });
-        _matchRepo.Update(match);
+
+        // Giai đoạn 4: Match giữ nguyên trạng thái COMPLETED, lưu audit log
         await _auditRepo.AddAsync(OnlineArenaAuditFactory.BuildAudit(matchId, userId, "FRAUD_REPORT_CREATED", new
         {
             reportId = report.Id,
+            fraudType = report.FraudType,
+            timestampText = report.TimestampText,
+            timestampSeconds = report.TimestampSeconds,
             description = req.Description
         }));
+
         await _uow.SaveChangesAsync();
 
+        // Giai đoạn 5: Thông báo SignalR cho Admin Dashboard
         await _notifier.NotifyFraudReportCreatedAsync(matchId, new
         {
             reportId = report.Id,
             matchId = report.MatchId,
             reporterUserId = report.ReporterUserId,
             reportedUserId = report.ReportedUserId,
+            fraudType = report.FraudType,
+            timestampText = report.TimestampText,
+            timestampSeconds = report.TimestampSeconds,
             statusCode = report.StatusCode,
             createdAt = report.CreatedAt
         });
@@ -132,12 +154,9 @@ public class ReviewFraudReportUseCase
 
         var decision = string.IsNullOrWhiteSpace(request.VerdictCode)
             ? FraudVerdict.INCONCLUSIVE.ToString()
-            : request.VerdictCode;
-        report.StatusCode = decision == FraudVerdict.GUILTY.ToString()
-            ? "RESOLVED_VALID"
-            : decision == FraudVerdict.INNOCENT.ToString()
-                ? "RESOLVED_INVALID"
-                : "INCONCLUSIVE";
+            : request.VerdictCode.ToUpperInvariant();
+
+        report.StatusCode = "RESOLVED";
         report.VerdictCode = decision;
         report.Decision = decision;
         report.AdminNote = request.AdminNote;
@@ -148,43 +167,53 @@ public class ReviewFraudReportUseCase
 
         var match = await _matchRepo.GetByIdAsync(report.MatchId)
             ?? throw new KeyNotFoundException("Match not found.");
+
         if (decision == FraudVerdict.GUILTY.ToString())
         {
-            match.StatusCode = OnlineMatchStatus.COMPLETED.ToString();
-            match.Phase = "COMPLETED";
-            match.Outcome = report.ReportedUserId == match.Player1Id
-                ? OnlineMatchOutcome.PLAYER2_WIN.ToString()
-                : OnlineMatchOutcome.PLAYER1_WIN.ToString();
-            match.WinnerId = match.Outcome == OnlineMatchOutcome.PLAYER1_WIN.ToString() ? match.Player1Id : match.Player2Id;
-            match.EndedAt = DateTime.UtcNow;
-        }
-        else if (decision == FraudVerdict.INNOCENT.ToString())
-        {
-            if (match.StatusCode == OnlineMatchStatus.NEEDS_REVIEW.ToString())
+            var cheaterId = report.ReportedUserId;
+            var victimId = report.ReporterUserId;
+
+            // Cheater -> DNF, Victim -> Winner
+            if (cheaterId == match.Player1Id)
             {
-                match.ReviewReasonJson = OnlineArenaFlowHelpers.MergeReviewReason(match.ReviewReasonJson, new
-                {
-                    code = "FRAUD_REPORT_RESOLVED_INVALID",
-                    reportId = report.Id
-                });
+                match.Player1IsDnf = true;
+                match.Player1ResultStatus = "DNF";
+                match.Player2ResultStatus = "VALID";
             }
+            else
+            {
+                match.Player2IsDnf = true;
+                match.Player2ResultStatus = "DNF";
+                match.Player1ResultStatus = "VALID";
+            }
+
+            match.Outcome = victimId == match.Player1Id
+                ? OnlineMatchOutcome.PLAYER1_WIN.ToString()
+                : OnlineMatchOutcome.PLAYER2_WIN.ToString();
+            match.WinnerId = victimId;
         }
 
         _fraudRepo.Update(report);
         _matchRepo.Update(match);
+
         await _auditRepo.AddAsync(OnlineArenaAuditFactory.BuildAudit(match.Id, reviewerId, "FRAUD_REPORT_RESOLVED", new
         {
             reportId = report.Id,
-            decision
+            verdict = decision,
+            adminNote = request.AdminNote
         }));
+
         await _uow.SaveChangesAsync();
 
+        // Giai đoạn 10: Thông báo cho cả 2 người chơi qua SignalR
         await _notifier.NotifyFraudReportResolvedAsync(match.Id, new
         {
             reportId = report.Id,
             matchId = match.Id,
-            decision,
-            statusCode = report.StatusCode,
+            verdict = decision,
+            reporterId = report.ReporterUserId,
+            cheaterId = report.ReportedUserId,
+            adminNote = request.AdminNote,
             resolvedAt = report.ResolvedAt
         });
 
@@ -289,8 +318,12 @@ internal static class FraudReportMapper
             ReporterUserId = report.ReporterUserId,
             ReportedUserId = report.ReportedUserId,
             ReasonCode = report.ReasonCode,
+            FraudType = report.FraudType ?? "OTHER",
+            TimestampText = report.TimestampText ?? "00:00",
+            TimestampSeconds = report.TimestampSeconds,
             Description = report.Description,
             EvidenceUrl = report.EvidenceUrl,
+            EvidenceScreenshotUrl = report.EvidenceScreenshotUrl,
             StatusCode = report.StatusCode,
             ReviewScope = report.ReviewScope,
             Decision = report.Decision,

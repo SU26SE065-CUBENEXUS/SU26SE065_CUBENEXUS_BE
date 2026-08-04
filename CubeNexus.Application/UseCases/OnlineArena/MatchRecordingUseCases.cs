@@ -417,7 +417,10 @@ internal static class MatchRecordingPolicy
 
         var recordingStarted = match.Player1Id == userId ? match.Player1RecordingStarted : match.Player2RecordingStarted;
         if (!recordingStarted)
-            throw new InvalidOperationException("Recording has not been marked as ready for this player.");
+        {
+            if (match.Player1Id == userId) match.Player1RecordingStarted = true;
+            else match.Player2RecordingStarted = true;
+        }
     }
 
     public static void ValidateCompleteEligibility(OnlineMatch match, Guid userId, string objectKey)
