@@ -202,6 +202,7 @@ builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetEloConf
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.UpdateEloConfigUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetAdminPlayerEloListUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.AdjustPlayerEloUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchRecoveryStateUseCase>();
 builder.Services.AddSingleton<CubeNexus.Application.UseCases.OnlineArena.IMatchTransitionScheduler, CubeNexus.API.Services.MatchTransitionSchedulerImpl>();
 
 // Background Services

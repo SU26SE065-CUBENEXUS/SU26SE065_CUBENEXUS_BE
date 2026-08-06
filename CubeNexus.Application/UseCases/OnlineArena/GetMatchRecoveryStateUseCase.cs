@@ -15,7 +15,7 @@ public class GetMatchRecoveryStateUseCase
 
     public async Task<OnlineMatchRecoveryStateDto> ExecuteAsync(Guid userId, Guid matchId)
     {
-        var match = await _matchRepo.GetByIdAsync(matchId);
+        var match = await _matchRepo.GetByIdWithPlayersAsync(matchId);
         if (match == null)
             throw new KeyNotFoundException("Match not found.");
 
