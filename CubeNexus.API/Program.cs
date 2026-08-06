@@ -151,6 +151,7 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineM
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IMobileTimerSessionRepository, CubeNexus.Infrastructure.Repositories.MobileTimerSessionRepository>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IEloHistoryRepository, CubeNexus.Infrastructure.Repositories.EloHistoryRepository>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IFraudReportRepository, CubeNexus.Infrastructure.Repositories.FraudReportRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.Repositories.IEloConfigRepository, CubeNexus.Infrastructure.Repositories.EloConfigRepository>();
 
 // UseCases
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.InitOnlineProfileUseCase>();
@@ -197,7 +198,10 @@ builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ApplyReady
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ApplySolveTimeoutUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.TransitionToSolvingUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.SubmitMobileTimerSolveTimeUseCase>();
-builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchRecoveryStateUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetEloConfigUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.UpdateEloConfigUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetAdminPlayerEloListUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.AdjustPlayerEloUseCase>();
 builder.Services.AddSingleton<CubeNexus.Application.UseCases.OnlineArena.IMatchTransitionScheduler, CubeNexus.API.Services.MatchTransitionSchedulerImpl>();
 
 // Background Services

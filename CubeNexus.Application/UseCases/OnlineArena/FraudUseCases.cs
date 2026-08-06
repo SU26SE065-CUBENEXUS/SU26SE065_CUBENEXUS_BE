@@ -3,6 +3,7 @@ using CubeNexus.Application.Interfaces;
 using CubeNexus.Application.Interfaces.OnlineArena;
 using CubeNexus.Domain.Entities;
 using CubeNexus.Domain.Enums;
+using CubeNexus.Domain.Services;
 
 namespace CubeNexus.Application.UseCases.OnlineArena;
 
@@ -124,6 +125,9 @@ public class ReviewFraudReportUseCase
     private readonly IOnlineMatchVideoEvidenceRepository _videoEvidenceRepo;
     private readonly IOnlineMatchAuditLogRepository _auditRepo;
     private readonly IOnlineArenaRealtimeNotifier _notifier;
+    private readonly IOnlineProfileRepository _profileRepo;
+    private readonly IEloHistoryRepository _eloHistoryRepo;
+    private readonly IEloCalculator _eloCalc;
     private readonly IUnitOfWork _uow;
 
     public ReviewFraudReportUseCase(
@@ -133,6 +137,9 @@ public class ReviewFraudReportUseCase
         IOnlineMatchVideoEvidenceRepository videoEvidenceRepo,
         IOnlineMatchAuditLogRepository auditRepo,
         IOnlineArenaRealtimeNotifier notifier,
+        IOnlineProfileRepository profileRepo,
+        IEloHistoryRepository eloHistoryRepo,
+        IEloCalculator eloCalc,
         IUnitOfWork uow)
     {
         _fraudRepo = fraudRepo;
@@ -141,6 +148,9 @@ public class ReviewFraudReportUseCase
         _videoEvidenceRepo = videoEvidenceRepo;
         _auditRepo = auditRepo;
         _notifier = notifier;
+        _profileRepo = profileRepo;
+        _eloHistoryRepo = eloHistoryRepo;
+        _eloCalc = eloCalc;
         _uow = uow;
     }
 
@@ -191,6 +201,87 @@ public class ReviewFraudReportUseCase
                 ? OnlineMatchOutcome.PLAYER1_WIN.ToString()
                 : OnlineMatchOutcome.PLAYER2_WIN.ToString();
             match.WinnerId = victimId;
+            match.StatusCode = OnlineMatchStatus.COMPLETED.ToString();
+        }
+        else if (decision == FraudVerdict.INCONCLUSIVE.ToString())
+        {
+            match.Outcome = OnlineMatchOutcome.DRAW.ToString();
+            match.WinnerId = null;
+            match.StatusCode = OnlineMatchStatus.COMPLETED.ToString();
+        }
+
+        // Recalculate ELO and update player profiles
+        var p1Profile = await _profileRepo.GetProfileAsync(match.Player1Id, match.PuzzleTypeId);
+        var p2Profile = await _profileRepo.GetProfileAsync(match.Player2Id, match.PuzzleTypeId);
+
+        if (p1Profile != null && p2Profile != null)
+        {
+            // Revert old ELO delta if match was already scored previously
+            if (match.Player1EloBefore.HasValue && match.Player1EloAfter.HasValue)
+            {
+                var oldP1Delta = match.Player1EloAfter.Value - match.Player1EloBefore.Value;
+                p1Profile.EloStandard -= oldP1Delta;
+            }
+            if (match.Player2EloBefore.HasValue && match.Player2EloAfter.HasValue)
+            {
+                var oldP2Delta = match.Player2EloAfter.Value - match.Player2EloBefore.Value;
+                p2Profile.EloStandard -= oldP2Delta;
+            }
+
+            var p1Score = match.Outcome == nameof(OnlineMatchOutcome.PLAYER1_WIN) ? 1.0m : match.Outcome == nameof(OnlineMatchOutcome.DRAW) ? 0.5m : 0.0m;
+            var p2Score = match.Outcome == nameof(OnlineMatchOutcome.PLAYER2_WIN) ? 1.0m : match.Outcome == nameof(OnlineMatchOutcome.DRAW) ? 0.5m : 0.0m;
+
+            var (p1EloAfter, p2EloAfter, p1Exp, p2Exp) = _eloCalc.Calculate(
+                p1Profile.EloStandard,
+                p1Profile.KFactorCurrentStandard,
+                p1Score,
+                p2Profile.EloStandard,
+                p2Profile.KFactorCurrentStandard,
+                p2Score
+            );
+
+            match.Player1EloBefore = p1Profile.EloStandard;
+            match.Player2EloBefore = p2Profile.EloStandard;
+            match.Player1EloAfter = p1EloAfter;
+            match.Player2EloAfter = p2EloAfter;
+
+            UpdateProfile(p1Profile, p1EloAfter, p1Score);
+            UpdateProfile(p2Profile, p2EloAfter, p2Score);
+
+            _profileRepo.Update(p1Profile);
+            _profileRepo.Update(p2Profile);
+
+            await _eloHistoryRepo.AddAsync(new EloHistory
+            {
+                Id = Guid.NewGuid(),
+                OnlineProfileId = p1Profile.Id,
+                MatchId = match.Id,
+                EloBefore = p1Profile.EloStandard,
+                EloAfter = p1EloAfter,
+                Delta = p1EloAfter - p1Profile.EloStandard,
+                KFactorUsed = p1Profile.KFactorCurrentStandard,
+                ActualScore = p1Score,
+                ExpectedScore = p1Exp,
+                ReasonCode = $"FRAUD_VERDICT_{decision}",
+                EloModeCode = "STANDARD",
+                ChangedAt = DateTime.UtcNow
+            });
+
+            await _eloHistoryRepo.AddAsync(new EloHistory
+            {
+                Id = Guid.NewGuid(),
+                OnlineProfileId = p2Profile.Id,
+                MatchId = match.Id,
+                EloBefore = p2Profile.EloStandard,
+                EloAfter = p2EloAfter,
+                Delta = p2EloAfter - p2Profile.EloStandard,
+                KFactorUsed = p2Profile.KFactorCurrentStandard,
+                ActualScore = p2Score,
+                ExpectedScore = p2Exp,
+                ReasonCode = $"FRAUD_VERDICT_{decision}",
+                EloModeCode = "STANDARD",
+                ChangedAt = DateTime.UtcNow
+            });
         }
 
         _fraudRepo.Update(report);
@@ -218,6 +309,18 @@ public class ReviewFraudReportUseCase
         });
 
         return FraudReportMapper.ToDto(report);
+    }
+
+    private static void UpdateProfile(OnlineProfile profile, int newElo, decimal score)
+    {
+        profile.EloStandard = newElo;
+        profile.PeakEloStandard = Math.Max(profile.PeakEloStandard, newElo);
+
+        if (score == 1.0m) profile.TotalWinsStandard++;
+        else if (score == 0.0m) profile.TotalLossesStandard++;
+        else profile.TotalDrawsStandard++;
+
+        profile.UpdatedAt = DateTime.UtcNow;
     }
 }
 
