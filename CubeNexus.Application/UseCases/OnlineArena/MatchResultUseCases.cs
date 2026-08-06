@@ -200,22 +200,19 @@ public class CompleteOnlineMatchUseCase
         var p1ScrambleOk = !p1Valid || existing.Player1ScrambleCheckStatus == "PASSED";
         var p2ScrambleOk = !p2Valid || existing.Player2ScrambleCheckStatus == "PASSED";
 
-        var p1FinishOk = p1Valid ? existing.Player1FinishCheckStatus == "PASSED" : existing.Player1FinishCheckStatus == "NOT_REQUIRED";
-        var p2FinishOk = p2Valid ? existing.Player2FinishCheckStatus == "PASSED" : existing.Player2FinishCheckStatus == "NOT_REQUIRED";
-
+        // Finish scan FAIL bây giờ được xử lý bằng cách cho scan lại (FinishCheckStatus = NOT_STARTED),
+        // không bao giờ đảt giá trị "FAILED" ở đây nữa.
+        // Khi hết giờ mà chưa scan xong → background service sẽ auto-DNF (xử lý trong ReconcileOnlineMatchStatusUseCase).
+        // shouldReview chỉ còn trigger khi:
+        //   - ScrambleCheck bị FAILED (thái độ gian lận khi setup)
+        //   - Có fraud report từ người chơi
         var shouldReview =
             !p1ScrambleOk
             || !p2ScrambleOk
-            || !p1FinishOk
-            || !p2FinishOk
             || existing.Player1ScrambleCheckStatus == "FAILED"
             || existing.Player2ScrambleCheckStatus == "FAILED"
-            || existing.Player1FinishCheckStatus == "FAILED"
-            || existing.Player2FinishCheckStatus == "FAILED"
             || existing.Player1ScrambleCheckStatus == "NEEDS_REVIEW"
             || existing.Player2ScrambleCheckStatus == "NEEDS_REVIEW"
-            || existing.Player1FinishCheckStatus == "NEEDS_REVIEW"
-            || existing.Player2FinishCheckStatus == "NEEDS_REVIEW"
             || OnlineArenaFlowHelpers.HasOpenFraudReport(fraudReports);
 
         if (shouldReview)

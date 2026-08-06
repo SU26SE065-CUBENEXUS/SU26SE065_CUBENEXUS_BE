@@ -328,11 +328,11 @@ public class ReconcileOnlineMatchStatusUseCase
         var bothFinishPassed =
             (match.Player1FinishCheckStatus == "PASSED" || match.Player1FinishCheckStatus == "NOT_REQUIRED" || match.Player1ResultStatus == PlayerResultStatus.DNF.ToString())
             && (match.Player2FinishCheckStatus == "PASSED" || match.Player2FinishCheckStatus == "NOT_REQUIRED" || match.Player2ResultStatus == PlayerResultStatus.DNF.ToString());
+        // shouldReview chỉ trigger khi ScrambleCheck bị FAILED hoặc có fraud report.
+        // Finish scan FAIL được xử lý bằng cách cho scan lại (không xét FAILED ở đây nữa).
         var requiresReview =
             match.Player1ScrambleCheckStatus is "FAILED" or "NEEDS_REVIEW"
-            || match.Player2ScrambleCheckStatus is "FAILED" or "NEEDS_REVIEW"
-            || match.Player1FinishCheckStatus is "FAILED" or "NEEDS_REVIEW"
-            || match.Player2FinishCheckStatus is "FAILED" or "NEEDS_REVIEW";
+            || match.Player2ScrambleCheckStatus is "FAILED" or "NEEDS_REVIEW";
         var finishDeadlineExpired =
             match.StatusCode == nameof(OnlineMatchStatus.PENDING_EVIDENCE)
             && match.VideoEvidenceUploadDeadlineAt.HasValue
@@ -346,14 +346,64 @@ public class ReconcileOnlineMatchStatusUseCase
             return OnlineArenaFlowHelpers.BuildMatchState(refreshed, requestingUserId, isAdmin);
         }
 
-        if ((bothResultsSubmitted && requiresReview) || (finishDeadlineExpired && !bothFinishPassed))
+        // Khi hết deadline finish scan mà player chưa scan xong → auto-DNF (không chuyển NEEDS_REVIEW)
+        if (finishDeadlineExpired && !bothFinishPassed)
+        {
+            var now = DateTime.UtcNow;
+            var changed = false;
+
+            // Auto-DNF player nào chưa hoàn thành finish scan
+            var p1NeedsAutoFinish = match.Player1ResultStatus == PlayerResultStatus.VALID.ToString()
+                && match.Player1FinishCheckStatus is not "PASSED" and not "NOT_REQUIRED";
+            var p2NeedsAutoFinish = match.Player2ResultStatus == PlayerResultStatus.VALID.ToString()
+                && match.Player2FinishCheckStatus is not "PASSED" and not "NOT_REQUIRED";
+
+            if (p1NeedsAutoFinish)
+            {
+                // Player 1 hết giờ scan → auto DNF
+                match.Player1IsDnf = true;
+                match.Player1TimeMs = null;
+                match.Player1ResultStatus = PlayerResultStatus.DNF.ToString();
+                match.Player1FinishedAt = now;
+                match.Player1FinishCheckStatus = "NOT_REQUIRED"; // DNF không cần finish check
+                changed = true;
+            }
+
+            if (p2NeedsAutoFinish)
+            {
+                match.Player2IsDnf = true;
+                match.Player2TimeMs = null;
+                match.Player2ResultStatus = PlayerResultStatus.DNF.ToString();
+                match.Player2FinishedAt = now;
+                match.Player2FinishCheckStatus = "NOT_REQUIRED";
+                changed = true;
+            }
+
+            if (changed)
+            {
+                _matchRepo.Update(match);
+                await _uow.SaveChangesAsync();
+
+                // Notify cả 2 người chơi về auto-DNF
+                await _notifier.NotifyFinishCheckUpdatedAsync(match.Id,
+                    OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Finish scan time expired. Result auto-applied as DNF."));
+            }
+
+            // Tiếp tục — bảy giờ cả 2 player đều có kết quả (có thể là DNF), complete match
+            await _completeUseCase.ExecuteAsync(match.Id);
+            var refreshedAfterDnf = await _matchRepo.GetByIdAsync(matchId) ?? match;
+            return OnlineArenaFlowHelpers.BuildMatchState(refreshedAfterDnf, requestingUserId, isAdmin);
+        }
+
+        // Scramble FAILED hoặc fraud report → mới chuyển NEEDS_REVIEW
+        if (bothResultsSubmitted && requiresReview)
         {
             match.StatusCode = OnlineMatchStatus.NEEDS_REVIEW.ToString();
             match.Phase = "NEEDS_REVIEW";
             match.Outcome = OnlineMatchOutcome.INCONCLUSIVE.ToString();
             match.ReviewReasonJson = OnlineArenaFlowHelpers.MergeReviewReason(match.ReviewReasonJson, new
             {
-                code = finishDeadlineExpired ? "FINISH_VALIDATION_TIMEOUT" : "MATCH_RECONCILED_TO_REVIEW",
+                code = "SCRAMBLE_CHECK_FAILED_OR_FRAUD_REPORT",
                 at = DateTime.UtcNow
             });
 

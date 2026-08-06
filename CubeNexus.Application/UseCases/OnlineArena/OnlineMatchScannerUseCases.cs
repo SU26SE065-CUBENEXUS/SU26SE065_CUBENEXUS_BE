@@ -285,19 +285,21 @@ public class ObserveOnlineMatchScannerFrameUseCase
                     }
                     else
                     {
-                        var signalRPayload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Finish check failed. Match moved to review.");
+                        // Finish scan FAILED (sai màu/ánh sáng) — cho phép scan lại từ đầu
+                        // Không chuyển sang NEEDS_REVIEW, match vẫn tiếp tục bình thường
+                        var signalRPayload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Finish check failed. Please re-scan your Rubik's cube.");
                         await _notifier.NotifyFinishCheckUpdatedAsync(match.Id, signalRPayload);
-                        await _notifier.NotifyMatchNeedsReviewAsync(match.Id, signalRPayload);
 
                         return new ObserveFinishFrameResponseDto
                         {
                             MatchId = match.Id,
                             MeUserId = userId,
-                            FinishCheckStatus = "FAILED",
+                            FinishCheckStatus = "NOT_STARTED",
                             WaitingForOpponent = false,
                             OpponentResultStatus = isP1 ? match.Player2ResultStatus : match.Player1ResultStatus,
                             OpponentFinishCheckStatus = isP1 ? match.Player2FinishCheckStatus : match.Player1FinishCheckStatus,
-                            NextUiState = "NEEDS_REVIEW",
+                            NextUiState = "RETRY_SCAN",
+                            Message = "Colors did not match a solved Rubik's cube. Please re-scan all faces from the beginning.",
                             ServerNow = DateTime.UtcNow,
                             MatchStatus = match.StatusCode,
                             Outcome = match.Outcome
@@ -649,16 +651,21 @@ internal static class OnlineArenaScannerFlow
             if (match.Player1Id == userId)
             {
                 match.Player1ObservedStateJson = JsonSerializer.Serialize(observedState);
-                match.Player1FinishCheckStatus = passed ? "PASSED" : "FAILED";
+                // Nếu scan PASS → PASSED
+                // Nếu scan FAIL → reset về NOT_STARTED (cho phép scan lại từ đầu), không chuyển NEEDS_REVIEW
+                match.Player1FinishCheckStatus = passed ? "PASSED" : "NOT_STARTED";
+                // Reset scanner state JSON để người chơi có thể bắt đầu session scan mới
+                if (!passed) match.Player1ScannerStateJson = null;
             }
             else
             {
                 match.Player2ObservedStateJson = JsonSerializer.Serialize(observedState);
-                match.Player2FinishCheckStatus = passed ? "PASSED" : "FAILED";
+                match.Player2FinishCheckStatus = passed ? "PASSED" : "NOT_STARTED";
+                if (!passed) match.Player2ScannerStateJson = null;
             }
 
-            if (!passed)
-                match.StatusCode = OnlineMatchStatus.NEEDS_REVIEW.ToString();
+            // Khi FAIL: KHÔNG chuyển match sang NEEDS_REVIEW — match tiếp tục bình thường
+            // Người chơi có thể start lại scanner session và scan lại từ đầu
         }
 
         return new OnlineArenaScannerValidationDto

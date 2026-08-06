@@ -255,6 +255,8 @@ public class ObserveFinishFrameResponseDto
     public string OpponentResultStatus { get; set; } = string.Empty;
     public string OpponentFinishCheckStatus { get; set; } = string.Empty;
     public string NextUiState { get; set; } = string.Empty;
+    /// <summary>Human-readable message explaining the state (e.g., retry reason).</summary>
+    public string? Message { get; set; }
     public DateTime ServerNow { get; set; }
 
     // If completed
