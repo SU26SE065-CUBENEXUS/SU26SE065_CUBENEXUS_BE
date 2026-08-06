@@ -158,19 +158,22 @@ public class CompleteOnlineMatchScannerUseCase
             }
             else
             {
-                var signalRPayload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Finish check failed. Match moved to review.");
+                // Finish scan FAILED (sai màu/ánh sáng) — cho phép scan lại từ đầu
+                // KHÔNG chuyển sang NEEDS_REVIEW, match vẫn tiếp tục bình thường.
+                // CompleteValidation đã reset FinishCheckStatus về NOT_STARTED và xóa ScannerStateJson.
+                var signalRPayload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Finish check failed. Please re-scan your Rubik's cube from the beginning.");
                 await _notifier.NotifyFinishCheckUpdatedAsync(match.Id, signalRPayload);
-                await _notifier.NotifyMatchNeedsReviewAsync(match.Id, signalRPayload);
 
                 return new ObserveFinishFrameResponseDto
                 {
                     MatchId = match.Id,
                     MeUserId = userId,
-                    FinishCheckStatus = "FAILED",
+                    FinishCheckStatus = "NOT_STARTED",
                     WaitingForOpponent = false,
                     OpponentResultStatus = isP1 ? match.Player2ResultStatus : match.Player1ResultStatus,
                     OpponentFinishCheckStatus = isP1 ? match.Player2FinishCheckStatus : match.Player1FinishCheckStatus,
-                    NextUiState = "NEEDS_REVIEW",
+                    NextUiState = "RETRY_SCAN",
+                    Message = "Colors did not match a solved Rubik's cube. Please re-scan all faces from the beginning.",
                     ServerNow = DateTime.UtcNow,
                     MatchStatus = match.StatusCode,
                     Outcome = match.Outcome
