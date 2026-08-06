@@ -207,7 +207,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowVite", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8081", "http://127.0.0.1:8081", "http://192.168.88.198:8081", "http://192.168.101.25:8081", "http://localhost:3000", "http://127.0.0.1:3000", "http://192.168.101.25:3000", "http://192.168.0.101:3000", "http://192.168.0.101:8081", "http://192.168.1.149:8081", "http://192.168.1.149:3000", "http://192.168.1.148:8081", "http://192.168.1.148:3000")
+        policy.SetIsOriginAllowed(_ => true)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using CubeNexus.Application.DTOs.OnlineArena;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Application.UseCases.OnlineArena;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -656,6 +657,7 @@ public class OnlineArenaController : ControllerBase
     }
 
     [HttpPost("matches/{matchId:guid}/reports")]
+    [HttpPost("matches/{matchId:guid}/fraud-reports")]
     public async Task<IActionResult> CreateFraudReport(Guid matchId, [FromBody] CreateFraudReportRequest request, [FromServices] CreateFraudReportUseCase useCase)
     {
         if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
@@ -668,6 +670,36 @@ public class OnlineArenaController : ControllerBase
         {
             return MapException(ex);
         }
+    }
+
+    [HttpGet("matches/{matchId:guid}/report")]
+    [HttpGet("matches/{matchId:guid}/fraud-reports")]
+    public async Task<IActionResult> GetMatchFraudReport(Guid matchId, [FromServices] CubeNexus.Infrastructure.Persistence.ApplicationDbContext dbContext)
+    {
+        if (!TryGetCurrentUserId(out var userId)) return Unauthorized401();
+
+        var report = await dbContext.FraudReports
+            .Where(r => r.MatchId == matchId)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (report == null) return NotFound(new { message = "No fraud report for this match." });
+
+        return Ok(new
+        {
+            id = report.Id,
+            matchId = report.MatchId,
+            reporterUserId = report.ReporterUserId,
+            reportedUserId = report.ReportedUserId,
+            fraudType = report.FraudType,
+            timestampText = report.TimestampText,
+            description = report.Description,
+            statusCode = report.StatusCode,
+            verdictCode = report.VerdictCode,
+            adminNote = report.AdminNote,
+            createdAt = report.CreatedAt,
+            reviewedAt = report.ReviewedAt
+        });
     }
 
     [HttpPost("matches/{matchId:guid}/dev/mock-scramble-pass")]

@@ -344,6 +344,10 @@ public class OnlineMatchHistoryItemDto
     public DateTime CreatedAt { get; set; }
     public DateTime? EndedAt { get; set; }
     public bool HasVideoReplay { get; set; }
+    public string? ReportStatus { get; set; }
+    public string? ReportVerdictCode { get; set; }
+    public string? ReportAdminNote { get; set; }
+    public string? ReportedByUserId { get; set; }
 }
 
 public class OnlineMatchHistoryResponseDto

@@ -37,6 +37,7 @@ public class OnlineArenaAdminController : ControllerBase
     };
 
     [HttpGet]
+    [HttpGet("pending")]
     public async Task<IActionResult> GetPendingReports([FromServices] GetPendingFraudReportsUseCase useCase)
     {
         try

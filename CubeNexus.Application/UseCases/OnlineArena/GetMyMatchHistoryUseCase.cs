@@ -6,10 +6,14 @@ namespace CubeNexus.Application.UseCases.OnlineArena;
 public class GetMyMatchHistoryUseCase
 {
     private readonly IOnlineMatchRepository _matchRepo;
+    private readonly IFraudReportRepository _fraudRepo;
 
-    public GetMyMatchHistoryUseCase(IOnlineMatchRepository matchRepo)
+    public GetMyMatchHistoryUseCase(
+        IOnlineMatchRepository matchRepo,
+        IFraudReportRepository fraudRepo)
     {
         _matchRepo = matchRepo;
+        _fraudRepo = fraudRepo;
     }
 
     public async Task<OnlineMatchHistoryResponseDto> ExecuteAsync(
@@ -27,6 +31,8 @@ public class GetMyMatchHistoryUseCase
 
         foreach (var m in matches)
         {
+            var reports = await _fraudRepo.GetByMatchAsync(m.Id);
+            var latestReport = reports?.OrderByDescending(r => r.CreatedAt).FirstOrDefault();
             var isP1 = m.Player1Id == userId;
             var me = isP1 ? m.Player1 : m.Player2;
             var opponent = isP1 ? m.Player2 : m.Player1;
@@ -86,6 +92,10 @@ public class GetMyMatchHistoryUseCase
                 CreatedAt = m.CreatedAt,
                 EndedAt = m.EndedAt,
                 HasVideoReplay = hasVideoReplay,
+                ReportStatus = latestReport?.StatusCode,
+                ReportVerdictCode = latestReport?.VerdictCode,
+                ReportAdminNote = latestReport?.AdminNote,
+                ReportedByUserId = latestReport?.ReporterUserId.ToString(),
             });
         }
 
