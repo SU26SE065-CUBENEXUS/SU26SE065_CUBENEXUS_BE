@@ -17,14 +17,18 @@ public class AdminTournamentController : ControllerBase
         _adminTournamentService = adminTournamentService;
     }
 
-    private IActionResult MapException(Exception ex) => ex switch
+    private IActionResult MapException(Exception ex)
     {
-        UnauthorizedAccessException forbidden => StatusCode(StatusCodes.Status403Forbidden, new { code = "FORBIDDEN", message = forbidden.Message }),
-        KeyNotFoundException notFound => NotFound(new { code = "NOT_FOUND", message = notFound.Message }),
-        InvalidOperationException invalidOperation => BadRequest(new { code = "BAD_REQUEST", message = invalidOperation.Message }),
-        ArgumentException argument => BadRequest(new { code = "BAD_REQUEST", message = argument.Message }),
-        _ => StatusCode(StatusCodes.Status500InternalServerError, new { code = "SERVER_ERROR", message = ex.Message })
-    };
+        var msg = ex.InnerException != null ? $"{ex.Message}: {ex.InnerException.Message}" : ex.Message;
+        return ex switch
+        {
+            UnauthorizedAccessException forbidden => StatusCode(StatusCodes.Status403Forbidden, new { code = "FORBIDDEN", message = forbidden.Message }),
+            KeyNotFoundException notFound => NotFound(new { code = "NOT_FOUND", message = notFound.Message }),
+            InvalidOperationException invalidOperation => BadRequest(new { code = "BAD_REQUEST", message = invalidOperation.Message }),
+            ArgumentException argument => BadRequest(new { code = "BAD_REQUEST", message = argument.Message }),
+            _ => StatusCode(StatusCodes.Status500InternalServerError, new { code = "SERVER_ERROR", message = msg })
+        };
+    }
 
     [HttpGet]
     public async Task<IActionResult> GetTournaments(
