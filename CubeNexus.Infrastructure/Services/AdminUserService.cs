@@ -201,6 +201,17 @@ public class AdminUserService : IAdminUserService
 
         user.UpdatedAt = DateTime.UtcNow;
 
+        // Auto-disable all tournaments created by this banned manager/user
+        var userTournaments = await _context.Tournaments
+            .Where(t => t.CreatedBy == targetUserId && t.StatusCode != "DISABLED")
+            .ToListAsync(ct);
+
+        foreach (var tour in userTournaments)
+        {
+            tour.StatusCode = "DISABLED";
+            tour.UpdatedAt = DateTime.UtcNow;
+        }
+
         await _context.SaveChangesAsync(ct);
 
         return new AdminUserDto

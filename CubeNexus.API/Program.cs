@@ -109,6 +109,7 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.IUnitOfWork>(
 // Services (business logic – inject IUnitOfWork, không phụ thuộc DbContext trực tiếp)
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAdminUserService, AdminUserService>();
+builder.Services.AddScoped<IAdminTournamentService, AdminTournamentService>();
 builder.Services.AddScoped<IOnlineProfileInitService, OnlineProfileInitService>();
 builder.Services.AddScoped<IOnlineArenaService, OnlineArenaService>();
 builder.Services.AddScoped<IPuzzleService, PuzzleService>();
