@@ -712,25 +712,45 @@ public class TournamentOperationService : ITournamentOperationService
         var detailList = new List<(MedleyResultDetail detail, PenaltyType? penalty)>();
         var detailsToInsert = new List<MedleyResultDetail>();
 
-        if (dto.Details.Count != medleyPuzzles.Count)
-            throw new Application.Exceptions.CustomException("INVALID_MEDLEY_PUZZLE_ORDER", "Details count does not match expected medley puzzles count.", 400);
+        // Rebuild details: Medley chỉ lưu TỔNG THỜI GIAN trong bảng results.
+        // Các dòng medley_result_details chỉ ghi nhận scramble nào dùng cho khối nào.
+        // raw_time_ms và final_time_ms trên từng dòng detail để NULL (không theo dõi riêng).
+        {
+            var firstDetail = dto.Details?.FirstOrDefault();
+            var totalRawTimeMs = firstDetail?.RawTimeMs;
+            var totalPenaltyTypeId = firstDetail?.PenaltyTypeId;
+
+            dto.Details = medleyPuzzles.Select((mp, idx) => new MedleyDetailSubmissionDto
+            {
+                MedleyPuzzleId = mp.Id,
+                RawTimeMs = idx == 0 ? totalRawTimeMs : null,
+                PenaltyTypeId = idx == 0 ? totalPenaltyTypeId : null,
+                ScrambleId = Guid.Empty
+            }).ToList();
+        }
 
         int index = 0;
         foreach (var detailDto in dto.Details)
         {
             var expectedMp = medleyPuzzles[index];
-            if (detailDto.MedleyPuzzleId != expectedMp.Id)
-                throw new Application.Exceptions.CustomException("INVALID_MEDLEY_PUZZLE_ORDER", $"Medley puzzle at index {index} is incorrect. Expected {expectedMp.Id}.", 400);
-
             if (!medleyPuzzleMap.TryGetValue(detailDto.MedleyPuzzleId, out var mp))
                 throw new InvalidOperationException($"Medley puzzle {detailDto.MedleyPuzzleId} not found in this event.");
 
-            // Validate Scramble
+            // Validate Scramble - find by PuzzleTypeId
             var scramble = await _unitOfWork.Scrambles.GetByIdAsync(detailDto.ScrambleId, ct);
             if (scramble == null || scramble.ScrambleSetId != scrambleSet.Id || scramble.SolveNumber != dto.SolveNumber || scramble.PuzzleTypeId != mp.PuzzleTypeId)
             {
+                var matchingScrambles = await _unitOfWork.Scrambles.FindAsync(
+                    s => s.ScrambleSetId == scrambleSet.Id && s.SolveNumber == dto.SolveNumber && s.PuzzleTypeId == mp.PuzzleTypeId, ct);
+                scramble = matchingScrambles.FirstOrDefault();
+            }
+
+            if (scramble == null)
+            {
                 throw new Application.Exceptions.CustomException("INVALID_SCRAMBLE", $"Scramble does not match solve number {dto.SolveNumber} for this competitor/group.", 400);
             }
+
+            detailDto.ScrambleId = scramble.Id;
 
             PenaltyType? penaltyType = null;
             if (detailDto.PenaltyTypeId.HasValue)
@@ -759,7 +779,7 @@ public class TournamentOperationService : ITournamentOperationService
         }
 
         // Apply Penalty rules via Domain Service
-        _penaltyCalculationService.CalculateMedleyResult(result, detailList);
+        _penaltyCalculationService.CalculateMedleyResult(result, detailList, ev.TimeLimitMs);
 
         _unitOfWork.Results.Add(result);
         _unitOfWork.MedleyResultDetails.AddRange(detailsToInsert);
@@ -777,10 +797,8 @@ public class TournamentOperationService : ITournamentOperationService
             _unitOfWork.GroupCompetitors.Update(groupCompetitor);
         }
 
-        Console.WriteLine($"[Save Stage] Saving medley result to DB. GroupCompetitorId={dto.GroupCompetitorId}, RegistrationId={registration.Id}, UserId={user.Id}, SolveNumber={dto.SolveNumber}");
         await _unitOfWork.SaveChangesAsync(ct);
 
-        Console.WriteLine($"[Build-payload Stage] Building medley realtime payload. GroupCompetitorId={dto.GroupCompetitorId}, RegistrationId={registration.Id}, UserId={user.Id}, SolveNumber={dto.SolveNumber}");
         try
         {
             // Fetch group/round competitors and results for ranking
@@ -851,17 +869,42 @@ public class TournamentOperationService : ITournamentOperationService
                 }
             };
 
-            Console.WriteLine($"[Broadcast Stage] Broadcasting ResultSubmittedEvent (Medley). GroupCompetitorId={dto.GroupCompetitorId}");
             await _realtimeNotifier.BroadcastResultSubmittedAsync(submittedEvent, ct);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Broadcast Stage ERROR] Failed to broadcast medley realtime event: {ex.Message}. GroupCompetitorId={dto.GroupCompetitorId}, RegistrationId={registration.Id}, UserId={user.Id}, SolveNumber={dto.SolveNumber}");
+            Console.WriteLine($"[Broadcast] Failed to broadcast medley realtime event: {ex.Message}");
         }
 
         int submittedCount = resultCount;
-        int? nextSolveNumber = (!isCutoffStopped && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
-        bool canSubmitNext = !isCutoffStopped && nextSolveNumber.HasValue && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW && group.StatusCode == "ONGOING";
+        bool isCutoffStopped2 = isCutoffStopped; // alias for clarity
+        int? nextSolveNumber = (!isCutoffStopped2 && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
+        bool canSubmitNext = !isCutoffStopped2 && nextSolveNumber.HasValue
+            && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW
+            && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED
+            && group.StatusCode == "ONGOING";
+
+        // Fetch next scramble for first sub-puzzle of next solve (so judge UI can show it)
+        ScrambleInfoDto? nextScrambleInfo = null;
+        if (canSubmitNext && nextSolveNumber.HasValue)
+        {
+            var firstMp = medleyPuzzles.FirstOrDefault();
+            if (firstMp != null)
+            {
+                var nextScrambles = await _unitOfWork.Scrambles.FindAsync(
+                    s => s.ScrambleSetId == scrambleSet.Id && s.SolveNumber == nextSolveNumber.Value && s.PuzzleTypeId == firstMp.PuzzleTypeId, ct);
+                var nextScramble = nextScrambles.FirstOrDefault();
+                if (nextScramble != null)
+                {
+                    nextScrambleInfo = new ScrambleInfoDto
+                    {
+                        ScrambleId = nextScramble.Id,
+                        SolveNumber = nextScramble.SolveNumber,
+                        Sequence = nextScramble.Sequence
+                    };
+                }
+            }
+        }
 
         return new SubmitResultResponseDto
         {
@@ -875,9 +918,9 @@ public class TournamentOperationService : ITournamentOperationService
                 SolveCount = ev.SolveCount,
                 NextSolveNumber = nextSolveNumber,
                 CanSubmitNext = canSubmitNext,
-                IsCutoffReached = isCutoffStopped
+                IsCutoffReached = isCutoffStopped2
             },
-            NextScramble = null
+            NextScramble = nextScrambleInfo
         };
     }
 

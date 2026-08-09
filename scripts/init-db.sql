@@ -459,22 +459,15 @@ CREATE TABLE IF NOT EXISTS medley_result_details (
     CONSTRAINT uq_medley_result_details_result_puzzle
         UNIQUE (result_id, medley_puzzle_id),
 
+    -- Medley Relay chỉ theo dõi TỔNG THỜI GIAN (lưu trong bảng results), không theo dõi thời gian riêng từng khối.
+    -- raw_time_ms và final_time_ms trên từng dòng detail có thể NULL.
     CONSTRAINT ck_medley_result_details_values
         CHECK (
             sort_order > 0
             AND (raw_time_ms IS NULL OR raw_time_ms > 0)
             AND (final_time_ms IS NULL OR final_time_ms > 0)
-        ),
-
-    CONSTRAINT ck_medley_result_details_dnf_consistency
-        CHECK (
-            (is_dnf = true AND final_time_ms IS NULL)
-            OR
-            (is_dnf = false AND raw_time_ms IS NOT NULL AND final_time_ms IS NOT NULL)
         )
 );
-
-
 
 
 CREATE TABLE IF NOT EXISTS disputes (
