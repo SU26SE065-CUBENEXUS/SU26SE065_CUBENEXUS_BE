@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS users (
     is_active BOOLEAN NOT NULL DEFAULT true,
     is_banned BOOLEAN NOT NULL DEFAULT false,
     ban_reason TEXT,
+    banned_at TIMESTAMPTZ,
+    banned_until TIMESTAMPTZ,
     email_confirmed BOOLEAN NOT NULL DEFAULT true,
     email_confirmed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL,

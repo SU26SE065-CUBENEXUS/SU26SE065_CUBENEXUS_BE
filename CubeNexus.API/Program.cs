@@ -108,6 +108,7 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.IUnitOfWork>(
 
 // Services (business logic – inject IUnitOfWork, không phụ thuộc DbContext trực tiếp)
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAdminUserService, AdminUserService>();
 builder.Services.AddScoped<IOnlineProfileInitService, OnlineProfileInitService>();
 builder.Services.AddScoped<IOnlineArenaService, OnlineArenaService>();
 builder.Services.AddScoped<IPuzzleService, PuzzleService>();
@@ -202,6 +203,7 @@ builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetEloConf
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.UpdateEloConfigUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetAdminPlayerEloListUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.AdjustPlayerEloUseCase>();
+
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetMatchRecoveryStateUseCase>();
 builder.Services.AddSingleton<CubeNexus.Application.UseCases.OnlineArena.IMatchTransitionScheduler, CubeNexus.API.Services.MatchTransitionSchedulerImpl>();
 

@@ -252,7 +252,24 @@ public partial class AuthService : IAuthService
             throw new UnauthorizedAccessException("Tài khoản đã bị vô hiệu hóa.");
 
         if (user.IsBanned)
-            throw new UnauthorizedAccessException("Tài khoản đã bị cấm.");
+        {
+            if (user.BannedUntil.HasValue && user.BannedUntil.Value <= DateTime.UtcNow)
+            {
+                user.IsBanned = false;
+                user.BanReason = null;
+                user.BannedAt = null;
+                user.BannedUntil = null;
+                await _context.SaveChangesAsync();
+            }
+            else
+            {
+                var reason = string.IsNullOrWhiteSpace(user.BanReason) ? "Không có lý do cụ thể." : user.BanReason;
+                var untilStr = user.BannedUntil.HasValue
+                    ? $"đến {user.BannedUntil.Value.ToLocalTime():dd/MM/yyyy HH:mm}"
+                    : "vĩnh viễn";
+                throw new UnauthorizedAccessException($"Tài khoản của bạn đã bị cấm ({untilStr}). Lý do: {reason}");
+            }
+        }
 
         return await GenerateTokenResponseAsync(user);
     }
