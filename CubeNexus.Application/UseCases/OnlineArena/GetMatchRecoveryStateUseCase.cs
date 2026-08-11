@@ -41,6 +41,8 @@ public class GetMatchRecoveryStateUseCase
 
         var canWatch = myResultStatus != PlayerResultStatus.PENDING.ToString();
 
+        var isInspectingActive = match.InspectionDeadlineAt.HasValue && DateTime.UtcNow < match.InspectionDeadlineAt.Value;
+
         // nextUiState: derived directly from match.Phase — backend is single source of truth
         var nextUiState = match.Phase switch
         {
@@ -49,7 +51,7 @@ public class GetMatchRecoveryStateUseCase
             "INSPECTION" => "INSPECTION",
             "SOLVING" or "FINISH_CHECKING" or "PENDING_EVIDENCE" =>
                 myResultStatus == PlayerResultStatus.PENDING.ToString()
-                ? "SOLVING"
+                ? (isInspectingActive ? "INSPECTION" : "SOLVING")
                 : (myResultStatus == PlayerResultStatus.VALID.ToString() && myFinishStatus != "PASSED")
                     ? "FINISH_SCANNING"
                     : "WAITING_OPPONENT",
@@ -57,6 +59,7 @@ public class GetMatchRecoveryStateUseCase
             "COMPLETED" or "CANCELLED" => "COMPLETED",
             _ => "SETUP"
         };
+
 
         if (match.Phase is "ROOM_SETUP" or "WEBRTC_CONNECTING" or "MOBILE_TIMER_PAIRING" or "SCRAMBLE_CHECKING")
         {
