@@ -244,35 +244,60 @@ internal static class RubikCubeStateValidator
 
         foreach (var face in Faces)
         {
+            if (!observedState.TryGetValue(face, out var faceGrid) || faceGrid.Count != 3)
+            {
+                for (var row = 0; row < 3; row++)
+                {
+                    for (var column = 0; column < 3; column++)
+                    {
+                        var expectedColor = expectedState.TryGetValue(face, out var expFace) && expFace.Count == 3 ? expFace[row][column] : "unknown";
+                        mismatches.Add(new CubeScanStickerMismatchDto
+                        {
+                            FaceCode = face,
+                            Row = row,
+                            Column = column,
+                            ExpectedColor = expectedColor,
+                            ObservedColor = "missing"
+                        });
+                    }
+                }
+                continue;
+            }
+
             for (var row = 0; row < 3; row++)
             {
                 for (var column = 0; column < 3; column++)
                 {
-                    var expected = expectedState[face][row][column].Trim().ToLowerInvariant();
-                    var observed = observedState[face][row][column].Trim().ToLowerInvariant();
-                    if (string.Equals(expected, observed, StringComparison.OrdinalIgnoreCase))
+                    var expectedColor = expectedState.TryGetValue(face, out var expFace) && expFace.Count == 3 ? expFace[row][column] : "unknown";
+                    var observedColor = faceGrid[row][column];
+                    if (string.Equals(expectedColor, observedColor, StringComparison.OrdinalIgnoreCase))
                     {
                         matchedStickerCount++;
-                        continue;
                     }
-
-                    mismatches.Add(new CubeScanStickerMismatchDto
+                    else
                     {
-                        Face = face,
-                        Row = row,
-                        Column = column,
-                        Expected = expected,
-                        Observed = observed
-                    });
+                        mismatches.Add(new CubeScanStickerMismatchDto
+                        {
+                            FaceCode = face,
+                            Row = row,
+                            Column = column,
+                            ExpectedColor = expectedColor,
+                            ObservedColor = observedColor
+                        });
+                    }
                 }
             }
         }
 
+        var totalStickers = expectedState.Values.Sum(face => face.Sum(row => row.Count));
+        var matched = matchedStickerCount == totalStickers && mismatches.Count == 0;
+
         return new CubeStateComparisonResult
         {
-            Matched = mismatches.Count == 0,
-            MatchedStickerCount = matchedStickerCount,
-            MismatchedStickerCount = mismatches.Count,
+            Matched = matched,
+            TotalStickers = totalStickers,
+            MatchedStickers = matchedStickerCount,
+            MismatchedStickers = mismatches.Count,
             Mismatches = mismatches
         };
     }
