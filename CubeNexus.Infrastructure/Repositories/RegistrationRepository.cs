@@ -23,6 +23,10 @@ public class RegistrationRepository : Repository<Registration>, IRegistrationRep
             .Include(r => r.OfflineRegistrationEvents)
                 .ThenInclude(ore => ore.Event)
                     .ThenInclude(e => e.PuzzleType)
+            .Include(r => r.OfflineRegistrationEvents)
+                .ThenInclude(ore => ore.Event)
+                    .ThenInclude(e => e.MedleyPuzzles)
+                        .ThenInclude(mp => mp.PuzzleType)
             .Where(r => r.UserId == userId)
             .OrderByDescending(r => r.RegisteredAt)
             .ToListAsync(ct);
@@ -35,6 +39,10 @@ public class RegistrationRepository : Repository<Registration>, IRegistrationRep
             .Include(r => r.OfflineRegistrationEvents)
                 .ThenInclude(ore => ore.Event)
                     .ThenInclude(e => e.PuzzleType)
+            .Include(r => r.OfflineRegistrationEvents)
+                .ThenInclude(ore => ore.Event)
+                    .ThenInclude(e => e.MedleyPuzzles)
+                        .ThenInclude(mp => mp.PuzzleType)
             .FirstOrDefaultAsync(r => r.Id == registrationId && r.UserId == userId, ct);
     }
 
@@ -69,6 +77,10 @@ public class RegistrationRepository : Repository<Registration>, IRegistrationRep
             .Include(r => r.OfflineRegistrationEvents)
                 .ThenInclude(ore => ore.Event)
                     .ThenInclude(e => e.PuzzleType)
+            .Include(r => r.OfflineRegistrationEvents)
+                .ThenInclude(ore => ore.Event)
+                    .ThenInclude(e => e.MedleyPuzzles)
+                        .ThenInclude(mp => mp.PuzzleType)
             .FirstOrDefaultAsync(r => r.QrToken == qrToken || r.QrToken.Contains(qrToken), ct);
     }
 
@@ -80,6 +92,10 @@ public class RegistrationRepository : Repository<Registration>, IRegistrationRep
             .Include(r => r.OfflineRegistrationEvents)
                 .ThenInclude(ore => ore.Event)
                     .ThenInclude(e => e.PuzzleType)
+            .Include(r => r.OfflineRegistrationEvents)
+                .ThenInclude(ore => ore.Event)
+                    .ThenInclude(e => e.MedleyPuzzles)
+                        .ThenInclude(mp => mp.PuzzleType)
             .FirstOrDefaultAsync(r => r.Id == registrationId, ct);
     }
 
@@ -91,6 +107,10 @@ public class RegistrationRepository : Repository<Registration>, IRegistrationRep
             .Include(r => r.OfflineRegistrationEvents)
                 .ThenInclude(ore => ore.Event)
                     .ThenInclude(e => e.PuzzleType)
+            .Include(r => r.OfflineRegistrationEvents)
+                .ThenInclude(ore => ore.Event)
+                    .ThenInclude(e => e.MedleyPuzzles)
+                        .ThenInclude(mp => mp.PuzzleType)
             .Where(r => r.TournamentId == tournamentId)
             .OrderByDescending(r => r.RegisteredAt)
             .ToListAsync(ct);

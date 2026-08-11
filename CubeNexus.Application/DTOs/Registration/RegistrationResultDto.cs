@@ -1,3 +1,5 @@
+using CubeNexus.Application.DTOs.Tournament;
+
 namespace CubeNexus.Application.DTOs.Registration;
 
 public class RegistrationResultDto
@@ -25,6 +27,7 @@ public class RegisteredEventDetailDto
     public Guid EventId { get; set; }
     public string PuzzleTypeName { get; set; } = string.Empty;
     public string EventFormatCode { get; set; } = string.Empty;
+    public List<MedleyPuzzleDetailDto> MedleyPuzzles { get; set; } = new();
     public string StatusCode { get; set; } = string.Empty;
     public int? SeedTimeMs { get; set; }
     public string? SeedSourceCode { get; set; }

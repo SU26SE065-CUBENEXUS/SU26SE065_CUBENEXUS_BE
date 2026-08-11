@@ -267,6 +267,14 @@ public class TournamentRegistrationService : ITournamentRegistrationService
                     EventId = ore.EventId,
                     PuzzleTypeName = ore.Event?.PuzzleType?.Name ?? string.Empty,
                     EventFormatCode = ore.Event?.EventFormatCode ?? string.Empty,
+                    MedleyPuzzles = ore.Event?.MedleyPuzzles?.OrderBy(mp => mp.SortOrder).Select(mp => new CubeNexus.Application.DTOs.Tournament.MedleyPuzzleDetailDto
+                    {
+                        Id = mp.Id,
+                        PuzzleTypeId = mp.PuzzleTypeId,
+                        PuzzleTypeName = mp.PuzzleType?.Name ?? string.Empty,
+                        PuzzleTypeCode = mp.PuzzleType?.Code ?? string.Empty,
+                        SortOrder = mp.SortOrder
+                    }).ToList() ?? new List<CubeNexus.Application.DTOs.Tournament.MedleyPuzzleDetailDto>(),
                     StatusCode = ore.StatusCode,
                     SeedTimeMs = ore.SeedTimeMs,
                     SeedSourceCode = ore.SeedSourceCode,
@@ -420,6 +428,14 @@ public class TournamentRegistrationService : ITournamentRegistrationService
                 EventId = ore.EventId,
                 PuzzleTypeName = ore.Event?.PuzzleType?.Name ?? string.Empty,
                 EventFormatCode = ore.Event?.EventFormatCode ?? string.Empty,
+                MedleyPuzzles = ore.Event?.MedleyPuzzles?.OrderBy(mp => mp.SortOrder).Select(mp => new CubeNexus.Application.DTOs.Tournament.MedleyPuzzleDetailDto
+                {
+                    Id = mp.Id,
+                    PuzzleTypeId = mp.PuzzleTypeId,
+                    PuzzleTypeName = mp.PuzzleType?.Name ?? string.Empty,
+                    PuzzleTypeCode = mp.PuzzleType?.Code ?? string.Empty,
+                    SortOrder = mp.SortOrder
+                }).ToList() ?? new List<CubeNexus.Application.DTOs.Tournament.MedleyPuzzleDetailDto>(),
                 StatusCode = ore.StatusCode,
                 SeedTimeMs = ore.SeedTimeMs,
                 SeedSourceCode = ore.SeedSourceCode,

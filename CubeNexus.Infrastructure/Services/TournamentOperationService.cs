@@ -448,6 +448,10 @@ public class TournamentOperationService : ITournamentOperationService
         var existingResults = await _unitOfWork.Results.FindAsync(r => r.GroupCompetitorId == dto.GroupCompetitorId, ct);
         var existingResultsList = existingResults.ToList();
 
+        bool isAlreadyCutoff = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
+        if (isAlreadyCutoff)
+            throw new Application.Exceptions.CustomException("CUTOFF_STOPPED", "Competitor is stopped due to not meeting the cutoff time in initial solves.", 400);
+
         if (existingResultsList.Count >= ev.SolveCount)
             throw new Application.Exceptions.CustomException("SOLVE_COUNT_EXCEEDED", $"Competitor has already completed all {ev.SolveCount} solves.", 400);
 
@@ -680,6 +684,10 @@ public class TournamentOperationService : ITournamentOperationService
 
         var existingResults = await _unitOfWork.Results.FindAsync(r => r.GroupCompetitorId == dto.GroupCompetitorId, ct);
         var existingResultsList = existingResults.ToList();
+
+        bool isAlreadyCutoff = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
+        if (isAlreadyCutoff)
+            throw new Application.Exceptions.CustomException("CUTOFF_STOPPED", "Competitor is stopped due to not meeting the cutoff time in initial solves.", 400);
 
         if (existingResultsList.Count >= ev.SolveCount)
             throw new Application.Exceptions.CustomException("SOLVE_COUNT_EXCEEDED", $"Competitor has already completed all {ev.SolveCount} solves.", 400);
@@ -948,11 +956,17 @@ public class TournamentOperationService : ITournamentOperationService
         var submittedCount = resultsList.Count;
         var solveCount = ev.SolveCount;
 
-        int? nextSolveNumber = submittedCount < solveCount ? submittedCount + 1 : null;
+        bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, resultsList);
+        int? nextSolveNumber = (!isCutoffStopped && submittedCount < solveCount) ? submittedCount + 1 : null;
         bool canSubmit = true;
         string? reason = null;
 
-        if (groupCompetitor.StatusCode == CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW)
+        if (isCutoffStopped)
+        {
+            canSubmit = false;
+            reason = "CUTOFF_REACHED";
+        }
+        else if (groupCompetitor.StatusCode == CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW)
         {
             canSubmit = false;
             reason = "COMPETITOR_NO_SHOW";
@@ -1012,6 +1026,7 @@ public class TournamentOperationService : ITournamentOperationService
             SubmittedCount = submittedCount,
             NextSolveNumber = nextSolveNumber,
             CanSubmit = canSubmit,
+            IsCutoffReached = isCutoffStopped,
             Reason = reason,
             CurrentScramble = currentScramble
         };
@@ -1131,8 +1146,10 @@ public class TournamentOperationService : ITournamentOperationService
             var resultsList = results.ToList();
             var submittedCount = resultsList.Count;
 
-            int? nextSolveNumber = submittedCount < ev.SolveCount ? submittedCount + 1 : null;
-            bool canSubmit = gc.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW &&
+            bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, resultsList);
+            int? nextSolveNumber = (!isCutoffStopped && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
+            bool canSubmit = !isCutoffStopped &&
+                             gc.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW &&
                              grp.StatusCode == "ONGOING" &&
                              registration.CheckedInAt != null &&
                              registration.StatusCode == "CHECKED_IN" &&
@@ -1146,12 +1163,13 @@ public class TournamentOperationService : ITournamentOperationService
                 CompetitorName = competitorName,
                 EventId = ev.Id,
                 EventName = eventName,
-                RoundNumber = roundNumber,
-                StationNumber = stationNumber,
+                RoundNumber = grp.RoundNumber,
+                StationNumber = gc.StationNumber ?? stationNumber,
                 SolveCount = ev.SolveCount,
                 SubmittedCount = submittedCount,
                 NextSolveNumber = nextSolveNumber,
                 CanSubmit = canSubmit,
+                IsCutoffReached = isCutoffStopped,
                 Status = gc.StatusCode.ToString()
             });
         }

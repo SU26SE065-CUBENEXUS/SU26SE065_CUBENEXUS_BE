@@ -32,6 +32,9 @@ public static class LiveBoardCalculator
             var reg = offReg != null && regMap.TryGetValue(offReg.RegistrationId, out var r) ? r : null;
             var user = reg != null && userMap.TryGetValue(reg.UserId, out var u) ? u : null;
 
+            int completedSolves = compResults.Count;
+            bool isCutoffReached = CutoffEvaluator.IsCutoffStopped(solveCount, cutoffTimeMs, compResults);
+
             var resultDtos = compResults.OrderBy(res => res.SolveNumber).Select(res => new LiveBoardResultDto
             {
                 ResultId = res.Id,
@@ -46,8 +49,24 @@ public static class LiveBoardCalculator
                 EvidencePhotoUrl = res.EvidencePhotoUrl
             }).ToList();
 
-            int completedSolves = compResults.Count;
-            bool isCutoffReached = CutoffEvaluator.IsCutoffStopped(solveCount, cutoffTimeMs, compResults);
+            // Per WCA Regulation 9g: If a competitor fails cutoff in the initial solves, remaining attempts are recorded/calculated as DNF
+            if (isCutoffReached && resultDtos.Count < solveCount)
+            {
+                for (int solveNum = resultDtos.Count + 1; solveNum <= solveCount; solveNum++)
+                {
+                    resultDtos.Add(new LiveBoardResultDto
+                    {
+                        ResultId = Guid.Empty,
+                        SolveNumber = solveNum,
+                        RawTimeMs = null,
+                        FinalTimeMs = null,
+                        PenaltyCode = "DNF",
+                        IsDnf = true,
+                        IsLocked = true,
+                        SubmittedAt = DateTime.UtcNow
+                    });
+                }
+            }
 
             // Calculate Best Time
             int? bestTimeMs = null;
@@ -63,9 +82,16 @@ public static class LiveBoardCalculator
 
             // Calculate Average Time
             int? averageTimeMs = null;
-            if (completedSolves >= solveCount)
+            int effectiveCompletedSolves = isCutoffReached ? solveCount : completedSolves;
+
+            if (effectiveCompletedSolves >= solveCount)
             {
-                if (solveCount == 5)
+                if (isCutoffReached)
+                {
+                    // Failed cutoff => remaining solves recorded as DNF => Average is DNF
+                    averageTimeMs = int.MaxValue;
+                }
+                else if (solveCount == 5)
                 {
                     int dnfCount = compResults.Count(res => res.IsDnf);
                     if (dnfCount >= 2)
@@ -104,8 +130,8 @@ public static class LiveBoardCalculator
                 GroupId = c.GroupId,
                 Results = resultDtos,
                 BestTimeMs = bestTimeMs == int.MaxValue ? null : bestTimeMs,
-                AverageTimeMs = averageTimeMs == int.MaxValue ? null : averageTimeMs,
-                CompletedSolves = completedSolves,
+                AverageTimeMs = averageTimeMs,
+                CompletedSolves = effectiveCompletedSolves,
                 IsCutoffReached = isCutoffReached
             });
         }
