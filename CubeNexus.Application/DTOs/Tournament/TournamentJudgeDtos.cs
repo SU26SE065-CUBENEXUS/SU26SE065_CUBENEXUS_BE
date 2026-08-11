@@ -12,11 +12,17 @@ public class TournamentJudgeDto
     public string RoleCode { get; set; } = "STATION_JUDGE";
     public int? AssignedStationNumber { get; set; }
     public DateTime AssignedAt { get; set; }
+    public bool IsActive { get; set; } = true;
     
     /// <summary>
     /// Mật khẩu thật dạng plain-text (chỉ trả về khi mới tạo hoặc vừa reset để Manager sao chép bàn giao).
     /// </summary>
     public string? RawPassword { get; set; }
+}
+
+public class ToggleJudgeStatusDto
+{
+    public bool IsActive { get; set; }
 }
 
 public class CreateTournamentJudgeDto

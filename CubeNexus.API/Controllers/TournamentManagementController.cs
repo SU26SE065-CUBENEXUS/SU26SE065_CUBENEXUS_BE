@@ -354,6 +354,52 @@ public class TournamentManagementController : ControllerBase
     }
 
     /// <summary>
+    /// Bật/Tắt trạng thái hoạt động (IsActive) của Trọng tài.
+    /// </summary>
+    [HttpPatch("api/tournament-management/tournaments/{tournamentId:guid}/judges/{judgeUserId:guid}/toggle-status")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> ToggleJudgeStatus(Guid tournamentId, Guid judgeUserId, [FromBody] ToggleJudgeStatusDto dto, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            Guid.TryParse(userIdString, out var managerId);
+
+            var result = await _tournamentService.ToggleJudgeStatusAsync(tournamentId, judgeUserId, dto.IsActive, managerId, ct);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while toggling judge status.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Vô hiệu hóa hàng loạt toàn bộ Trọng tài của Giải đấu.
+    /// </summary>
+    [HttpPost("api/tournament-management/tournaments/{tournamentId:guid}/judges/deactivate-all")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> DeactivateAllJudges(Guid tournamentId, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            Guid.TryParse(userIdString, out var managerId);
+
+            var result = await _tournamentService.DeactivateAllJudgesAsync(tournamentId, managerId, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while deactivating all judges.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Đặt lại mật khẩu mới cho Trọng tài.
     /// </summary>
     [HttpPost("api/tournament-management/tournaments/{tournamentId:guid}/judges/{judgeUserId:guid}/reset-password")]

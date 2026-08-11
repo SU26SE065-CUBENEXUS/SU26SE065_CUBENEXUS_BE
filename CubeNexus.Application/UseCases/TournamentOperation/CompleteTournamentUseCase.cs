@@ -35,6 +35,24 @@ public class CompleteTournamentUseCase : ICompleteTournamentUseCase
         }
 
         var events = await _unitOfWork.Events.FindAsync(e => e.TournamentId == tournamentId);
+        var eventIds = events.Select(e => e.Id).ToList();
+        if (eventIds.Any())
+        {
+            var groups = await _unitOfWork.Groups.FindAsync(g => eventIds.Contains(g.EventId));
+            if (groups.Any())
+            {
+                var uncompletedGroups = groups.Where(g => g.StatusCode != "COMPLETED").ToList();
+                if (uncompletedGroups.Any())
+                {
+                    throw new CustomException(
+                        "TOURNAMENT_NOT_READY_TO_COMPLETE",
+                        "Không thể hoàn thành giải đấu vì còn vòng thi hoặc nhóm thi đấu chưa hoàn tất (chưa Complete Round). Vui lòng nhập điểm và hoàn thành các vòng thi trước.",
+                        400
+                    );
+                }
+            }
+        }
+
         foreach (var ev in events)
         {
             ev.RegistrationStatusCode = "CLOSED";
@@ -43,6 +61,19 @@ public class CompleteTournamentUseCase : ICompleteTournamentUseCase
 
         tournament.StatusCode = "COMPLETED";
         _unitOfWork.Tournaments.Update(tournament);
+
+        // Auto-deactivate all judge user accounts for this tournament
+        var judges = await _unitOfWork.TournamentJudges.FindAsync(tj => tj.TournamentId == tournamentId);
+        var judgeUserIds = judges.Select(tj => tj.UserId).Distinct().ToList();
+        if (judgeUserIds.Any())
+        {
+            var judgeUsers = await _unitOfWork.Users.FindAsync(u => judgeUserIds.Contains(u.Id));
+            foreach (var judgeUser in judgeUsers)
+            {
+                judgeUser.IsActive = false;
+                _unitOfWork.Users.Update(judgeUser);
+            }
+        }
 
         await _unitOfWork.SaveChangesAsync();
 

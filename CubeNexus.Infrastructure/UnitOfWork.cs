@@ -113,6 +113,11 @@ public class UnitOfWork : IUnitOfWork, IAppUnitOfWork
     public IRepository<ResultAuditLog> ResultAuditLogs
         => _resultAuditLogs ??= new Repository<ResultAuditLog>(_db);
 
+    private IRepository<TournamentJudge>? _tournamentJudges;
+
+    public IRepository<TournamentJudge> TournamentJudges
+        => _tournamentJudges ??= new Repository<TournamentJudge>(_db);
+
     // ── Persist ───────────────────────────────────────────────
 
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)

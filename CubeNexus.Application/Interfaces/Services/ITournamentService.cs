@@ -16,5 +16,7 @@ public interface ITournamentService
     Task<TournamentJudgeDto> UpdateTournamentJudgeAsync(Guid tournamentId, Guid judgeUserId, UpdateTournamentJudgeDto dto, Guid managerId, CancellationToken ct = default);
     Task<TournamentJudgeDto> ResetTournamentJudgePasswordAsync(Guid tournamentId, Guid judgeUserId, ResetJudgePasswordDto dto, Guid managerId, CancellationToken ct = default);
     Task<List<TournamentJudgeDto>> ShuffleTournamentJudgesAsync(Guid tournamentId, ShuffleTournamentJudgesDto dto, Guid managerId, CancellationToken ct = default);
+    Task<TournamentJudgeDto> ToggleJudgeStatusAsync(Guid tournamentId, Guid judgeUserId, bool isActive, Guid managerId, CancellationToken ct = default);
+    Task<List<TournamentJudgeDto>> DeactivateAllJudgesAsync(Guid tournamentId, Guid managerId, CancellationToken ct = default);
     Task DeleteTournamentJudgeAsync(Guid tournamentId, Guid judgeUserId, Guid managerId, CancellationToken ct = default);
 }

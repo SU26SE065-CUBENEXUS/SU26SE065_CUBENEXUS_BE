@@ -162,12 +162,17 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationByStationUseCase
         if (resultsList.Any() && resultsList.All(r => r.IsLocked))
             throw new CustomException("RESULTS_LOCKED", "Results for this competitor are already locked.", 400);
 
-        bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, resultsList);
+        bool isStopped = CutoffEvaluator.IsStopped(ev.SolveCount, ev.CutoffTimeMs, resultsList);
 
-        if (isCutoffStopped || comp.StatusCode == GroupCompetitorStatus.COMPLETED || resultsList.Count >= ev.SolveCount)
+        if (isStopped || comp.StatusCode == GroupCompetitorStatus.COMPLETED || resultsList.Count >= ev.SolveCount)
         {
-            if (isCutoffStopped)
+            if (isStopped)
             {
+                bool isDnfStopped = CutoffEvaluator.IsDnfStopped(ev.SolveCount, resultsList);
+                if (isDnfStopped)
+                {
+                    throw new CustomException("DNF_LIMIT_REACHED", "Thí sinh đã dừng thi đấu do đạt số lượt DNF tối đa làm DNF kết quả Average.", 400);
+                }
                 var cutoffDisplay = ev.CutoffTimeMs.HasValue ? $"{ev.CutoffTimeMs.Value / 1000.0:0.##}s" : "mốc quy định";
                 throw new CustomException("CUTOFF_NOT_PASSED", $"Thí sinh đã dừng thi đấu do không đạt mốc Cutoff Time ({cutoffDisplay}).", 400);
             }

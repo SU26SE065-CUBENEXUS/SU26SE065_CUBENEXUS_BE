@@ -42,4 +42,35 @@ public static class CutoffEvaluator
 
         return !passedCutoff;
     }
+
+    /// <summary>
+    /// Determines whether a competitor has reached the maximum allowed DNF count
+    /// such that their Average score is mathematically guaranteed to be DNF.
+    /// - Mo3 / Ao3 (solveCount == 3): 1 DNF makes Average DNF.
+    /// - Ao5 (solveCount == 5): 2 DNFs make Average DNF.
+    /// </summary>
+    public static bool IsDnfStopped(int solveCount, List<Result> results)
+    {
+        int dnfCount = results.Count(r => r.IsDnf);
+        if (solveCount == 3 && dnfCount >= 1)
+            return true;
+        if (solveCount == 5 && dnfCount >= 2)
+            return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Determines whether a competitor should be stopped from performing further solves
+    /// due to either failing Cutoff time OR hitting the DNF limit for Average.
+    /// </summary>
+    public static bool IsStopped(int solveCount, int? cutoffTimeMs, List<Result> results)
+    {
+        if (IsCutoffStopped(solveCount, cutoffTimeMs, results))
+            return true;
+
+        if (IsDnfStopped(solveCount, results))
+            return true;
+
+        return false;
+    }
 }

@@ -19,14 +19,13 @@ public class GroupAssignmentDomainService
         if (stationCount <= 0)
             throw new ArgumentException("Station count must be greater than zero.", nameof(stationCount));
 
-        // For Round 1: Sort by SeedTimeMs ASC (NULLS LAST)
-        // For Round > 1: Preserve incoming rank order (do NOT re-sort by original pre-tournament SeedTimeMs!)
+        // For Round 1: Randomly shuffle competitors for group assignment
+        // For Round > 1: Preserve incoming rank order from previous round
         List<OfflineRegistrationEvent> sorted;
         if (roundNumber == 1)
         {
             sorted = registeredEvents
-                .OrderBy(e => e.SeedTimeMs.HasValue ? 0 : 1)
-                .ThenBy(e => e.SeedTimeMs)
+                .OrderBy(_ => Random.Shared.Next())
                 .ToList();
         }
         else
@@ -38,21 +37,23 @@ public class GroupAssignmentDomainService
         int competitorIndex = 0;
         int groupNumber = 1;
 
+        // Shuffle available station numbers (1..stationCount) randomly for fair station allocation across all groups
+        var randomStations = Enumerable.Range(1, stationCount)
+            .OrderBy(_ => Random.Shared.Next())
+            .ToList();
+        int globalStationIndex = 0;
+
         while (competitorIndex < sorted.Count)
         {
             var groupCompetitors = sorted.Skip(competitorIndex).Take(competitorsPerGroup).ToList();
             string groupName = $"Group {groupNumber}";
 
-            // Shuffle available station numbers (1..stationCount) randomly for fair and random station allocation
-            var randomStations = Enumerable.Range(1, stationCount)
-                .OrderBy(_ => Random.Shared.Next())
-                .ToList();
-
             for (int i = 0; i < groupCompetitors.Count; i++)
             {
                 var regEvent = groupCompetitors[i];
-                // Station number is assigned randomly from shuffled stations
-                int stationNumber = randomStations[i % randomStations.Count];
+                // Station number is assigned sequentially/round-robin from shuffled stations across groups
+                int stationNumber = randomStations[globalStationIndex % randomStations.Count];
+                globalStationIndex++;
 
                 assignments.Add(new GroupCompetitorAssignment
                 {

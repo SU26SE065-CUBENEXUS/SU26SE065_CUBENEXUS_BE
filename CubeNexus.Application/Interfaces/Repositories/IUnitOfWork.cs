@@ -28,6 +28,7 @@ public interface IUnitOfWork : IDisposable
     IRepository<MedleyEventPuzzle> MedleyEventPuzzles { get; }
     IRepository<Dispute> Disputes { get; }
     IRepository<ResultAuditLog> ResultAuditLogs { get; }
+    IRepository<TournamentJudge> TournamentJudges { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

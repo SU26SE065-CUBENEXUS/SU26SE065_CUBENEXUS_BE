@@ -72,19 +72,24 @@ public class LockRoundResultsUseCase : ILockRoundResultsUseCase
 
         foreach (var comp in competitors)
         {
-            if (comp.StatusCode != GroupCompetitorStatus.COMPLETED && comp.StatusCode != GroupCompetitorStatus.NO_SHOW)
+            if (comp.StatusCode == GroupCompetitorStatus.NO_SHOW)
+                continue;
+
+            var compResults = resultsByCompetitor.TryGetValue(comp.Id, out var rList) ? rList : new List<Result>();
+            bool isStopped = CutoffEvaluator.IsStopped(ev.SolveCount, ev.CutoffTimeMs, compResults);
+            bool isDone = compResults.Count >= ev.SolveCount || isStopped;
+
+            if (isDone)
+            {
+                if (comp.StatusCode != GroupCompetitorStatus.COMPLETED)
+                {
+                    comp.StatusCode = GroupCompetitorStatus.COMPLETED;
+                    _unitOfWork.GroupCompetitors.Update(comp);
+                }
+            }
+            else
             {
                 throw new CustomException("ROUND_NOT_READY_TO_LOCK", "Cannot lock results because some competitors have not completed their solves yet.", 409);
-            }
-
-            if (comp.StatusCode == GroupCompetitorStatus.COMPLETED)
-            {
-                var compResults = resultsByCompetitor.TryGetValue(comp.Id, out var rList) ? rList : new List<Result>();
-                bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, compResults);
-                if (compResults.Count < ev.SolveCount && !isCutoffStopped)
-                {
-                    throw new CustomException("ROUND_NOT_READY_TO_LOCK", "Cannot lock results because some competitors have not completed their solves yet.", 409);
-                }
             }
         }
 
@@ -175,9 +180,32 @@ public class CompleteRoundUseCase : ICompleteRoundUseCase
         // Check if all competitors are COMPLETED or NO_SHOW
         var groupIds = groups.Select(g => g.Id).ToList();
         var competitors = await _unitOfWork.GroupCompetitors.FindAsync(gc => groupIds.Contains(gc.GroupId));
-        var incompleteCompetitors = competitors.Where(c => c.StatusCode != GroupCompetitorStatus.COMPLETED && c.StatusCode != GroupCompetitorStatus.NO_SHOW).ToList();
-        if (incompleteCompetitors.Any())
-            throw new CustomException("ROUND_NOT_READY_TO_COMPLETE", "All competitors must be completed or marked as no-show before completing the round.", 409);
+        var competitorIds = competitors.Select(c => c.Id).ToList();
+        var results = await _unitOfWork.Results.FindAsync(r => competitorIds.Contains(r.GroupCompetitorId));
+        var resultsByCompetitor = results.GroupBy(r => r.GroupCompetitorId).ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var comp in competitors)
+        {
+            if (comp.StatusCode == GroupCompetitorStatus.NO_SHOW)
+                continue;
+
+            var compResults = resultsByCompetitor.TryGetValue(comp.Id, out var rList) ? rList : new List<Result>();
+            bool isStopped = CutoffEvaluator.IsStopped(ev.SolveCount, ev.CutoffTimeMs, compResults);
+            bool isDone = compResults.Count >= ev.SolveCount || isStopped;
+
+            if (isDone)
+            {
+                if (comp.StatusCode != GroupCompetitorStatus.COMPLETED)
+                {
+                    comp.StatusCode = GroupCompetitorStatus.COMPLETED;
+                    _unitOfWork.GroupCompetitors.Update(comp);
+                }
+            }
+            else
+            {
+                throw new CustomException("ROUND_NOT_READY_TO_COMPLETE", "All competitors must be completed or marked as no-show before completing the round.", 409);
+            }
+        }
 
         foreach (var group in groups)
         {

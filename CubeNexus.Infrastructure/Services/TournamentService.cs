@@ -341,6 +341,7 @@ public class TournamentService : ITournamentService
             RoleCode = tj.RoleCode ?? "STATION_JUDGE",
             AssignedStationNumber = tj.AssignedStationNumber,
             AssignedAt = tj.AssignedAt,
+            IsActive = tj.User?.IsActive ?? true,
             RawPassword = null
         }).ToList();
     }
@@ -669,6 +670,58 @@ public class TournamentService : ITournamentService
             AssignedAt = tj.AssignedAt,
             RawPassword = rawPassword
         };
+    }
+
+    public async Task<TournamentJudgeDto> ToggleJudgeStatusAsync(Guid tournamentId, Guid judgeUserId, bool isActive, Guid managerId, CancellationToken ct = default)
+    {
+        var tj = await _context.TournamentJudges
+            .Include(x => x.User)
+            .FirstOrDefaultAsync(x => x.TournamentId == tournamentId && x.UserId == judgeUserId, ct);
+
+        if (tj == null)
+            throw new KeyNotFoundException("Trọng tài không thuộc giải đấu này.");
+
+        if (tj.User != null)
+        {
+            tj.User.IsActive = isActive;
+            tj.User.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync(ct);
+        }
+
+        return new TournamentJudgeDto
+        {
+            Id = tj.Id,
+            UserId = tj.UserId,
+            TournamentId = tj.TournamentId,
+            DisplayName = tj.User?.DisplayName ?? "Judge",
+            Username = GetUsernameFromUser(tj.User),
+            Email = tj.User?.Email ?? string.Empty,
+            UserCode = tj.User?.UserCode ?? string.Empty,
+            RoleCode = tj.RoleCode ?? "STATION_JUDGE",
+            AssignedStationNumber = tj.AssignedStationNumber,
+            AssignedAt = tj.AssignedAt,
+            IsActive = tj.User?.IsActive ?? true
+        };
+    }
+
+    public async Task<List<TournamentJudgeDto>> DeactivateAllJudgesAsync(Guid tournamentId, Guid managerId, CancellationToken ct = default)
+    {
+        var judges = await _context.TournamentJudges
+            .Include(x => x.User)
+            .Where(x => x.TournamentId == tournamentId)
+            .ToListAsync(ct);
+
+        foreach (var tj in judges)
+        {
+            if (tj.User != null)
+            {
+                tj.User.IsActive = false;
+                tj.User.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
+        await _context.SaveChangesAsync(ct);
+        return await GetTournamentJudgesAsync(tournamentId, ct);
     }
 
     public async Task DeleteTournamentJudgeAsync(Guid tournamentId, Guid judgeUserId, Guid managerId, CancellationToken ct = default)

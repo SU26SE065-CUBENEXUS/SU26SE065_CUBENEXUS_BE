@@ -82,28 +82,25 @@ public class AdvanceRoundUseCase : IAdvanceRoundUseCase
             ev.CutoffTimeMs
         );
 
-        // Exclude NO_SHOW, non-COMPLETED, and cutoff-stopped competitors
-        // IsCutoffReached = true means the competitor FAILED to pass cutoff (was stopped early)
-        // → they must NOT advance to the next round
+        // Exclude NO_SHOW, non-COMPLETED, cutoff-stopped, and DNF average/best competitors
+        // A competitor with a DNF Average (or DNF Best in Bo1/Bo2) cannot qualify for the next round per WCA Reg 9m1.
+        bool isAverageFormat = ev.SolveCount >= 3;
         var eligibleCompetitors = calculatedCompetitors
             .Where(c => c.CompetitorStatus == "COMPLETED"
-                     && c.CompletedSolves >= ev.SolveCount
-                     && !c.IsCutoffReached)
+                     && !c.IsCutoffReached
+                     && (isAverageFormat
+                         ? (c.AverageTimeMs.HasValue && c.AverageTimeMs.Value > 0 && c.AverageTimeMs.Value < int.MaxValue)
+                         : (c.BestTimeMs.HasValue && c.BestTimeMs.Value > 0 && c.BestTimeMs.Value < int.MaxValue)))
             .ToList();
 
         // Advanced Tie-Break Logic
-        // Sort by Average ASC, then Best ASC, then SeedTimeMs ASC, then SubmittedAt ASC, then Id
+        // Sort by Average ASC, then Best ASC, then SubmittedAt ASC, then Id
         var competitorEntities = competitors.ToDictionary(c => c.Id);
         var resultListByComp = results.GroupBy(r => r.GroupCompetitorId).ToDictionary(g => g.Key, g => g.ToList());
 
         var sortedEligible = eligibleCompetitors
             .OrderBy(c => c.AverageTimeMs ?? int.MaxValue)
             .ThenBy(c => c.BestTimeMs ?? int.MaxValue)
-            .ThenBy(c => {
-                var compEntity = competitorEntities[c.GroupCompetitorId];
-                var offReg = offlineRegEventMap[compEntity.RegistrationEventId];
-                return offReg.SeedTimeMs ?? int.MaxValue;
-            })
             .ThenBy(c => {
                 var compResults = resultListByComp.TryGetValue(c.GroupCompetitorId, out var rList) ? rList : new List<Result>();
                 return compResults.Any() ? compResults.Max(r => r.SubmittedAt) : DateTime.MaxValue;

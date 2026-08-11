@@ -33,7 +33,7 @@ public static class LiveBoardCalculator
             var user = reg != null && userMap.TryGetValue(reg.UserId, out var u) ? u : null;
 
             int completedSolves = compResults.Count;
-            bool isCutoffReached = CutoffEvaluator.IsCutoffStopped(solveCount, cutoffTimeMs, compResults);
+            bool isCutoffReached = CutoffEvaluator.IsStopped(solveCount, cutoffTimeMs, compResults);
 
             var resultDtos = compResults.OrderBy(res => res.SolveNumber).Select(res => new LiveBoardResultDto
             {

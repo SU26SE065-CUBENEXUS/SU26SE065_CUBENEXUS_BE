@@ -410,6 +410,7 @@ public class TournamentOperationService : ITournamentOperationService
 
     public async Task<SubmitResultResponseDto> SubmitTraditionalResultAsync(SubmitTraditionalResultDto dto, Guid userId, CancellationToken ct = default)
     {
+        await EnsureActiveJudgeAsync(userId, ct);
         Console.WriteLine($"[Validation Stage] SubmitTraditionalResultAsync started. GroupCompetitorId={dto.GroupCompetitorId}, ScrambleId={dto.ScrambleId}, SolveNumber={dto.SolveNumber}");
 
         var groupCompetitor = await _unitOfWork.GroupCompetitors.GetByIdAsync(dto.GroupCompetitorId, ct);
@@ -448,9 +449,13 @@ public class TournamentOperationService : ITournamentOperationService
         var existingResults = await _unitOfWork.Results.FindAsync(r => r.GroupCompetitorId == dto.GroupCompetitorId, ct);
         var existingResultsList = existingResults.ToList();
 
-        bool isAlreadyCutoff = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
-        if (isAlreadyCutoff)
-            throw new Application.Exceptions.CustomException("CUTOFF_STOPPED", "Competitor is stopped due to not meeting the cutoff time in initial solves.", 400);
+        bool isAlreadyStopped = CutoffEvaluator.IsStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
+        if (isAlreadyStopped)
+        {
+            bool isDnf = CutoffEvaluator.IsDnfStopped(ev.SolveCount, existingResultsList);
+            string errorMsg = isDnf ? "Competitor is stopped due to reaching max DNF count for average." : "Competitor is stopped due to not meeting the cutoff time in initial solves.";
+            throw new Application.Exceptions.CustomException("COMPETITOR_STOPPED", errorMsg, 400);
+        }
 
         if (existingResultsList.Count >= ev.SolveCount)
             throw new Application.Exceptions.CustomException("SOLVE_COUNT_EXCEEDED", $"Competitor has already completed all {ev.SolveCount} solves.", 400);
@@ -504,14 +509,14 @@ public class TournamentOperationService : ITournamentOperationService
 
         _unitOfWork.Results.Add(result);
 
-        // Include current result in list to evaluate cutoff
+        // Include current result in list to evaluate cutoff / DNF stopping
         existingResultsList.Add(result);
-        bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
+        bool isStopped = CutoffEvaluator.IsStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
 
         // Check if completed
         var resultCount = existingResultsList.Count;
 
-        if ((resultCount >= ev.SolveCount || isCutoffStopped) && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED)
+        if ((resultCount >= ev.SolveCount || isStopped) && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED)
         {
             groupCompetitor.StatusCode = CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED;
             _unitOfWork.GroupCompetitors.Update(groupCompetitor);
@@ -587,7 +592,7 @@ public class TournamentOperationService : ITournamentOperationService
                     BestTimeMs = calculatedComp?.BestTimeMs,
                     AverageTimeMs = calculatedComp?.AverageTimeMs,
                     Rank = calculatedComp?.Rank,
-                    IsCutoffReached = isCutoffStopped
+                    IsCutoffReached = isStopped
                 }
             };
 
@@ -600,8 +605,8 @@ public class TournamentOperationService : ITournamentOperationService
         }
 
         int submittedCount = resultCount;
-        int? nextSolveNumber = (!isCutoffStopped && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
-        bool canSubmitNext = !isCutoffStopped && nextSolveNumber.HasValue && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW && group.StatusCode == "ONGOING";
+        int? nextSolveNumber = (!isStopped && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
+        bool canSubmitNext = !isStopped && nextSolveNumber.HasValue && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW && group.StatusCode == "ONGOING";
 
         ScrambleInfoDto? nextScramble = null;
         if (canSubmitNext && nextSolveNumber.HasValue)
@@ -631,7 +636,7 @@ public class TournamentOperationService : ITournamentOperationService
                 SolveCount = ev.SolveCount,
                 NextSolveNumber = nextSolveNumber,
                 CanSubmitNext = canSubmitNext,
-                IsCutoffReached = isCutoffStopped
+                IsCutoffReached = isStopped
             },
             NextScramble = nextScramble
         };
@@ -685,9 +690,13 @@ public class TournamentOperationService : ITournamentOperationService
         var existingResults = await _unitOfWork.Results.FindAsync(r => r.GroupCompetitorId == dto.GroupCompetitorId, ct);
         var existingResultsList = existingResults.ToList();
 
-        bool isAlreadyCutoff = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
-        if (isAlreadyCutoff)
-            throw new Application.Exceptions.CustomException("CUTOFF_STOPPED", "Competitor is stopped due to not meeting the cutoff time in initial solves.", 400);
+        bool isAlreadyStopped = CutoffEvaluator.IsStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
+        if (isAlreadyStopped)
+        {
+            bool isDnf = CutoffEvaluator.IsDnfStopped(ev.SolveCount, existingResultsList);
+            string errorMsg = isDnf ? "Competitor is stopped due to reaching max DNF count for average." : "Competitor is stopped due to not meeting the cutoff time in initial solves.";
+            throw new Application.Exceptions.CustomException("COMPETITOR_STOPPED", errorMsg, 400);
+        }
 
         if (existingResultsList.Count >= ev.SolveCount)
             throw new Application.Exceptions.CustomException("SOLVE_COUNT_EXCEEDED", $"Competitor has already completed all {ev.SolveCount} solves.", 400);
@@ -792,14 +801,14 @@ public class TournamentOperationService : ITournamentOperationService
         _unitOfWork.Results.Add(result);
         _unitOfWork.MedleyResultDetails.AddRange(detailsToInsert);
 
-        // Include current result in list to evaluate cutoff
+        // Include current result in list to evaluate cutoff / DNF stopping
         existingResultsList.Add(result);
-        bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
+        bool isStopped = CutoffEvaluator.IsStopped(ev.SolveCount, ev.CutoffTimeMs, existingResultsList);
 
         // Check if completed
         var resultCount = existingResultsList.Count;
 
-        if ((resultCount >= ev.SolveCount || isCutoffStopped) && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED)
+        if ((resultCount >= ev.SolveCount || isStopped) && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED)
         {
             groupCompetitor.StatusCode = CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED;
             _unitOfWork.GroupCompetitors.Update(groupCompetitor);
@@ -873,7 +882,7 @@ public class TournamentOperationService : ITournamentOperationService
                     BestTimeMs = calculatedComp?.BestTimeMs,
                     AverageTimeMs = calculatedComp?.AverageTimeMs,
                     Rank = calculatedComp?.Rank,
-                    IsCutoffReached = isCutoffStopped
+                    IsCutoffReached = isStopped
                 }
             };
 
@@ -885,9 +894,8 @@ public class TournamentOperationService : ITournamentOperationService
         }
 
         int submittedCount = resultCount;
-        bool isCutoffStopped2 = isCutoffStopped; // alias for clarity
-        int? nextSolveNumber = (!isCutoffStopped2 && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
-        bool canSubmitNext = !isCutoffStopped2 && nextSolveNumber.HasValue
+        int? nextSolveNumber = (!isStopped && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
+        bool canSubmitNext = !isStopped && nextSolveNumber.HasValue
             && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW
             && groupCompetitor.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.COMPLETED
             && group.StatusCode == "ONGOING";
@@ -926,7 +934,7 @@ public class TournamentOperationService : ITournamentOperationService
                 SolveCount = ev.SolveCount,
                 NextSolveNumber = nextSolveNumber,
                 CanSubmitNext = canSubmitNext,
-                IsCutoffReached = isCutoffStopped2
+                IsCutoffReached = isStopped
             },
             NextScramble = nextScrambleInfo
         };
@@ -956,15 +964,15 @@ public class TournamentOperationService : ITournamentOperationService
         var submittedCount = resultsList.Count;
         var solveCount = ev.SolveCount;
 
-        bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, resultsList);
-        int? nextSolveNumber = (!isCutoffStopped && submittedCount < solveCount) ? submittedCount + 1 : null;
+        bool isStopped = CutoffEvaluator.IsStopped(ev.SolveCount, ev.CutoffTimeMs, resultsList);
+        int? nextSolveNumber = (!isStopped && submittedCount < solveCount) ? submittedCount + 1 : null;
         bool canSubmit = true;
         string? reason = null;
 
-        if (isCutoffStopped)
+        if (isStopped)
         {
             canSubmit = false;
-            reason = "CUTOFF_REACHED";
+            reason = CutoffEvaluator.IsDnfStopped(ev.SolveCount, resultsList) ? "DNF_LIMIT_REACHED" : "CUTOFF_REACHED";
         }
         else if (groupCompetitor.StatusCode == CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW)
         {
@@ -1026,7 +1034,7 @@ public class TournamentOperationService : ITournamentOperationService
             SubmittedCount = submittedCount,
             NextSolveNumber = nextSolveNumber,
             CanSubmit = canSubmit,
-            IsCutoffReached = isCutoffStopped,
+            IsCutoffReached = isStopped,
             Reason = reason,
             CurrentScramble = currentScramble
         };
@@ -1146,9 +1154,9 @@ public class TournamentOperationService : ITournamentOperationService
             var resultsList = results.ToList();
             var submittedCount = resultsList.Count;
 
-            bool isCutoffStopped = CutoffEvaluator.IsCutoffStopped(ev.SolveCount, ev.CutoffTimeMs, resultsList);
-            int? nextSolveNumber = (!isCutoffStopped && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
-            bool canSubmit = !isCutoffStopped &&
+            bool isStopped = CutoffEvaluator.IsStopped(ev.SolveCount, ev.CutoffTimeMs, resultsList);
+            int? nextSolveNumber = (!isStopped && submittedCount < ev.SolveCount) ? submittedCount + 1 : null;
+            bool canSubmit = !isStopped &&
                              gc.StatusCode != CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW &&
                              grp.StatusCode == "ONGOING" &&
                              registration.CheckedInAt != null &&
@@ -1169,7 +1177,7 @@ public class TournamentOperationService : ITournamentOperationService
                 SubmittedCount = submittedCount,
                 NextSolveNumber = nextSolveNumber,
                 CanSubmit = canSubmit,
-                IsCutoffReached = isCutoffStopped,
+                IsCutoffReached = isStopped,
                 Status = gc.StatusCode.ToString()
             });
         }
@@ -1182,4 +1190,12 @@ public class TournamentOperationService : ITournamentOperationService
         };
     }
 
+    private async Task EnsureActiveJudgeAsync(Guid userId, CancellationToken ct)
+    {
+        var user = await _unitOfWork.Users.GetByIdAsync(userId, ct);
+        if (user != null && user.UserRole == "JUDGE" && !user.IsActive)
+        {
+            throw new Application.Exceptions.CustomException("JUDGE_ACCOUNT_DISABLED", "Tài khoản trọng tài này đã bị vô hiệu hóa hoặc giải đấu đã kết thúc.", 403);
+        }
+    }
 }

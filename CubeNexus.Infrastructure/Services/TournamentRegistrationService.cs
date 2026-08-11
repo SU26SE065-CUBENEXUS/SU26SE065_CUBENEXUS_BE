@@ -94,45 +94,15 @@ public class TournamentRegistrationService : ITournamentRegistrationService
 
             var puzzleTypeId = eventEntity.PuzzleTypeId;
 
-            // 1. Calculate seed from OFFICIAL_RESULT
-            var officialResults = await _unitOfWork.Registrations.GetLatestOfficialResultsAsync(userId, puzzleTypeId, ct);
-            var seedTime = CalculateOfficialSeedTime(officialResults);
-            string? seedSource = null;
-            DateTime? seedGeneratedAt = null;
-
-            if (seedTime.HasValue)
-            {
-                seedSource = "OFFICIAL_RESULT";
-                seedGeneratedAt = DateTime.UtcNow;
-            }
-            else
-            {
-                var recentSolves = await _unitOfWork.Practice.GetRecentSolvesForUserAsync(
-                    userId, puzzleTypeId, 5, ct);
-
-                if (recentSolves.Count == 5)
-                {
-                    var ao5 = PracticeAo5Calculator.CalculateAo5(
-                        recentSolves.OrderBy(s => s.SolvedAt).ToList());
-
-                    if (ao5.HasValue)
-                    {
-                        seedTime = ao5.Value;
-                        seedSource = "PRACTICE_AO5";
-                        seedGeneratedAt = DateTime.UtcNow;
-                    }
-                }
-            }
-
             registration.OfflineRegistrationEvents.Add(new OfflineRegistrationEvent
             {
                 Id = Guid.NewGuid(),
                 RegistrationId = registration.Id,
                 EventId = evDto.EventId,
                 StatusCode = "REGISTERED",
-                SeedTimeMs = seedTime,
-                SeedSourceCode = seedSource,
-                SeedGeneratedAt = seedGeneratedAt,
+                SeedTimeMs = null,
+                SeedSourceCode = null,
+                SeedGeneratedAt = null,
                 UpdatedAt = DateTime.UtcNow
             });
         }
@@ -400,8 +370,7 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         }
 
         return result
-            .OrderBy(x => x.SeedTimeMs.HasValue ? 0 : 1)
-            .ThenBy(x => x.SeedTimeMs)
+            .OrderBy(x => x.DisplayName)
             .ToList();
     }
 

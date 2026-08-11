@@ -188,6 +188,42 @@ public class AdminTournamentService : IAdminTournamentService
         t.StatusCode = normalizedStatus;
         t.UpdatedAt = DateTime.UtcNow;
 
+        // Auto-deactivate judge accounts if tournament is COMPLETED or CANCELLED
+        if (normalizedStatus == "COMPLETED" || normalizedStatus == "CANCELLED")
+        {
+            if (normalizedStatus == "COMPLETED")
+            {
+                var eventIds = t.Events.Select(e => e.Id).ToList();
+                if (eventIds.Any())
+                {
+                    var hasUncompletedGroups = await _context.Groups
+                        .AnyAsync(g => eventIds.Contains(g.EventId) && g.StatusCode != "COMPLETED", ct);
+
+                    if (hasUncompletedGroups)
+                    {
+                        throw new InvalidOperationException("Không thể hoàn thành giải đấu vì còn nhóm hoặc vòng thi chưa hoàn tất (chưa Complete Round).");
+                    }
+                }
+            }
+
+            var judgeUserIds = await _context.TournamentJudges
+                .Where(tj => tj.TournamentId == id)
+                .Select(tj => tj.UserId)
+                .ToListAsync(ct);
+
+            if (judgeUserIds.Any())
+            {
+                var judgeUsers = await _context.Users
+                    .Where(u => judgeUserIds.Contains(u.Id))
+                    .ToListAsync(ct);
+
+                foreach (var judgeUser in judgeUsers)
+                {
+                    judgeUser.IsActive = false;
+                }
+            }
+        }
+
         await _context.SaveChangesAsync(ct);
 
         var regCount = await _context.Registrations
