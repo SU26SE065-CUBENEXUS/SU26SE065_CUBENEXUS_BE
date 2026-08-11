@@ -48,17 +48,18 @@ public class GetMatchRecoveryStateUseCase
         {
             "ROOM_SETUP" or "WEBRTC_CONNECTING" or "MOBILE_TIMER_PAIRING" or "SCRAMBLE_CHECKING" => "SETUP",
             "COUNTDOWN" => "COUNTDOWN",
-            "INSPECTION" => "INSPECTION",
-            "SOLVING" or "FINISH_CHECKING" or "PENDING_EVIDENCE" =>
-                myResultStatus == PlayerResultStatus.PENDING.ToString()
-                ? (isInspectingActive ? "INSPECTION" : "SOLVING")
-                : (myResultStatus == PlayerResultStatus.VALID.ToString() && myFinishStatus != "PASSED")
-                    ? "FINISH_SCANNING"
-                    : "WAITING_OPPONENT",
+            "INSPECTION" or "SOLVING" or "FINISH_CHECKING" or "PENDING_EVIDENCE" =>
+                myFinishStatus == "PASSED"
+                ? "WAITING_OPPONENT"
+                : (myResultStatus == PlayerResultStatus.PENDING.ToString()
+                    ? (isInspectingActive ? "INSPECTION" : "SOLVING")
+                    : "FINISH_SCANNING"),
             "NEEDS_REVIEW" => "NEEDS_REVIEW",
             "COMPLETED" or "CANCELLED" => "COMPLETED",
             _ => "SETUP"
         };
+
+
 
 
         if (match.Phase is "ROOM_SETUP" or "WEBRTC_CONNECTING" or "MOBILE_TIMER_PAIRING" or "SCRAMBLE_CHECKING")
