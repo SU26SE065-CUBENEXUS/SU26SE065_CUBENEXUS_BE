@@ -127,6 +127,11 @@ CREATE TABLE IF NOT EXISTS tournaments (
     start_date TIMESTAMPTZ NOT NULL,
     end_date TIMESTAMPTZ NOT NULL,
     status_code VARCHAR(30) NOT NULL,
+    tournament_type VARCHAR(32) NOT NULL DEFAULT 'OFFLINE',
+    format_code VARCHAR(16) NOT NULL DEFAULT 'AO1',
+    puzzle_type_id UUID REFERENCES puzzle_types(id) ON DELETE SET NULL,
+    scramble_sequence TEXT,
+    attempt_time_limit_ms INT NOT NULL DEFAULT 300000,
     created_by UUID NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
@@ -493,6 +498,50 @@ ON disputes(status_code);
 
 CREATE INDEX IF NOT EXISTS idx_disputes_reported_by
 ON disputes(reported_by);
+
+
+-- =========================================================
+-- 2.1 ONLINE ASYNC TOURNAMENT ATTEMPTS
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS online_async_attempts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tournament_id UUID NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scramble_sequence TEXT NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'INITIALIZED',
+    review_status VARCHAR(32) NOT NULL DEFAULT 'PENDING_REVIEW',
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    hand_timer_started_at TIMESTAMPTZ,
+    solve_started_at TIMESTAMPTZ,
+    solve_finished_at TIMESTAMPTZ,
+    attempt_deadline_at TIMESTAMPTZ,
+    raw_time_ms INT,
+    penalty_time_ms INT NOT NULL DEFAULT 0,
+    penalty_code VARCHAR(16) NOT NULL DEFAULT 'NONE',
+    is_dnf BOOLEAN NOT NULL DEFAULT FALSE,
+    final_time_ms INT,
+    scramble_check_status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    finish_check_status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    video_evidence_url TEXT,
+    scramble_evidence_json TEXT,
+    finish_evidence_json TEXT,
+    reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at TIMESTAMPTZ,
+    review_note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ix_online_async_attempts_tournament_user 
+    ON online_async_attempts(tournament_id, user_id);
+
+CREATE INDEX IF NOT EXISTS ix_online_async_attempts_leaderboard 
+    ON online_async_attempts(tournament_id, review_status, is_dnf, final_time_ms);
+
+CREATE INDEX IF NOT EXISTS ix_online_async_attempts_deadline
+    ON online_async_attempts(attempt_deadline_at)
+    WHERE attempt_deadline_at IS NOT NULL;
 
 
 -- =========================================================

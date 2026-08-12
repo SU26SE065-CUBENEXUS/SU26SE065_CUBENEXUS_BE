@@ -27,6 +27,7 @@ public class AdminTournamentService : IAdminTournamentService
         var query = _context.Tournaments
             .AsNoTracking()
             .Include(t => t.CreatedByUser)
+            .Include(t => t.PuzzleType)
             .Include(t => t.Events)
                 .ThenInclude(e => e.PuzzleType)
             .Include(t => t.Events)
@@ -83,6 +84,12 @@ public class AdminTournamentService : IAdminTournamentService
             RegistrationOpenAt = t.RegistrationOpenAt,
             RegistrationCloseAt = t.RegistrationCloseAt,
             StatusCode = t.StatusCode,
+            TournamentType = t.TournamentType,
+            FormatCode = t.FormatCode,
+            PuzzleTypeId = t.PuzzleTypeId,
+            PuzzleTypeName = t.PuzzleType?.Name,
+            PuzzleTypeCode = t.PuzzleType?.Code,
+            AttemptTimeLimitMs = t.AttemptTimeLimitMs,
             CreatedByUserId = t.CreatedBy,
             CreatedByName = t.CreatedByUser?.DisplayName ?? "Unknown",
             CreatedByEmail = t.CreatedByUser?.Email ?? string.Empty,
@@ -122,6 +129,7 @@ public class AdminTournamentService : IAdminTournamentService
         var t = await _context.Tournaments
             .AsNoTracking()
             .Include(x => x.CreatedByUser)
+            .Include(x => x.PuzzleType)
             .Include(x => x.Events)
                 .ThenInclude(e => e.PuzzleType)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -149,6 +157,12 @@ public class AdminTournamentService : IAdminTournamentService
             RegistrationOpenAt = t.RegistrationOpenAt,
             RegistrationCloseAt = t.RegistrationCloseAt,
             StatusCode = t.StatusCode,
+            TournamentType = t.TournamentType,
+            FormatCode = t.FormatCode,
+            PuzzleTypeId = t.PuzzleTypeId,
+            PuzzleTypeName = t.PuzzleType?.Name,
+            PuzzleTypeCode = t.PuzzleType?.Code,
+            AttemptTimeLimitMs = t.AttemptTimeLimitMs,
             CreatedByUserId = t.CreatedBy,
             CreatedByName = t.CreatedByUser?.DisplayName ?? "Unknown",
             CreatedByEmail = t.CreatedByUser?.Email ?? string.Empty,
@@ -170,6 +184,7 @@ public class AdminTournamentService : IAdminTournamentService
     {
         var t = await _context.Tournaments
             .Include(x => x.CreatedByUser)
+            .Include(x => x.PuzzleType)
             .Include(x => x.Events)
                 .ThenInclude(e => e.PuzzleType)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -244,6 +259,12 @@ public class AdminTournamentService : IAdminTournamentService
             RegistrationOpenAt = t.RegistrationOpenAt,
             RegistrationCloseAt = t.RegistrationCloseAt,
             StatusCode = t.StatusCode,
+            TournamentType = t.TournamentType,
+            FormatCode = t.FormatCode,
+            PuzzleTypeId = t.PuzzleTypeId,
+            PuzzleTypeName = t.PuzzleType?.Name,
+            PuzzleTypeCode = t.PuzzleType?.Code,
+            AttemptTimeLimitMs = t.AttemptTimeLimitMs,
             CreatedByUserId = t.CreatedBy,
             CreatedByName = t.CreatedByUser?.DisplayName ?? "Unknown",
             CreatedByEmail = t.CreatedByUser?.Email ?? string.Empty,
@@ -259,5 +280,51 @@ public class AdminTournamentService : IAdminTournamentService
                 RegistrationStatusCode = e.RegistrationStatusCode,
             }).ToList(),
         };
+    }
+
+    public async Task<AdminTournamentDto> ForceStartOnlineAsyncTournamentAsync(Guid id, CancellationToken ct = default)
+    {
+        var tournament = await _context.Tournaments
+            .Include(t => t.CreatedByUser)
+            .Include(t => t.PuzzleType)
+            .Include(t => t.Events).ThenInclude(e => e.PuzzleType)
+            .FirstOrDefaultAsync(t => t.Id == id, ct)
+            ?? throw new KeyNotFoundException("Tournament was not found.");
+
+        if (tournament.TournamentType != "ONLINE_ASYNC")
+            throw new InvalidOperationException("This development action is available only for online asynchronous tournaments.");
+        if (tournament.StatusCode is "DISABLED" or "CANCELLED" or "COMPLETED")
+            throw new InvalidOperationException("A disabled, cancelled, or completed tournament cannot be started.");
+
+        var now = DateTime.UtcNow;
+        tournament.RegistrationCloseAt = now;
+        tournament.StartDate = now;
+        if (tournament.EndDate <= now)
+            tournament.EndDate = now.AddHours(1);
+        tournament.StatusCode = "ONGOING";
+        tournament.UpdatedAt = now;
+        await _context.SaveChangesAsync(ct);
+        return await GetTournamentByIdAsync(id, ct);
+    }
+
+    public async Task<AdminTournamentDto> CloseOnlineAsyncRegistrationAsync(Guid id, CancellationToken ct = default)
+    {
+        var tournament = await _context.Tournaments.FirstOrDefaultAsync(t => t.Id == id, ct)
+            ?? throw new KeyNotFoundException("Tournament was not found.");
+
+        if (tournament.TournamentType != "ONLINE_ASYNC")
+            throw new InvalidOperationException("This development action is available only for online asynchronous tournaments.");
+        if (tournament.StatusCode is "DISABLED" or "CANCELLED" or "COMPLETED")
+            throw new InvalidOperationException("Registration cannot be changed for this tournament.");
+
+        var now = DateTime.UtcNow;
+        if (now >= tournament.StartDate)
+            throw new InvalidOperationException("Registration is already closed because the competition has started.");
+
+        tournament.RegistrationCloseAt = now;
+        tournament.StatusCode = "REGISTRATION_CLOSED";
+        tournament.UpdatedAt = now;
+        await _context.SaveChangesAsync(ct);
+        return await GetTournamentByIdAsync(id, ct);
     }
 }

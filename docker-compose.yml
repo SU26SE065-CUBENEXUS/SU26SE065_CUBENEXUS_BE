@@ -6,7 +6,7 @@ services:
     container_name: cubenexus-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: CubeNexus
+      POSTGRES_DB: cubenexus
       POSTGRES_USER: cubenexus
       POSTGRES_PASSWORD: 123456
     ports:

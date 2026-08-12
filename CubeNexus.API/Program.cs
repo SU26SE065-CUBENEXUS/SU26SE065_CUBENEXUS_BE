@@ -8,6 +8,7 @@ using CubeNexus.Infrastructure.Identity;
 using CubeNexus.Infrastructure.Options;
 using CubeNexus.Infrastructure.Persistence;
 using CubeNexus.Infrastructure.Services;
+using CubeNexus.API.Filters;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -16,7 +17,7 @@ using Microsoft.OpenApi.Models;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers(options => options.Filters.Add<ApiExceptionFilter>());
 builder.Services.AddEndpointsApiExplorer();
 
 // Swagger - cấu hình nhập token không cần prefix "Bearer"
@@ -116,6 +117,7 @@ builder.Services.AddScoped<IPuzzleService, PuzzleService>();
 builder.Services.AddScoped<IScrambleGeneratorService, ScrambleGeneratorService>();
 builder.Services.AddScoped<IPracticeService, PracticeService>();
 builder.Services.AddScoped<ITournamentService, TournamentService>();
+builder.Services.AddScoped<IOnlineAsyncTournamentService, OnlineAsyncTournamentService>();
 builder.Services.AddScoped<ITournamentRegistrationService, TournamentRegistrationService>();
 builder.Services.AddScoped<ITournamentOperationService, TournamentOperationService>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICheckInRegistrationByQrUseCase, CubeNexus.Application.UseCases.TournamentOperation.CheckInRegistrationByQrUseCase>();
@@ -143,6 +145,7 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IRecordingS
 
 // Repositories (Since they are created via UnitOfWork or registered individually, let's register the specific repositories for DI if any use case injects them directly)
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.Repositories.IPuzzleTypeRepository, CubeNexus.Infrastructure.Repositories.PuzzleTypeRepository>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.Repositories.IOnlineAsyncAttemptRepository, CubeNexus.Infrastructure.Repositories.OnlineAsyncAttemptRepository>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository, CubeNexus.Infrastructure.Repositories.OnlineProfileRepository>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IMatchmakingQueueRepository, CubeNexus.Infrastructure.Repositories.MatchmakingQueueRepository>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineMatchConfirmationRepository, CubeNexus.Infrastructure.Repositories.OnlineMatchConfirmationRepository>();

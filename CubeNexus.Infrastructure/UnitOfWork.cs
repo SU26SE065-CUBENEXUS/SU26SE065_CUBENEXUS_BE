@@ -20,6 +20,7 @@ public class UnitOfWork : IUnitOfWork, IAppUnitOfWork
 
     // Lazy initialization – chỉ tạo repository khi cần
     private ITournamentRepository?          _tournaments;
+    private IOnlineAsyncAttemptRepository?  _onlineAsyncAttempts;
     private IRegistrationRepository?        _registrations;
     private IRepository<OfflineRegistrationEvent>? _offlineRegistrationEvents;
     private IPuzzleTypeRepository?          _puzzleTypes;
@@ -48,6 +49,9 @@ public class UnitOfWork : IUnitOfWork, IAppUnitOfWork
 
     public ITournamentRepository Tournaments
         => _tournaments ??= new TournamentRepository(_db);
+
+    public IOnlineAsyncAttemptRepository OnlineAsyncAttempts
+        => _onlineAsyncAttempts ??= new OnlineAsyncAttemptRepository(_db);
 
     public IRegistrationRepository Registrations
         => _registrations ??= new RegistrationRepository(_db);
@@ -117,6 +121,11 @@ public class UnitOfWork : IUnitOfWork, IAppUnitOfWork
 
     public IRepository<TournamentJudge> TournamentJudges
         => _tournamentJudges ??= new Repository<TournamentJudge>(_db);
+
+    private IRepository<TournamentManager>? _tournamentManagers;
+
+    public IRepository<TournamentManager> TournamentManagers
+        => _tournamentManagers ??= new Repository<TournamentManager>(_db);
 
     // ── Persist ───────────────────────────────────────────────
 

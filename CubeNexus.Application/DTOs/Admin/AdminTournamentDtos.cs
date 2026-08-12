@@ -34,6 +34,12 @@ public class AdminTournamentDto
     public DateTime RegistrationOpenAt { get; set; }
     public DateTime RegistrationCloseAt { get; set; }
     public string StatusCode { get; set; } = string.Empty;
+    public string TournamentType { get; set; } = "OFFLINE";
+    public string FormatCode { get; set; } = "AO1";
+    public Guid? PuzzleTypeId { get; set; }
+    public string? PuzzleTypeName { get; set; }
+    public string? PuzzleTypeCode { get; set; }
+    public int AttemptTimeLimitMs { get; set; }
     public Guid CreatedByUserId { get; set; }
     public string CreatedByName { get; set; } = string.Empty;
     public string CreatedByEmail { get; set; } = string.Empty;

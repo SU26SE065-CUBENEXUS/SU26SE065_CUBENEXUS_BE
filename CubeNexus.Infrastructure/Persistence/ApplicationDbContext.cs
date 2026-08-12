@@ -16,8 +16,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<PenaltyType> PenaltyTypes => Set<PenaltyType>();
     public DbSet<EloConfig> EloConfigs => Set<EloConfig>();
 
-    // 2. Offline Tournament
+    // 2. Offline & Online Tournaments
     public DbSet<Tournament> Tournaments => Set<Tournament>();
+    public DbSet<OnlineAsyncAttempt> OnlineAsyncAttempts => Set<OnlineAsyncAttempt>();
     public DbSet<TournamentManager> TournamentManagers => Set<TournamentManager>();
     public DbSet<TournamentJudge> TournamentJudges => Set<TournamentJudge>();
     public DbSet<Event> Events => Set<Event>();
@@ -70,6 +71,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<PenaltyType>().ToTable("penalty_types");
         modelBuilder.Entity<EloConfig>().ToTable("elo_config");
         modelBuilder.Entity<Tournament>().ToTable("tournaments");
+        modelBuilder.Entity<OnlineAsyncAttempt>().ToTable("online_async_attempts");
         modelBuilder.Entity<TournamentManager>().ToTable("tournament_managers");
         modelBuilder.Entity<TournamentJudge>().ToTable("tournament_judges");
         modelBuilder.Entity<Event>().ToTable("events");
@@ -106,6 +108,16 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<Tournament>(entity =>
         {
             entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedBy);
+            entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<OnlineAsyncAttempt>(entity =>
+        {
+            entity.HasOne(e => e.Tournament).WithMany(t => t.OnlineAsyncAttempts).HasForeignKey(e => e.TournamentId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.ReviewedByUser).WithMany().HasForeignKey(e => e.ReviewedBy).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => new { e.TournamentId, e.UserId }).IsUnique().HasDatabaseName("ix_online_async_attempts_tournament_user");
+            entity.HasIndex(e => new { e.TournamentId, e.ReviewStatus, e.IsDnf, e.FinalTimeMs }).HasDatabaseName("ix_online_async_attempts_leaderboard");
         });
 
         modelBuilder.Entity<TournamentManager>(entity =>

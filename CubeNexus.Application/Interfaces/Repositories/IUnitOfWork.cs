@@ -5,6 +5,7 @@ namespace CubeNexus.Application.Interfaces.Repositories;
 public interface IUnitOfWork : IDisposable
 {
     ITournamentRepository Tournaments { get; }
+    IOnlineAsyncAttemptRepository OnlineAsyncAttempts { get; }
     IRegistrationRepository Registrations { get; }
     IRepository<OfflineRegistrationEvent> OfflineRegistrationEvents { get; }
 
@@ -29,6 +30,7 @@ public interface IUnitOfWork : IDisposable
     IRepository<Dispute> Disputes { get; }
     IRepository<ResultAuditLog> ResultAuditLogs { get; }
     IRepository<TournamentJudge> TournamentJudges { get; }
+    IRepository<TournamentManager> TournamentManagers { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

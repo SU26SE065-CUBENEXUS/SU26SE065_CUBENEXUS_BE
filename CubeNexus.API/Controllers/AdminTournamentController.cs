@@ -78,4 +78,18 @@ public class AdminTournamentController : ControllerBase
             return MapException(ex);
         }
     }
+
+    [HttpPost("{id:guid}/online-async/force-start")]
+    public async Task<IActionResult> ForceStartOnlineAsyncTournament(Guid id, CancellationToken ct = default)
+    {
+        try { return Ok(await _adminTournamentService.ForceStartOnlineAsyncTournamentAsync(id, ct)); }
+        catch (Exception ex) { return MapException(ex); }
+    }
+
+    [HttpPost("{id:guid}/online-async/close-registration")]
+    public async Task<IActionResult> CloseOnlineAsyncRegistration(Guid id, CancellationToken ct = default)
+    {
+        try { return Ok(await _adminTournamentService.CloseOnlineAsyncRegistrationAsync(id, ct)); }
+        catch (Exception ex) { return MapException(ex); }
+    }
 }

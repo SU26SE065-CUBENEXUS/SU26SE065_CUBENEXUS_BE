@@ -2,7 +2,7 @@ using CubeNexus.Application.DTOs.OnlineArena;
 
 namespace CubeNexus.Application.UseCases.OnlineArena;
 
-internal sealed class CubeStateBasicValidation
+public sealed class CubeStateBasicValidation
 {
     public bool IsValid { get; init; }
     public string? Reason { get; init; }
@@ -10,7 +10,7 @@ internal sealed class CubeStateBasicValidation
     public Dictionary<string, int> ColorCounts { get; init; } = [];
 }
 
-internal sealed class CubeStateComparisonResult
+public sealed class CubeStateComparisonResult
 {
     public bool Matched { get; init; }
     public int MatchedStickerCount { get; init; }
@@ -18,15 +18,16 @@ internal sealed class CubeStateComparisonResult
     public List<CubeScanStickerMismatchDto> Mismatches { get; init; } = [];
 }
 
-internal sealed class BatchScrambleValidationResult
+public sealed class BatchScrambleValidationResult
 {
     public bool IsValid { get; init; }
     public bool IsMatchAll { get; init; }
+    public bool Passed => IsValid && IsMatchAll;
     public string? Reason { get; init; }
     public List<string> MismatchedCenterColors { get; init; } = [];
 }
 
-internal static class RubikCubeStateValidator
+public static class RubikCubeStateValidator
 {
     private static readonly string[] Faces = ["U", "R", "F", "D", "L", "B"];
     private static readonly string[] Colors = ["white", "red", "green", "yellow", "orange", "blue"];
@@ -156,24 +157,46 @@ internal static class RubikCubeStateValidator
         };
     }
 
+    /// <summary>
+    /// A01 captures five distinct faces. A solved cube is valid when each captured
+    /// face is a uniform 3x3 grid and its centre colors are distinct.
+    /// </summary>
+    public static BatchScrambleValidationResult ValidateSolvedBatch(List<ScrambleCheckBatchFaceDto> faces)
+    {
+        if (faces == null || faces.Count != 5)
+            return new BatchScrambleValidationResult { IsValid = false, Reason = "Finish check requires exactly 5 scanned faces." };
+
+        var validColorSet = Colors.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var centers = faces.Select(f => (f.CenterColor ?? string.Empty).Trim().ToLowerInvariant()).ToList();
+        if (centers.Any(c => !validColorSet.Contains(c)) || centers.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 5)
+            return new BatchScrambleValidationResult { IsValid = false, Reason = "Finish scan must contain 5 distinct valid center colors." };
+
+        foreach (var face in faces)
+        {
+            if (face.Grid3x3 == null || face.Grid3x3.Count != 3 || face.Grid3x3.Any(row => row.Count != 3))
+                return new BatchScrambleValidationResult { IsValid = false, Reason = "Each scanned face must contain a 3x3 grid." };
+            var center = (face.CenterColor ?? string.Empty).Trim().ToLowerInvariant();
+            if (face.Grid3x3.SelectMany(row => row).Any(color => !string.Equals(color.Trim(), center, StringComparison.OrdinalIgnoreCase)))
+                return new BatchScrambleValidationResult { IsValid = true, IsMatchAll = false, Reason = "The scanned cube is not solved." };
+        }
+
+        return new BatchScrambleValidationResult { IsValid = true, IsMatchAll = true, Reason = "Solved cube check passed." };
+    }
+
     private static bool MatchesAnyRotation(List<string> s, List<string> e)
     {
-        if (SequenceEquals(s, e)) return true;
-
-        // 90 deg clockwise: [s6, s3, s0, s7, s4, s1, s8, s5, s2]
-        var r90 = new List<string> { s[6], s[3], s[0], s[7], s[4], s[1], s[8], s[5], s[2] };
-        if (SequenceEquals(r90, e)) return true;
-
-        // 180 deg: [s8, s7, s6, s5, s4, s3, s2, s1, s0]
-        var r180 = new List<string> { s[8], s[7], s[6], s[5], s[4], s[3], s[2], s[1], s[0] };
-        if (SequenceEquals(r180, e)) return true;
-
-        // 270 deg clockwise: [s2, s5, s8, s1, s4, s7, s0, s3, s6]
-        var r270 = new List<string> { s[2], s[5], s[8], s[1], s[4], s[7], s[0], s[3], s[6] };
-        if (SequenceEquals(r270, e)) return true;
-
+        var current = s;
+        for (var i = 0; i < 4; i++)
+        {
+            if (SequenceEquals(current, e)) return true;
+            current = RotateClockwise(current);
+        }
         return false;
     }
+
+    private static List<string> RotateClockwise(List<string> s)
+        => [s[6], s[3], s[0], s[7], s[4], s[1], s[8], s[5], s[2]];
+
 
     private static bool SequenceEquals(List<string> a, List<string> b)
     {
@@ -253,11 +276,11 @@ internal static class RubikCubeStateValidator
                         var expectedColor = expectedState.TryGetValue(face, out var expFace) && expFace.Count == 3 ? expFace[row][column] : "unknown";
                         mismatches.Add(new CubeScanStickerMismatchDto
                         {
-                            FaceCode = face,
+                            Face = face,
                             Row = row,
                             Column = column,
-                            ExpectedColor = expectedColor,
-                            ObservedColor = "missing"
+                            Expected = expectedColor,
+                            Observed = "missing"
                         });
                     }
                 }
@@ -278,11 +301,11 @@ internal static class RubikCubeStateValidator
                     {
                         mismatches.Add(new CubeScanStickerMismatchDto
                         {
-                            FaceCode = face,
+                            Face = face,
                             Row = row,
                             Column = column,
-                            ExpectedColor = expectedColor,
-                            ObservedColor = observedColor
+                            Expected = expectedColor,
+                            Observed = observedColor
                         });
                     }
                 }
@@ -295,9 +318,8 @@ internal static class RubikCubeStateValidator
         return new CubeStateComparisonResult
         {
             Matched = matched,
-            TotalStickers = totalStickers,
-            MatchedStickers = matchedStickerCount,
-            MismatchedStickers = mismatches.Count,
+            MatchedStickerCount = matchedStickerCount,
+            MismatchedStickerCount = mismatches.Count,
             Mismatches = mismatches
         };
     }

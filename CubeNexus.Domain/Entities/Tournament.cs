@@ -17,7 +17,15 @@ public class Tournament
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
+    public string TournamentType { get; set; } = "OFFLINE"; // OFFLINE | ONLINE_ASYNC
+    public string FormatCode { get; set; } = "AO1"; // AO1
+    public Guid? PuzzleTypeId { get; set; }
+    public string? ScrambleSequence { get; set; }
+    public int AttemptTimeLimitMs { get; set; } = 300000; // 5 minutes default
+
     public User CreatedByUser { get; set; } = null!;
+    public PuzzleType? PuzzleType { get; set; }
     public ICollection<Event> Events { get; set; } = new List<Event>();
     public ICollection<Registration> Registrations { get; set; } = new List<Registration>();
+    public ICollection<OnlineAsyncAttempt> OnlineAsyncAttempts { get; set; } = new List<OnlineAsyncAttempt>();
 }
