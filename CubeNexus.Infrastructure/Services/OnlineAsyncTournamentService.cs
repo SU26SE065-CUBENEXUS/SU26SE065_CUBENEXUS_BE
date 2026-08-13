@@ -7,29 +7,23 @@ using CubeNexus.Domain.Entities;
 using CubeNexus.Application.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
-using System.Security.Cryptography;
 
 namespace CubeNexus.Infrastructure.Services;
 
 public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
 {
-    // A01 is deliberately an easy 3x3 verification flow. Every sequence has exactly
-    // two turns, but the selected sequence is shared by all competitors in a tournament.
-    private static readonly string[] EasyA01Scrambles =
-    [
-        "U R'", "U L", "U F'", "U B", "R U", "R D'", "L U'", "L R",
-        "F U", "F R'", "B U'", "B L", "D R", "D L'", "R2 U", "L2 U'",
-        "U2 R", "U2 L'", "F2 U", "B2 U'"
-    ];
+    private const int PlusTwoThresholdMs = 6_000;
+    private const int DnfThresholdMs = 14_000;
+
     private readonly IUnitOfWork _uow;
-    private readonly IScrambleGeneratorService _scrambleGenerator;
+    private readonly IScramblePoolService _scramblePool;
     private readonly IAiRubikClient _aiRubikClient;
     private readonly IRecordingStorageService _recordingStorage;
 
-    public OnlineAsyncTournamentService(IUnitOfWork uow, IScrambleGeneratorService scrambleGenerator, IAiRubikClient aiRubikClient, IRecordingStorageService recordingStorage)
+    public OnlineAsyncTournamentService(IUnitOfWork uow, IScramblePoolService scramblePool, IAiRubikClient aiRubikClient, IRecordingStorageService recordingStorage)
     {
         _uow = uow;
-        _scrambleGenerator = scrambleGenerator;
+        _scramblePool = scramblePool;
         _aiRubikClient = aiRubikClient;
         _recordingStorage = recordingStorage;
     }
@@ -55,10 +49,6 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         if (puzzleType == null)
             throw new CustomException("PUZZLE_NOT_FOUND", "Specified puzzle type was not found.", 404);
 
-        // Generate one simple, random, shared two-turn scramble for this A01 tournament.
-        // It is persisted on the tournament, so every competitor is verified against the same state.
-        var scrambleSequence = EasyA01Scrambles[RandomNumberGenerator.GetInt32(EasyA01Scrambles.Length)];
-
         var tournament = new Tournament
         {
             Id = Guid.NewGuid(),
@@ -67,7 +57,8 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
             TournamentType = "ONLINE_ASYNC",
             FormatCode = "AO1",
             PuzzleTypeId = request.PuzzleTypeId,
-            ScrambleSequence = scrambleSequence,
+            // Async competitors receive a private scramble only when starting their attempt.
+            ScrambleSequence = null,
             AttemptTimeLimitMs = request.AttemptTimeLimitMs > 0 ? request.AttemptTimeLimitMs : 300000,
             RegistrationOpenAt = request.RegistrationOpenAt,
             RegistrationCloseAt = request.RegistrationCloseAt,
@@ -211,19 +202,28 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         if (now > tournament.EndDate)
             throw new CustomException("COMPETITION_ENDED", "Competition has ended. New attempts are not allowed.", 400);
 
+        await _uow.BeginTransactionAsync();
+        try
+        {
         // Step 12 Enforcement: Format AO1 -> Single attempt constraint
         var existingAttempt = await _uow.OnlineAsyncAttempts.GetByTournamentAndUserAsync(tournamentId, userId, ct);
         if (existingAttempt != null)
             throw new CustomException("ATTEMPT_ALREADY_EXISTS", "You have already started or completed your attempt for this AO1 tournament.", 400);
 
+        var attemptId = Guid.NewGuid();
+        var reservation = await _scramblePool.ReserveAsync("ONLINE_ASYNC", tournament.PuzzleTypeId!.Value,
+            "ONLINE_ASYNC_ATTEMPT", attemptId, userId, ct);
         var attempt = new OnlineAsyncAttempt
         {
-            Id = Guid.NewGuid(),
+            Id = attemptId,
             TournamentId = tournamentId,
             UserId = userId,
-            ScrambleSequence = tournament.ScrambleSequence ?? "R U R' U'",
+            ScrambleSequence = reservation.Sequence,
+            ScramblePoolItemId = reservation.Id,
             Status = "INITIALIZED",
             ReviewStatus = "PENDING_REVIEW",
+            // The total attempt budget starts as soon as the competitor enters
+            // the attempt, so it includes scramble scan, solve and finish scan.
             AttemptDeadlineAt = now.AddMilliseconds(tournament.AttemptTimeLimitMs),
             StartedAt = now,
             CreatedAt = now,
@@ -232,6 +232,8 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
 
         _uow.OnlineAsyncAttempts.Add(attempt);
         await _uow.SaveChangesAsync(ct);
+        await _scramblePool.MarkUsedAsync(reservation.Id, userId, ct);
+        await _uow.CommitTransactionAsync();
 
         return new StartOnlineAsyncAttemptResponse
         {
@@ -242,6 +244,12 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
             TimeLimitMs = tournament.AttemptTimeLimitMs,
             Status = attempt.Status
         };
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync();
+            throw;
+        }
     }
 
     public async Task<VerifyAsyncScrambleResponse> VerifyScrambleAsync(Guid attemptId, Guid userId, VerifyAsyncScrambleRequest request, CancellationToken ct = default)
@@ -250,6 +258,7 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         if (attempt == null || attempt.UserId != userId)
             throw new CustomException("ATTEMPT_NOT_FOUND", "Attempt not found.", 404);
 
+        await EnsureAttemptWithinDeadlineAsync(attempt, ct);
         EnsureAttemptStatus(attempt, "INITIALIZED");
         var tournament = await _uow.Tournaments.GetByIdAsync(attempt.TournamentId, ct)
             ?? throw new CustomException("TOURNAMENT_NOT_FOUND", "Online async tournament not found.", 404);
@@ -303,10 +312,13 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         }
         else throw new CustomException("AI_SCAN_REQUIRED", "A camera scan is required before starting the solve.", 400);
 
+        var now = DateTime.UtcNow;
         attempt.Status = "SCRAMBLE_VERIFIED";
-        attempt.HandTimerStartedAt = DateTime.UtcNow;
-        attempt.AttemptDeadlineAt ??= DateTime.UtcNow.AddMilliseconds(tournament.AttemptTimeLimitMs);
-        attempt.UpdatedAt = DateTime.UtcNow;
+        attempt.HandTimerStartedAt = now;
+        // AttemptDeadlineAt intentionally starts in StartAttemptAsync so the total
+        // time remain includes the initial scramble scan.
+        attempt.AttemptDeadlineAt ??= attempt.StartedAt.AddMilliseconds(tournament.AttemptTimeLimitMs);
+        attempt.UpdatedAt = now;
         await _uow.SaveChangesAsync(ct);
 
         return new VerifyAsyncScrambleResponse
@@ -315,7 +327,8 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
             Passed = true,
             Status = "PASSED",
             Reason = "Scramble verified successfully.",
-            AttemptDeadlineAt = attempt.AttemptDeadlineAt
+            AttemptDeadlineAt = attempt.AttemptDeadlineAt,
+            HandTimerStartedAt = attempt.HandTimerStartedAt
         };
     }
 
@@ -336,6 +349,9 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
             ScrambleCheckStatus = attempt.ScrambleCheckStatus,
             FinishCheckStatus = attempt.FinishCheckStatus,
             AttemptDeadlineAt = attempt.AttemptDeadlineAt,
+            HandTimerStartedAt = attempt.HandTimerStartedAt,
+            SolveStartedAt = attempt.SolveStartedAt,
+            ScrambleSequence = attempt.ScrambleSequence,
             RawTimeMs = result.RawTimeMs,
             PenaltyTimeMs = result.PenaltyTimeMs,
             PenaltyCode = result.PenaltyCode,
@@ -357,13 +373,43 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         EnsureAttemptStatus(attempt, "SCRAMBLE_VERIFIED");
 
         var now = DateTime.UtcNow;
-        attempt.HandTimerStartedAt = now;
+        if (!attempt.HandTimerStartedAt.HasValue)
+            throw new CustomException("HAND_TIMER_NOT_STARTED", "Penalty timer has not started.", 400);
+
+        // Penalty is authoritative on the server. The client value is display-only
+        // and must not be trusted to decide NONE / PLUS2 / DNF.
+        var elapsedDouble = Math.Max(0, (now - attempt.HandTimerStartedAt.Value).TotalMilliseconds);
+        var handTimerMs = (int)Math.Min(int.MaxValue, Math.Round(elapsedDouble));
+
+        attempt.UpdatedAt = now;
+        if (handTimerMs > DnfThresholdMs)
+        {
+            attempt.Status = "COMPLETED";
+            attempt.SolveFinishedAt = now;
+            attempt.PenaltyCode = "DNF";
+            attempt.PenaltyTimeMs = 0;
+            attempt.IsDnf = true;
+            attempt.FinalTimeMs = null;
+            attempt.ReviewStatus = "PENDING_REVIEW";
+
+            await _uow.SaveChangesAsync(ct);
+            return new StartAsyncSolveTimerResponse
+            {
+                AttemptId = attemptId,
+                Status = attempt.Status,
+                SolveStartedAt = now,
+                HandTimerMs = handTimerMs,
+                PenaltyCode = "DNF",
+                PenaltyTimeMs = 0,
+                IsDnf = true,
+                Message = "Start delay exceeded 14 seconds. Result is DNF."
+            };
+        }
+
         attempt.SolveStartedAt = now;
         attempt.Status = "SOLVING";
-        attempt.UpdatedAt = now;
-
-        attempt.PenaltyCode = "NONE";
-        attempt.PenaltyTimeMs = 0;
+        attempt.PenaltyCode = handTimerMs > PlusTwoThresholdMs ? "PLUS2" : "NONE";
+        attempt.PenaltyTimeMs = handTimerMs > PlusTwoThresholdMs ? 2_000 : 0;
         attempt.IsDnf = false;
 
         await _uow.SaveChangesAsync(ct);
@@ -373,10 +419,11 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
             AttemptId = attemptId,
             Status = attempt.Status,
             SolveStartedAt = now,
-            PenaltyCode = "NONE",
-            PenaltyTimeMs = 0,
+            HandTimerMs = handTimerMs,
+            PenaltyCode = attempt.PenaltyCode,
+            PenaltyTimeMs = attempt.PenaltyTimeMs,
             IsDnf = false,
-            Message = "Timer started normally."
+            Message = attempt.PenaltyCode == "PLUS2" ? "Timer started with a +2 second penalty." : "Timer started normally."
         };
     }
 
@@ -389,37 +436,18 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         await EnsureAttemptWithinDeadlineAsync(attempt, ct);
         EnsureAttemptStatus(attempt, "SOLVING");
 
-        if (request.RawTimeMs < 1)
-            throw new CustomException("INVALID_SOLVE_TIME", "Solve time must be greater than zero.", 400);
-
-        var tournament = await _uow.Tournaments.GetByIdAsync(attempt.TournamentId, ct);
-        if (tournament == null)
-            throw new CustomException("TOURNAMENT_NOT_FOUND", "Online async tournament not found.", 404);
-
-        int timeLimitMs = tournament?.AttemptTimeLimitMs ?? 300000;
-
         var now = DateTime.UtcNow;
+        if (!attempt.SolveStartedAt.HasValue)
+            throw new CustomException("SOLVE_TIMER_NOT_STARTED", "Solve timer has not started.", 400);
+
+        var elapsedDouble = Math.Max(1, (now - attempt.SolveStartedAt.Value).TotalMilliseconds);
+        var serverRawTimeMs = (int)Math.Min(int.MaxValue, Math.Round(elapsedDouble));
         attempt.SolveFinishedAt = now;
-        attempt.RawTimeMs = request.RawTimeMs;
-        attempt.Status = "COMPLETED";
+        attempt.RawTimeMs = serverRawTimeMs;
+        attempt.Status = "FINISH_PENDING";
         attempt.ReviewStatus = "PENDING_REVIEW";
         attempt.UpdatedAt = now;
-
-        // Step 5 Rule Enforcement: Attempt Time Limit = 5 minutes (300,000ms), counted from when Competitor starts Solving.
-        if (request.RawTimeMs > timeLimitMs)
-        {
-            attempt.IsDnf = true;
-            attempt.PenaltyCode = "DNF";
-            attempt.FinalTimeMs = null;
-        }
-        else if (attempt.IsDnf)
-        {
-            attempt.FinalTimeMs = null;
-        }
-        else
-        {
-            attempt.FinalTimeMs = request.RawTimeMs + attempt.PenaltyTimeMs;
-        }
+        attempt.FinalTimeMs = serverRawTimeMs + attempt.PenaltyTimeMs;
 
         await _uow.SaveChangesAsync(ct);
 
@@ -433,7 +461,15 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
             throw new CustomException("ATTEMPT_NOT_FOUND", "Attempt not found.", 404);
 
         await EnsureAttemptWithinDeadlineAsync(attempt, ct);
-        EnsureAttemptStatus(attempt, "COMPLETED");
+        // A successful finish verification is idempotent. This lets the client
+        // retry a failed evidence upload without changing a finalized result.
+        if (attempt.Status == "COMPLETED" && attempt.FinishCheckStatus == "PASSED" && !attempt.IsDnf)
+            return MapToFinishResponse(attempt);
+
+        // FINISH_PENDING is the current lifecycle state. COMPLETED + PENDING is
+        // accepted for attempts created by the previous implementation.
+        if (attempt.Status != "FINISH_PENDING" && !(attempt.Status == "COMPLETED" && attempt.FinishCheckStatus == "PENDING" && !attempt.IsDnf))
+            throw new CustomException("INVALID_ATTEMPT_STATE", $"This action requires attempt status FINISH_PENDING; current status is {attempt.Status}.", 400);
 
         if (request.Faces == null || request.Faces.Count != 5)
             throw new CustomException("AI_SCAN_REQUIRED", "Five scanned cube faces are required for finish verification.", 400);
@@ -448,6 +484,7 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         {
             attempt.FinishEvidenceJson = JsonSerializer.Serialize(request.Faces);
             attempt.FinishCheckStatus = "FAILED";
+            attempt.Status = "COMPLETED";
             attempt.IsDnf = true;
             attempt.PenaltyCode = "DNF";
             attempt.PenaltyTimeMs = 0;
@@ -458,11 +495,11 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         }
 
         attempt.FinishCheckStatus = "PASSED";
+        attempt.Status = "COMPLETED";
         attempt.FinishEvidenceJson = JsonSerializer.Serialize(request.Faces);
         attempt.IsDnf = false;
-        attempt.PenaltyCode = "NONE";
-        attempt.PenaltyTimeMs = 0;
-        attempt.FinalTimeMs = attempt.RawTimeMs;
+        // Preserve the penalty decided when solving started.
+        attempt.FinalTimeMs = (attempt.RawTimeMs ?? 0) + attempt.PenaltyTimeMs;
         attempt.UpdatedAt = DateTime.UtcNow;
 
         if (!string.IsNullOrWhiteSpace(request.ImageBase64))
@@ -493,23 +530,74 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
 
     public async Task<AsyncAttemptVideoUploadResponse> UploadVideoEvidenceAsync(Guid attemptId, Guid userId, Stream content, string contentType, CancellationToken ct = default)
     {
-        var attempt = await _uow.OnlineAsyncAttempts.GetByIdAsync(attemptId, ct);
-        if (attempt == null || attempt.UserId != userId)
-            throw new CustomException("ATTEMPT_NOT_FOUND", "Attempt not found.", 404);
-        await EnsureAttemptWithinDeadlineAsync(attempt, ct);
-        if (attempt.Status is not ("INITIALIZED" or "SCRAMBLE_VERIFIED" or "SOLVING" or "COMPLETED"))
-            throw new CustomException("INVALID_ATTEMPT_STATE", "Video cannot be uploaded for this attempt.", 400);
+        var attempt = await GetValidAttemptForVideoAsync(attemptId, userId, ct);
         if (content is null || !content.CanRead)
             throw new CustomException("INVALID_VIDEO", "A video file is required.", 400);
 
-        var normalizedType = contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ? contentType : "video/webm";
-        var extension = normalizedType.Contains("mp4", StringComparison.OrdinalIgnoreCase) ? "mp4" : "webm";
+        var normalizedType = NormalizeVideoContentType(contentType);
+        var extension = normalizedType == "video/mp4" ? "mp4" : "webm";
         var objectKey = $"online-async/{attempt.TournamentId:N}/{attempt.Id:N}/evidence.{extension}";
         await _recordingStorage.UploadStreamAsync(objectKey, content, normalizedType, ct);
         attempt.VideoEvidenceUrl = objectKey;
         attempt.UpdatedAt = DateTime.UtcNow;
         await _uow.SaveChangesAsync(ct);
         return new AsyncAttemptVideoUploadResponse { AttemptId = attempt.Id, ObjectKey = objectKey };
+    }
+
+    public async Task<AsyncAttemptVideoUploadUrlResponse> CreateVideoUploadUrlAsync(Guid attemptId, Guid userId, CreateAsyncAttemptVideoUploadUrlRequest request, CancellationToken ct = default)
+    {
+        var attempt = await GetValidAttemptForVideoAsync(attemptId, userId, ct);
+        var contentType = NormalizeVideoContentType(request.ContentType);
+        var extension = contentType == "video/mp4" ? "mp4" : "webm";
+        if (!string.IsNullOrWhiteSpace(request.FileExtension)
+            && !string.Equals(request.FileExtension.Trim().TrimStart('.'), extension, StringComparison.OrdinalIgnoreCase))
+            throw new CustomException("INVALID_VIDEO_EXTENSION", "Video extension does not match its content type.", 400);
+
+        var objectKey = $"online-async/{attempt.TournamentId:N}/{attempt.Id:N}/evidence-{Guid.NewGuid():N}.{extension}";
+        var ticket = await _recordingStorage.CreateUploadUrlAsync(objectKey, contentType, ct);
+        return new AsyncAttemptVideoUploadUrlResponse
+        {
+            AttemptId = attempt.Id,
+            UploadUrl = ticket.Url.ToString(),
+            ObjectKey = objectKey,
+            ContentType = contentType,
+            ExpiresAt = ticket.ExpiresAtUtc
+        };
+    }
+
+    public async Task<AsyncAttemptVideoUploadResponse> CompleteVideoUploadAsync(Guid attemptId, Guid userId, CompleteAsyncAttemptVideoUploadRequest request, CancellationToken ct = default)
+    {
+        var attempt = await GetValidAttemptForVideoAsync(attemptId, userId, ct);
+        var expectedPrefix = $"online-async/{attempt.TournamentId:N}/{attempt.Id:N}/";
+        if (string.IsNullOrWhiteSpace(request.ObjectKey) || !request.ObjectKey.StartsWith(expectedPrefix, StringComparison.Ordinal))
+            throw new CustomException("INVALID_VIDEO_OBJECT_KEY", "Video object key does not belong to this attempt.", 400);
+
+        var metadata = await _recordingStorage.GetObjectMetadataAsync(request.ObjectKey, ct);
+        if (metadata == null || metadata.FileSizeBytes <= 0)
+            throw new CustomException("VIDEO_UPLOAD_NOT_FOUND", "Uploaded recording is missing or empty in storage.", 400);
+
+        attempt.VideoEvidenceUrl = metadata.ObjectKey;
+        attempt.UpdatedAt = DateTime.UtcNow;
+        await _uow.SaveChangesAsync(ct);
+        return new AsyncAttemptVideoUploadResponse { AttemptId = attempt.Id, ObjectKey = metadata.ObjectKey };
+    }
+
+    private async Task<OnlineAsyncAttempt> GetValidAttemptForVideoAsync(Guid attemptId, Guid userId, CancellationToken ct)
+    {
+        var attempt = await _uow.OnlineAsyncAttempts.GetByIdAsync(attemptId, ct);
+        if (attempt == null || attempt.UserId != userId)
+            throw new CustomException("ATTEMPT_NOT_FOUND", "Attempt not found.", 404);
+        if (attempt.Status != "COMPLETED" || attempt.IsDnf || attempt.FinishCheckStatus != "PASSED")
+            throw new CustomException("INVALID_ATTEMPT_STATE", "Only a valid completed attempt can upload video evidence.", 400);
+        return attempt;
+    }
+
+    private static string NormalizeVideoContentType(string contentType)
+    {
+        var normalized = (contentType ?? string.Empty).Split(';', 2)[0].Trim().ToLowerInvariant();
+        if (normalized is not ("video/webm" or "video/mp4"))
+            throw new CustomException("INVALID_VIDEO_TYPE", "Only video/webm and video/mp4 are supported.", 400);
+        return normalized;
     }
 
     public async Task<string> GetVideoPlaybackUrlAsync(Guid attemptId, Guid reviewerUserId, CancellationToken ct = default)
@@ -596,7 +684,7 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
     // Helper mappers
     private static string GetComputedStatus(Tournament tournament, DateTime now)
     {
-        if (tournament.StatusCode is "DRAFT" or "CANCELLED" or "DISABLED")
+        if (tournament.StatusCode is "DRAFT" or "CANCELLED" or "DISABLED" or "COMPLETED")
             return tournament.StatusCode;
         if (now < tournament.RegistrationOpenAt) return "PUBLISHED";
         if (now <= tournament.RegistrationCloseAt) return "REGISTRATION_OPEN";
@@ -619,7 +707,9 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
 
     private async Task<bool> ExpireAttemptIfNeededAsync(OnlineAsyncAttempt attempt, CancellationToken ct)
     {
-        if (!attempt.AttemptDeadlineAt.HasValue || DateTime.UtcNow < attempt.AttemptDeadlineAt.Value || (attempt.Status == "COMPLETED" && attempt.FinishCheckStatus != "PENDING"))
+        if (!attempt.AttemptDeadlineAt.HasValue
+            || DateTime.UtcNow < attempt.AttemptDeadlineAt.Value
+            || (attempt.Status == "COMPLETED" && (attempt.FinishCheckStatus != "PENDING" || attempt.IsDnf)))
             return false;
 
         attempt.Status = "COMPLETED";

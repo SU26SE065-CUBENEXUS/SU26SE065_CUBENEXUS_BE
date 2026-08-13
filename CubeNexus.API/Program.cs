@@ -115,6 +115,9 @@ builder.Services.AddScoped<IOnlineProfileInitService, OnlineProfileInitService>(
 builder.Services.AddScoped<IOnlineArenaService, OnlineArenaService>();
 builder.Services.AddScoped<IPuzzleService, PuzzleService>();
 builder.Services.AddScoped<IScrambleGeneratorService, ScrambleGeneratorService>();
+builder.Services.AddScoped<ScramblePoolService>();
+builder.Services.AddScoped<IScramblePoolService>(sp => sp.GetRequiredService<ScramblePoolService>());
+builder.Services.AddScoped<IAdminScrambleService>(sp => sp.GetRequiredService<ScramblePoolService>());
 builder.Services.AddScoped<IPracticeService, PracticeService>();
 builder.Services.AddScoped<ITournamentService, TournamentService>();
 builder.Services.AddScoped<IOnlineAsyncTournamentService, OnlineAsyncTournamentService>();

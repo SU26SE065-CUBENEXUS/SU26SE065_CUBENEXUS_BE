@@ -15,6 +15,8 @@ public interface IOnlineAsyncTournamentService
     Task<StartAsyncSolveTimerResponse> StartSolveTimerAsync(Guid attemptId, Guid userId, StartAsyncSolveTimerRequest request, CancellationToken ct = default);
     Task<FinishAsyncSolveTimerResponse> FinishSolveTimerAsync(Guid attemptId, Guid userId, FinishAsyncSolveTimerRequest request, CancellationToken ct = default);
     Task<FinishAsyncSolveTimerResponse> VerifyFinishAsync(Guid attemptId, Guid userId, VerifyAsyncFinishRequest request, CancellationToken ct = default);
+    Task<AsyncAttemptVideoUploadUrlResponse> CreateVideoUploadUrlAsync(Guid attemptId, Guid userId, CreateAsyncAttemptVideoUploadUrlRequest request, CancellationToken ct = default);
+    Task<AsyncAttemptVideoUploadResponse> CompleteVideoUploadAsync(Guid attemptId, Guid userId, CompleteAsyncAttemptVideoUploadRequest request, CancellationToken ct = default);
     Task<AsyncAttemptVideoUploadResponse> UploadVideoEvidenceAsync(Guid attemptId, Guid userId, Stream content, string contentType, CancellationToken ct = default);
     Task<string> GetVideoPlaybackUrlAsync(Guid attemptId, Guid reviewerUserId, CancellationToken ct = default);
     

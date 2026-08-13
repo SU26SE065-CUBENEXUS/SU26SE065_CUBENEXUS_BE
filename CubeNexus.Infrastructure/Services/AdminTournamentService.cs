@@ -206,7 +206,7 @@ public class AdminTournamentService : IAdminTournamentService
         // Auto-deactivate judge accounts if tournament is COMPLETED or CANCELLED
         if (normalizedStatus == "COMPLETED" || normalizedStatus == "CANCELLED")
         {
-            if (normalizedStatus == "COMPLETED")
+            if (normalizedStatus == "COMPLETED" && t.TournamentType != "ONLINE_ASYNC")
             {
                 var eventIds = t.Events.Select(e => e.Id).ToList();
                 if (eventIds.Any())

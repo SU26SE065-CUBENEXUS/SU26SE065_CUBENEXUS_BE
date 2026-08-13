@@ -27,17 +27,17 @@ namespace CubeNexus.API.BackgroundServices;
 ///   COMPLETED / CANCELLED / NEEDS_REVIEW / DRAW
 ///     → skip (terminal)
 /// NOTE: BothChecklistPassed is NOT polled here — auto-ready triggers in MarkCamera/WebRtc/Timer/Scramble use cases. </summary>
-public class OnlineArenaBackgroundService : BackgroundService
+public sealed class OnlineArenaBackgroundService : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<OnlineArenaBackgroundService> _logger;
     private static readonly TimeSpan _interval = TimeSpan.FromSeconds(15);
 
     public OnlineArenaBackgroundService(
-        IServiceProvider serviceProvider,
+        IServiceScopeFactory scopeFactory,
         ILogger<OnlineArenaBackgroundService> logger)
     {
-        _serviceProvider = serviceProvider;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -45,26 +45,45 @@ public class OnlineArenaBackgroundService : BackgroundService
     {
         _logger.LogInformation("OnlineArenaBackgroundService started.");
 
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await RunReconcileLoopAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in OnlineArenaBackgroundService reconcile loop.");
-            }
+                try
+                {
+                    await RunReconcileLoopAsync(stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (ObjectDisposedException) when (stoppingToken.IsCancellationRequested)
+                {
+                    // The application is shutting down and its root service provider is gone.
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error in OnlineArenaBackgroundService reconcile loop.");
+                }
 
-            await Task.Delay(_interval, stoppingToken);
+                await Task.Delay(_interval, stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Expected when the host stops or a development hot reload restarts it.
         }
 
-        _logger.LogInformation("OnlineArenaBackgroundService stopped.");
+        if (!stoppingToken.IsCancellationRequested)
+            _logger.LogInformation("OnlineArenaBackgroundService stopped.");
     }
 
     private async Task RunReconcileLoopAsync(CancellationToken ct)
     {
-        using var scope = _serviceProvider.CreateScope();
+        if (ct.IsCancellationRequested) return;
+
+        using var scope = _scopeFactory.CreateScope();
         var matchRepo = scope.ServiceProvider.GetRequiredService<IOnlineMatchRepository>();
         var confirmationRepo = scope.ServiceProvider.GetRequiredService<IOnlineMatchConfirmationRepository>();
         var queueRepo = scope.ServiceProvider.GetRequiredService<IMatchmakingQueueRepository>();
@@ -82,6 +101,14 @@ public class OnlineArenaBackgroundService : BackgroundService
 
             // 2. Handle match lifecycle (setup timeout, solve timeout, etc.)
             await ProcessMatchLifecycleAsync(scope, matchRepo, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected shutdown path: do not attempt to write through a disposed logger.
+        }
+        catch (ObjectDisposedException) when (ct.IsCancellationRequested)
+        {
+            // Expected shutdown path: scoped services may be disposed while stopping.
         }
         catch (Exception ex)
         {
@@ -199,6 +226,14 @@ public class OnlineArenaBackgroundService : BackgroundService
                         break;
                     }
                 }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (ObjectDisposedException) when (ct.IsCancellationRequested)
+            {
+                return;
             }
             catch (Exception ex)
             {

@@ -33,4 +33,7 @@ public interface IUnitOfWork : IDisposable
     IRepository<TournamentManager> TournamentManagers { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
+    Task BeginTransactionAsync();
+    Task CommitTransactionAsync();
+    Task RollbackTransactionAsync();
 }

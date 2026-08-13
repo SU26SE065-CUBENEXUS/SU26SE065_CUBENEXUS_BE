@@ -9,6 +9,7 @@ public class OnlineMatch
     /// Shared scramble sequence for both players (ranked 1v1 uses same scramble).
     /// </summary>
     public string ScrambleSequence { get; set; } = string.Empty;
+    public Guid? ScramblePoolItemId { get; set; }
 
     public Guid Player1Id { get; set; }
     public Guid Player2Id { get; set; }
@@ -118,6 +119,7 @@ public class OnlineMatch
 
     // === Navigation ===
     public PuzzleType PuzzleType { get; set; } = null!;
+    public ScramblePoolItem? ScramblePoolItem { get; set; }
     public User Player1 { get; set; } = null!;
     public User Player2 { get; set; } = null!;
     public OnlineProfile Player1Profile { get; set; } = null!;

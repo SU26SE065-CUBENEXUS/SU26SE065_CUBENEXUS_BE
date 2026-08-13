@@ -1,0 +1,262 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using CubeNexus.Application.DTOs.Admin;
+using CubeNexus.Application.Interfaces.Services;
+using CubeNexus.Application.UseCases.OnlineArena;
+using CubeNexus.Domain.Entities;
+using CubeNexus.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+
+namespace CubeNexus.Infrastructure.Services;
+
+public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleService
+{
+    private static readonly HashSet<string> Modes = ["ONLINE_MATCH", "OFFLINE", "ONLINE_ASYNC"];
+    private static readonly Regex MovePattern = new("^[2-9]?[RLUDFB](?:w)?(?:2|')?$", RegexOptions.Compiled);
+    private readonly ApplicationDbContext _db;
+    private readonly IScrambleGeneratorService _generator;
+
+    public ScramblePoolService(ApplicationDbContext db, IScrambleGeneratorService generator)
+    {
+        _db = db;
+        _generator = generator;
+    }
+
+    public async Task<ScrambleReservationDto> ReserveAsync(string competitionMode, Guid puzzleTypeId,
+        string targetType, Guid targetId, Guid? actorUserId = null, CancellationToken ct = default)
+    {
+        var mode = NormalizeMode(competitionMode);
+        for (var retry = 0; retry < 8; retry++)
+        {
+            var id = await _db.ScramblePoolItems.AsNoTracking()
+                .Where(x => x.CompetitionMode == mode && x.PuzzleTypeId == puzzleTypeId &&
+                            x.Status == "AVAILABLE" && x.IsValidated)
+                .OrderBy(x => x.ApprovedAt ?? x.CreatedAt)
+                .ThenBy(x => x.CreatedAt)
+                .ThenBy(x => x.Id)
+                .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+            if (!id.HasValue)
+                throw new InvalidOperationException($"SCRAMBLE_POOL_EMPTY: Kho đề {mode} không còn đề hợp lệ cho loại cube này.");
+
+            var now = DateTime.UtcNow;
+            var changed = await _db.ScramblePoolItems
+                .Where(x => x.Id == id && x.Status == "AVAILABLE")
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.Status, "RESERVED")
+                    .SetProperty(x => x.AssignedTargetType, targetType)
+                    .SetProperty(x => x.AssignedTargetId, targetId)
+                    .SetProperty(x => x.AssignedAt, now), ct);
+            if (changed == 0) continue;
+
+            var item = await _db.ScramblePoolItems.AsNoTracking().SingleAsync(x => x.Id == id, ct);
+            _db.ScramblePoolAuditLogs.Add(new ScramblePoolAuditLog
+            {
+                Id = Guid.NewGuid(), ScramblePoolItemId = item.Id, Action = "ASSIGNED",
+                ActorUserId = actorUserId, TargetType = targetType, TargetId = targetId, CreatedAt = now
+            });
+            await _db.SaveChangesAsync(ct);
+            return new ScrambleReservationDto(item.Id, item.Sequence, item.ExpectedStateJson);
+        }
+        throw new InvalidOperationException("SCRAMBLE_POOL_BUSY: Kho đề đang được cấp phát đồng thời, vui lòng thử lại.");
+    }
+
+    public async Task MarkUsedAsync(Guid scramblePoolItemId, Guid? actorUserId = null, CancellationToken ct = default)
+    {
+        var item = await _db.ScramblePoolItems.SingleOrDefaultAsync(x => x.Id == scramblePoolItemId, ct)
+            ?? throw new KeyNotFoundException("Không tìm thấy đề.");
+        if (item.Status == "USED") return;
+        if (item.Status != "RESERVED") throw new InvalidOperationException("Chỉ đề đã cấp phát mới có thể đánh dấu đã dùng.");
+        item.Status = "USED";
+        item.UsedAt = DateTime.UtcNow;
+        AddAudit(item.Id, "USED", actorUserId, item.AssignedTargetType, item.AssignedTargetId);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ScramblePoolSummaryDto>> GetSummaryAsync(CancellationToken ct = default)
+    {
+        // Project the join first, then aggregate in memory. Npgsql/EF can produce an
+        // invalid GROUP BY translation when a navigation property is part of the key.
+        // The pool only returns four small fields here, so this remains lightweight
+        // while being stable on both an empty fresh database and a populated one.
+        var rows = await _db.ScramblePoolItems.AsNoTracking()
+            .Select(x => new
+            {
+                x.CompetitionMode,
+                x.PuzzleTypeId,
+                PuzzleCode = x.PuzzleType.Code,
+                x.Status
+            })
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(x => new { x.CompetitionMode, x.PuzzleTypeId, x.PuzzleCode, x.Status })
+            .Select(g => new ScramblePoolSummaryDto(g.Key.CompetitionMode, g.Key.PuzzleTypeId,
+                g.Key.PuzzleCode, g.Key.Status, g.Count()))
+            .OrderBy(x => x.CompetitionMode)
+            .ThenBy(x => x.PuzzleCode)
+            .ThenBy(x => x.Status)
+            .ToList();
+    }
+
+    public async Task<ScramblePoolPageDto> GetItemsAsync(string? mode, string? status, Guid? puzzleTypeId,
+        int page, int pageSize, CancellationToken ct = default)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = _db.ScramblePoolItems.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(mode)) query = query.Where(x => x.CompetitionMode == NormalizeMode(mode));
+        if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status.Trim().ToUpperInvariant());
+        if (puzzleTypeId.HasValue) query = query.Where(x => x.PuzzleTypeId == puzzleTypeId.Value);
+        var total = await query.CountAsync(ct);
+        var entities = await query.Include(x => x.PuzzleType).OrderByDescending(x => x.CreatedAt)
+            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+
+        var availableQueue = await _db.ScramblePoolItems.AsNoTracking()
+            .Where(x => x.Status == "AVAILABLE" && x.IsValidated)
+            .Select(x => new { x.Id, x.CompetitionMode, x.PuzzleTypeId, x.ApprovedAt, x.CreatedAt })
+            .ToListAsync(ct);
+        var queuePositions = availableQueue
+            .GroupBy(x => new { x.CompetitionMode, x.PuzzleTypeId })
+            .SelectMany(group => group
+                .OrderBy(x => x.ApprovedAt ?? x.CreatedAt)
+                .ThenBy(x => x.CreatedAt)
+                .ThenBy(x => x.Id)
+                .Select((item, index) => new { item.Id, Position = index + 1 }))
+            .ToDictionary(x => x.Id, x => x.Position);
+
+        return new ScramblePoolPageDto(
+            entities.Select(x => ToDto(x, queuePositions.GetValueOrDefault(x.Id))).ToList(),
+            total, page, pageSize);
+    }
+
+    public async Task<IReadOnlyList<ScramblePoolItemDto>> GenerateAsync(GenerateScramblesRequestDto request,
+        Guid actorUserId, CancellationToken ct = default)
+    {
+        if (request.Count is < 1 or > 500) throw new ArgumentException("Số lượng đề phải từ 1 đến 500.");
+        var mode = NormalizeMode(request.CompetitionMode);
+        var puzzle = await _db.PuzzleTypes.SingleOrDefaultAsync(x => x.Id == request.PuzzleTypeId && x.IsActive, ct)
+            ?? throw new KeyNotFoundException("Không tìm thấy loại cube đang hoạt động.");
+        var created = new List<ScramblePoolItem>();
+        var knownHashes = (await _db.ScramblePoolItems.AsNoTracking()
+            .Where(x => x.CompetitionMode == mode && x.PuzzleTypeId == puzzle.Id)
+            .Select(x => x.SequenceHash).ToListAsync(ct)).ToHashSet();
+        var generationAttempts = 0;
+        var maxGenerationAttempts = Math.Max(2_000, request.Count * 100);
+        while (created.Count < request.Count)
+        {
+            if (++generationAttempts > maxGenerationAttempts)
+                throw new InvalidOperationException(
+                    $"Không thể sinh đủ {request.Count} đề 2 bước không trùng. " +
+                    "Kho của chế độ và loại Rubik này có thể đã gần hết tổ hợp; hãy giảm số lượng cần sinh.");
+            var sequence = NormalizeSequence(_generator.GenerateScramble(puzzle.Code, puzzle.ScrambleLength));
+            var hash = Hash(sequence);
+            if (!knownHashes.Add(hash)) continue;
+            created.Add(CreateItem(mode, puzzle, sequence, hash, "CUBENEXUS_CRYPTO_V1", request.Notes,
+                actorUserId, request.AutoApprove));
+        }
+        _db.ScramblePoolItems.AddRange(created);
+        foreach (var item in created) AddAudit(item.Id, request.AutoApprove ? "GENERATED_AND_APPROVED" : "GENERATED", actorUserId);
+        await _db.SaveChangesAsync(ct);
+        return created.Select(x => ToDto(x)).ToList();
+    }
+
+    public async Task<IReadOnlyList<ScramblePoolItemDto>> ImportAsync(ImportScramblesRequestDto request,
+        Guid actorUserId, CancellationToken ct = default)
+    {
+        var mode = NormalizeMode(request.CompetitionMode);
+        var puzzle = await _db.PuzzleTypes.SingleOrDefaultAsync(x => x.Id == request.PuzzleTypeId && x.IsActive, ct)
+            ?? throw new KeyNotFoundException("Không tìm thấy loại cube đang hoạt động.");
+        if (request.Sequences.Count is < 1 or > 1000) throw new ArgumentException("Danh sách nhập phải có từ 1 đến 1000 đề.");
+        var rows = request.Sequences.Select(NormalizeSequence).Distinct().ToList();
+        var hashes = rows.Select(Hash).ToList();
+        var existing = (await _db.ScramblePoolItems.AsNoTracking().Where(x => x.CompetitionMode == mode &&
+            x.PuzzleTypeId == puzzle.Id && hashes.Contains(x.SequenceHash)).Select(x => x.SequenceHash).ToListAsync(ct)).ToHashSet();
+        if (existing.Count > 0) throw new InvalidOperationException("Danh sách có đề đã tồn tại trong phân khu này.");
+        var created = rows.Select(sequence => CreateItem(mode, puzzle, sequence, Hash(sequence), "ADMIN_IMPORT",
+            request.Notes, actorUserId, false)).ToList();
+        _db.ScramblePoolItems.AddRange(created);
+        foreach (var item in created) AddAudit(item.Id, "IMPORTED", actorUserId);
+        await _db.SaveChangesAsync(ct);
+        return created.Select(x => ToDto(x)).ToList();
+    }
+
+    public async Task<ScramblePoolItemDto> ApproveAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
+    {
+        var item = await FindItemAsync(id, ct);
+        if (item.Status != "DRAFT") throw new InvalidOperationException("Chỉ đề nháp mới được duyệt.");
+        ValidateSequence(item.Sequence, item.PuzzleType.Code is not ("222" or "333"));
+        item.IsValidated = true; item.Status = "AVAILABLE"; item.ApprovedBy = actorUserId; item.ApprovedAt = DateTime.UtcNow;
+        AddAudit(item.Id, "APPROVED", actorUserId);
+        await _db.SaveChangesAsync(ct);
+        return ToDto(item);
+    }
+
+    public async Task<ScramblePoolItemDto> RetireAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
+    {
+        var item = await FindItemAsync(id, ct);
+        if (item.Status is not ("DRAFT" or "AVAILABLE"))
+            throw new InvalidOperationException("Không thể thu hồi đề đã cấp phát hoặc đã sử dụng.");
+        item.Status = "RETIRED"; AddAudit(item.Id, "RETIRED", actorUserId);
+        await _db.SaveChangesAsync(ct);
+        return ToDto(item);
+    }
+
+    private async Task<ScramblePoolItem> FindItemAsync(Guid id, CancellationToken ct) =>
+        await _db.ScramblePoolItems.Include(x => x.PuzzleType).SingleOrDefaultAsync(x => x.Id == id, ct)
+        ?? throw new KeyNotFoundException("Không tìm thấy đề.");
+
+    private ScramblePoolItem CreateItem(string mode, PuzzleType puzzle, string sequence, string hash,
+        string generator, string? notes, Guid actor, bool approved)
+    {
+        ValidateSequence(sequence, puzzle.Code is not ("222" or "333"));
+        var now = DateTime.UtcNow;
+        return new ScramblePoolItem
+        {
+            Id = Guid.NewGuid(), CompetitionMode = mode, PuzzleTypeId = puzzle.Id, PuzzleType = puzzle,
+            Sequence = sequence, SequenceHash = hash,
+            ExpectedStateJson = puzzle.Code == "333" ? JsonSerializer.Serialize(RubikCubeStateValidator.BuildExpectedCubeStateForScramble(sequence)) : null,
+            Status = approved ? "AVAILABLE" : "DRAFT", IsValidated = true, GeneratorName = generator,
+            Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(), CreatedBy = actor, CreatedAt = now,
+            ApprovedBy = approved ? actor : null, ApprovedAt = approved ? now : null
+        };
+    }
+
+    private void AddAudit(Guid itemId, string action, Guid? actor, string? targetType = null, Guid? targetId = null) =>
+        _db.ScramblePoolAuditLogs.Add(new ScramblePoolAuditLog { Id = Guid.NewGuid(), ScramblePoolItemId = itemId,
+            Action = action, ActorUserId = actor, TargetType = targetType, TargetId = targetId, CreatedAt = DateTime.UtcNow });
+
+    private static string NormalizeMode(string mode)
+    {
+        var value = mode.Trim().ToUpperInvariant();
+        if (!Modes.Contains(value)) throw new ArgumentException("CompetitionMode phải là ONLINE_MATCH, OFFLINE hoặc ONLINE_ASYNC.");
+        return value;
+    }
+
+    private static string NormalizeSequence(string sequence)
+    {
+        var value = string.Join(' ', (sequence ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        ValidateSequence(value);
+        return value;
+    }
+
+    private static void ValidateSequence(string sequence, bool allowWideMoves = true)
+    {
+        var moves = sequence.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (moves.Length == 0 || moves.Any(move => !MovePattern.IsMatch(move)))
+            throw new ArgumentException($"Đề không hợp lệ: '{sequence}'. Chỉ chấp nhận ký hiệu cube chuẩn như R, U2, Rw hoặc 3Rw'.");
+        if (moves.Length > 2)
+            throw new ArgumentException("Đề không hợp lệ: mỗi scramble chỉ được có tối đa 2 bước xoay.");
+        if (!allowWideMoves && moves.Any(move => move.Contains('w') || char.IsDigit(move[0]) && move.Length > 1 && char.IsLetter(move[1])))
+            throw new ArgumentException("Đề 2x2/3x3 không chấp nhận wide move hoặc multi-layer move.");
+        for (var i = 1; i < moves.Length; i++)
+            if (moves[i].First(char.IsLetter) == moves[i - 1].First(char.IsLetter))
+                throw new ArgumentException("Đề không hợp lệ: hai bước liên tiếp không được cùng một mặt.");
+    }
+
+    private static string Hash(string sequence) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sequence))).ToLowerInvariant();
+    private static ScramblePoolItemDto ToDto(ScramblePoolItem x, int? queuePosition = null) => new(x.Id, x.CompetitionMode, x.PuzzleTypeId,
+        x.PuzzleType.Code, x.PuzzleType.Name, x.Sequence, x.Status, x.IsValidated, x.GeneratorName, x.Notes,
+        x.CreatedAt, x.ApprovedAt, x.AssignedTargetType, x.AssignedTargetId, x.AssignedAt, queuePosition);
+}

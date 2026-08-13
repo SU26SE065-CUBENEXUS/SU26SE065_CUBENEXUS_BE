@@ -133,6 +133,16 @@ public class OnlineAsyncTournamentController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("attempts/{attemptId:guid}/video/upload-url")]
+    [Authorize]
+    public async Task<IActionResult> CreateVideoUploadUrl(Guid attemptId, [FromBody] CreateAsyncAttemptVideoUploadUrlRequest request, CancellationToken ct)
+        => Ok(await _asyncTournamentService.CreateVideoUploadUrlAsync(attemptId, GetUserId(), request, ct));
+
+    [HttpPost("attempts/{attemptId:guid}/video/complete")]
+    [Authorize]
+    public async Task<IActionResult> CompleteVideoUpload(Guid attemptId, [FromBody] CompleteAsyncAttemptVideoUploadRequest request, CancellationToken ct)
+        => Ok(await _asyncTournamentService.CompleteVideoUploadAsync(attemptId, GetUserId(), request, ct));
+
     [HttpGet("{id:guid}/reviews")]
     [Authorize]
     public async Task<IActionResult> GetAttemptsForReview(Guid id, CancellationToken ct)

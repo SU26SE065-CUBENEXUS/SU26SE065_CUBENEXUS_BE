@@ -84,6 +84,7 @@ public class VerifyAsyncScrambleResponse
     public string Status { get; set; } = string.Empty;
     public string Reason { get; set; } = string.Empty;
     public DateTime? AttemptDeadlineAt { get; set; }
+    public DateTime? HandTimerStartedAt { get; set; }
 }
 
 public class StartAsyncSolveTimerRequest
@@ -91,11 +92,9 @@ public class StartAsyncSolveTimerRequest
     public Guid AttemptId { get; set; }
 
     /// <summary>
-    /// Duration in milliseconds from when scramble was verified/ready to when player pressed Space bar.
-    /// Rules:
-    ///  0 .. 6000 ms -> Normal start (Penalty = 0)
-    ///  6001 .. 14000 ms -> +2s penalty (PenaltyTimeMs = 2000)
-    ///  > 14000 ms -> DNF (PenaltyCode = DNF)
+    /// Client-observed duration, retained as telemetry/API compatibility only.
+    /// The server calculates the authoritative duration from HandTimerStartedAt:
+    ///  0 .. 6000 ms -> Normal; 6001 .. 14000 ms -> +2s; > 14000 ms -> DNF.
     /// </summary>
     public int HandTimerMs { get; set; }
 }
@@ -105,6 +104,7 @@ public class StartAsyncSolveTimerResponse
     public Guid AttemptId { get; set; }
     public string Status { get; set; } = "SOLVING";
     public DateTime SolveStartedAt { get; set; }
+    public int HandTimerMs { get; set; }
     public string PenaltyCode { get; set; } = "NONE"; // NONE | PLUS2 | DNF
     public int PenaltyTimeMs { get; set; } = 0;
     public bool IsDnf { get; set; } = false;
@@ -137,6 +137,9 @@ public class OnlineAsyncAttemptStateDto : FinishAsyncSolveTimerResponse
     public string ScrambleCheckStatus { get; set; } = "PENDING";
     public string FinishCheckStatus { get; set; } = "PENDING";
     public DateTime? AttemptDeadlineAt { get; set; }
+    public DateTime? HandTimerStartedAt { get; set; }
+    public DateTime? SolveStartedAt { get; set; }
+    public string ScrambleSequence { get; set; } = string.Empty;
 }
 
 public class VerifyAsyncFinishRequest
@@ -152,6 +155,26 @@ public class AsyncAttemptVideoUploadResponse
     public Guid AttemptId { get; set; }
     public string ObjectKey { get; set; } = string.Empty;
     public string RecordingStatus { get; set; } = "READY";
+}
+
+public class CreateAsyncAttemptVideoUploadUrlRequest
+{
+    public string ContentType { get; set; } = "video/webm";
+    public string FileExtension { get; set; } = "webm";
+}
+
+public class AsyncAttemptVideoUploadUrlResponse
+{
+    public Guid AttemptId { get; set; }
+    public string UploadUrl { get; set; } = string.Empty;
+    public string ObjectKey { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "video/webm";
+    public DateTime ExpiresAt { get; set; }
+}
+
+public class CompleteAsyncAttemptVideoUploadRequest
+{
+    public string ObjectKey { get; set; } = string.Empty;
 }
 
 public class ReviewAsyncAttemptRequest

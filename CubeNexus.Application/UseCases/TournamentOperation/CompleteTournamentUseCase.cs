@@ -35,20 +35,24 @@ public class CompleteTournamentUseCase : ICompleteTournamentUseCase
         }
 
         var events = await _unitOfWork.Events.FindAsync(e => e.TournamentId == tournamentId);
-        var eventIds = events.Select(e => e.Id).ToList();
-        if (eventIds.Any())
+
+        if (tournament.TournamentType != "ONLINE_ASYNC")
         {
-            var groups = await _unitOfWork.Groups.FindAsync(g => eventIds.Contains(g.EventId));
-            if (groups.Any())
+            var eventIds = events.Select(e => e.Id).ToList();
+            if (eventIds.Any())
             {
-                var uncompletedGroups = groups.Where(g => g.StatusCode != "COMPLETED").ToList();
-                if (uncompletedGroups.Any())
+                var groups = await _unitOfWork.Groups.FindAsync(g => eventIds.Contains(g.EventId));
+                if (groups.Any())
                 {
-                    throw new CustomException(
-                        "TOURNAMENT_NOT_READY_TO_COMPLETE",
-                        "Không thể hoàn thành giải đấu vì còn vòng thi hoặc nhóm thi đấu chưa hoàn tất (chưa Complete Round). Vui lòng nhập điểm và hoàn thành các vòng thi trước.",
-                        400
-                    );
+                    var uncompletedGroups = groups.Where(g => g.StatusCode != "COMPLETED").ToList();
+                    if (uncompletedGroups.Any())
+                    {
+                        throw new CustomException(
+                            "TOURNAMENT_NOT_READY_TO_COMPLETE",
+                            "Không thể hoàn thành giải đấu vì còn vòng thi hoặc nhóm thi đấu chưa hoàn tất (chưa Complete Round). Vui lòng nhập điểm và hoàn thành các vòng thi trước.",
+                            400
+                        );
+                    }
                 }
             }
         }

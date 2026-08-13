@@ -8,7 +8,9 @@ public class Scramble
     public int SolveNumber { get; set; }
     public string Sequence { get; set; } = string.Empty;
     public int SortOrder { get; set; }
+    public Guid? SourceScramblePoolItemId { get; set; }
 
     public ScrambleSet ScrambleSet { get; set; } = null!;
     public PuzzleType PuzzleType { get; set; } = null!;
+    public ScramblePoolItem? SourceScramblePoolItem { get; set; }
 }

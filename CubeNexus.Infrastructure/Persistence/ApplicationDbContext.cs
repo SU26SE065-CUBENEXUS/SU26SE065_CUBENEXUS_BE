@@ -29,6 +29,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<GroupCompetitor> GroupCompetitors => Set<GroupCompetitor>();
     public DbSet<ScrambleSet> ScrambleSets => Set<ScrambleSet>();
     public DbSet<Scramble> Scrambles => Set<Scramble>();
+    public DbSet<ScramblePoolItem> ScramblePoolItems => Set<ScramblePoolItem>();
+    public DbSet<ScramblePoolAuditLog> ScramblePoolAuditLogs => Set<ScramblePoolAuditLog>();
     public DbSet<Result> Results => Set<Result>();
     public DbSet<MedleyResultDetail> MedleyResultDetails => Set<MedleyResultDetail>();
     public DbSet<Dispute> Disputes => Set<Dispute>();
@@ -82,6 +84,8 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<GroupCompetitor>().ToTable("group_competitors");
         modelBuilder.Entity<ScrambleSet>().ToTable("scramble_sets");
         modelBuilder.Entity<Scramble>().ToTable("scrambles");
+        modelBuilder.Entity<ScramblePoolItem>().ToTable("scramble_pool_items");
+        modelBuilder.Entity<ScramblePoolAuditLog>().ToTable("scramble_pool_audit_logs");
         modelBuilder.Entity<Result>().ToTable("results");
         modelBuilder.Entity<MedleyResultDetail>().ToTable("medley_result_details");
         modelBuilder.Entity<Dispute>().ToTable("disputes");
@@ -116,6 +120,7 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.Tournament).WithMany(t => t.OnlineAsyncAttempts).HasForeignKey(e => e.TournamentId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.ReviewedByUser).WithMany().HasForeignKey(e => e.ReviewedBy).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.ScramblePoolItem).WithMany().HasForeignKey(e => e.ScramblePoolItemId).OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(e => new { e.TournamentId, e.UserId }).IsUnique().HasDatabaseName("ix_online_async_attempts_tournament_user");
             entity.HasIndex(e => new { e.TournamentId, e.ReviewStatus, e.IsDnf, e.FinalTimeMs }).HasDatabaseName("ix_online_async_attempts_leaderboard");
         });
@@ -159,6 +164,31 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.Group).WithMany().HasForeignKey(e => e.GroupId);
         });
 
+        modelBuilder.Entity<Scramble>(entity =>
+        {
+            entity.HasOne(e => e.SourceScramblePoolItem).WithMany().HasForeignKey(e => e.SourceScramblePoolItemId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => e.SourceScramblePoolItemId);
+        });
+
+        modelBuilder.Entity<ScramblePoolItem>(entity =>
+        {
+            entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedBy).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ApprovedByUser).WithMany().HasForeignKey(e => e.ApprovedBy).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => new { e.CompetitionMode, e.PuzzleTypeId, e.SequenceHash }).IsUnique();
+            entity.HasIndex(e => new { e.CompetitionMode, e.PuzzleTypeId, e.Status, e.CreatedAt });
+            entity.Property(e => e.CompetitionMode).HasMaxLength(32);
+            entity.Property(e => e.Status).HasMaxLength(20);
+            entity.Property(e => e.SequenceHash).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<ScramblePoolAuditLog>(entity =>
+        {
+            entity.HasOne(e => e.ScramblePoolItem).WithMany(x => x.AuditLogs).HasForeignKey(e => e.ScramblePoolItemId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.ActorUser).WithMany().HasForeignKey(e => e.ActorUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => new { e.ScramblePoolItemId, e.CreatedAt });
+        });
+
         modelBuilder.Entity<Result>(entity =>
         {
             entity.HasOne(e => e.JudgedByUser).WithMany().HasForeignKey(e => e.JudgedBy);
@@ -197,6 +227,7 @@ public class ApplicationDbContext : DbContext
             entity.HasOne(e => e.Winner).WithMany().HasForeignKey(e => e.WinnerId);
             entity.HasOne(e => e.TimeoutPlayer).WithMany().HasForeignKey(e => e.TimeoutPlayerId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(e => e.PuzzleType).WithMany().HasForeignKey(e => e.PuzzleTypeId);
+            entity.HasOne(e => e.ScramblePoolItem).WithMany().HasForeignKey(e => e.ScramblePoolItemId).OnDelete(DeleteBehavior.SetNull);
             // Player profile FK — cần map rõ ràng vì EF không tự suy ra từ tên
             entity.HasOne(e => e.Player1Profile).WithMany().HasForeignKey(e => e.Player1ProfileId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Player2Profile).WithMany().HasForeignKey(e => e.Player2ProfileId).OnDelete(DeleteBehavior.Restrict);

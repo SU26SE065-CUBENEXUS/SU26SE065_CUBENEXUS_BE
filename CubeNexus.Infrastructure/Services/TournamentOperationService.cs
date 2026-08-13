@@ -18,7 +18,7 @@ public class TournamentOperationService : ITournamentOperationService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly IRealtimeNotifier _realtimeNotifier;
-    private readonly IScrambleGeneratorService _scrambleGenerator;
+    private readonly IScramblePoolService _scramblePool;
     private readonly GroupAssignmentDomainService _groupAssignmentService;
     private readonly PenaltyCalculationDomainService _penaltyCalculationService;
     private readonly IRecordingStorageService? _storageService;
@@ -27,13 +27,13 @@ public class TournamentOperationService : ITournamentOperationService
     public TournamentOperationService(
         IUnitOfWork unitOfWork,
         IRealtimeNotifier realtimeNotifier,
-        IScrambleGeneratorService scrambleGenerator,
+        IScramblePoolService scramblePool,
         IRecordingStorageService? storageService = null,
         IOptions<R2Options>? r2Options = null)
     {
         _unitOfWork = unitOfWork;
         _realtimeNotifier = realtimeNotifier;
-        _scrambleGenerator = scrambleGenerator;
+        _scramblePool = scramblePool;
         _storageService = storageService;
         _r2Options = r2Options?.Value;
         _groupAssignmentService = new GroupAssignmentDomainService();
@@ -333,6 +333,9 @@ public class TournamentOperationService : ITournamentOperationService
                 throw new InvalidOperationException("Cannot regenerate scrambles when results already exist.");
         }
 
+        await _unitOfWork.BeginTransactionAsync();
+        try
+        {
         var puzzleTypes = await _unitOfWork.PuzzleTypes.GetAllAsync(ct);
         var puzzleTypeMap = puzzleTypes.ToDictionary(p => p.Id, p => p);
 
@@ -359,13 +362,17 @@ public class TournamentOperationService : ITournamentOperationService
 
                 for (int solveNum = 1; solveNum <= ev.SolveCount; solveNum++)
                 {
+                    var scrambleId = Guid.NewGuid();
+                    var reservation = await _scramblePool.ReserveAsync("OFFLINE", ev.PuzzleTypeId,
+                        "OFFLINE_SCRAMBLE", scrambleId, userId, ct);
                     scrambles.Add(new Scramble
                     {
-                        Id = Guid.NewGuid(),
+                        Id = scrambleId,
                         ScrambleSetId = ss.Id,
                         PuzzleTypeId = ev.PuzzleTypeId,
                         SolveNumber = solveNum,
-                        Sequence = _scrambleGenerator.GenerateScramble(pt.Code, pt.ScrambleLength),
+                        Sequence = reservation.Sequence,
+                        SourceScramblePoolItemId = reservation.Id,
                         SortOrder = solveNum
                     });
                 }
@@ -383,13 +390,17 @@ public class TournamentOperationService : ITournamentOperationService
                         if (!puzzleTypeMap.TryGetValue(mp.PuzzleTypeId, out var pt))
                             throw new InvalidOperationException($"Puzzle type {mp.PuzzleTypeId} not found.");
 
+                        var scrambleId = Guid.NewGuid();
+                        var reservation = await _scramblePool.ReserveAsync("OFFLINE", mp.PuzzleTypeId,
+                            "OFFLINE_SCRAMBLE", scrambleId, userId, ct);
                         scrambles.Add(new Scramble
                         {
-                            Id = Guid.NewGuid(),
+                            Id = scrambleId,
                             ScrambleSetId = ss.Id,
                             PuzzleTypeId = mp.PuzzleTypeId,
                             SolveNumber = solveNum,
-                            Sequence = _scrambleGenerator.GenerateScramble(pt.Code, pt.ScrambleLength),
+                            Sequence = reservation.Sequence,
+                            SourceScramblePoolItemId = reservation.Id,
                             SortOrder = (solveNum - 1) * medleyPuzzles.Count + (i + 1)
                         });
                     }
@@ -400,12 +411,19 @@ public class TournamentOperationService : ITournamentOperationService
         _unitOfWork.ScrambleSets.AddRange(scrambleSets);
         _unitOfWork.Scrambles.AddRange(scrambles);
         await _unitOfWork.SaveChangesAsync(ct);
+        await _unitOfWork.CommitTransactionAsync();
 
         return new OperationResultDto
         {
             Success = true,
             Message = $"Scrambles generated successfully for {groups.Count} groups."
         };
+        }
+        catch
+        {
+            await _unitOfWork.RollbackTransactionAsync();
+            throw;
+        }
     }
 
     public async Task<SubmitResultResponseDto> SubmitTraditionalResultAsync(SubmitTraditionalResultDto dto, Guid userId, CancellationToken ct = default)

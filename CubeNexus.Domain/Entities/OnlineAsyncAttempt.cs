@@ -6,9 +6,10 @@ public class OnlineAsyncAttempt
     public Guid TournamentId { get; set; }
     public Guid UserId { get; set; }
     public string ScrambleSequence { get; set; } = string.Empty;
+    public Guid? ScramblePoolItemId { get; set; }
 
     /// <summary>
-    /// Lifecycle status: INITIALIZED | SCRAMBLE_VERIFIED | SOLVING | COMPLETED | EXPIRED
+    /// Lifecycle status: INITIALIZED | SCRAMBLE_VERIFIED | SOLVING | FINISH_PENDING | COMPLETED
     /// </summary>
     public string Status { get; set; } = "INITIALIZED";
 
@@ -48,4 +49,5 @@ public class OnlineAsyncAttempt
     public Tournament Tournament { get; set; } = null!;
     public User User { get; set; } = null!;
     public User? ReviewedByUser { get; set; }
+    public ScramblePoolItem? ScramblePoolItem { get; set; }
 }

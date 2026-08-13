@@ -10,8 +10,9 @@
 -- Manual install:
 --   psql -h localhost -p 5432 -U cubenexus -d CubeNexus -f scripts/init-db.sql
 --
+-- This file contains the complete latest schema for a brand-new database.
 -- Existing database (created before this version):
---   Apply scripts/migrations/*.sql in lexical order after init-db.sql
+--   Apply only migrations newer than the schema version already deployed.
 --   Or reset dev DB: docker compose down -v && docker compose up -d
 -- =========================================================
 
@@ -106,6 +107,80 @@ CREATE TABLE IF NOT EXISTS elo_config (
             AND default_elo >= 0
         )
 );
+
+
+-- =========================================================
+-- 1.1 SCRAMBLE CONTROL CENTER
+-- One technical store, isolated by competition mode.
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS scramble_pool_items (
+    id UUID PRIMARY KEY,
+    competition_mode VARCHAR(32) NOT NULL,
+    puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id) ON DELETE RESTRICT,
+    sequence TEXT NOT NULL,
+    sequence_hash VARCHAR(64) NOT NULL,
+    expected_state_json TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+    is_validated BOOLEAN NOT NULL DEFAULT false,
+    generator_name TEXT NOT NULL DEFAULT 'ADMIN_IMPORT',
+    notes TEXT,
+    created_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    approved_at TIMESTAMPTZ,
+    assigned_target_type TEXT,
+    assigned_target_id UUID,
+    assigned_at TIMESTAMPTZ,
+    used_at TIMESTAMPTZ,
+
+    CONSTRAINT ck_scramble_pool_mode
+        CHECK (competition_mode IN ('ONLINE_MATCH', 'OFFLINE', 'ONLINE_ASYNC')),
+
+    CONSTRAINT ck_scramble_pool_status
+        CHECK (status IN ('DRAFT', 'AVAILABLE', 'RESERVED', 'USED', 'RETIRED', 'INVALID')),
+
+    CONSTRAINT ck_scramble_pool_sequence
+        CHECK (length(trim(sequence)) > 0),
+
+    CONSTRAINT ck_scramble_pool_max_two_moves
+        CHECK (
+            status IN ('RETIRED', 'INVALID')
+            OR cardinality(regexp_split_to_array(trim(sequence), E'\\s+')) <= 2
+        ),
+
+    CONSTRAINT uq_scramble_pool_mode_puzzle_hash
+        UNIQUE (competition_mode, puzzle_type_id, sequence_hash)
+);
+
+CREATE INDEX IF NOT EXISTS ix_scramble_pool_assignment
+ON scramble_pool_items(competition_mode, puzzle_type_id, status, created_at);
+
+CREATE INDEX IF NOT EXISTS ix_scramble_pool_assigned_target
+ON scramble_pool_items(assigned_target_type, assigned_target_id)
+WHERE assigned_target_id IS NOT NULL;
+
+
+CREATE TABLE IF NOT EXISTS scramble_pool_audit_logs (
+    id UUID PRIMARY KEY,
+    scramble_pool_item_id UUID NOT NULL REFERENCES scramble_pool_items(id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    target_type TEXT,
+    target_id UUID,
+    details_json TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_scramble_pool_audit_action
+        CHECK (length(trim(action)) > 0)
+);
+
+CREATE INDEX IF NOT EXISTS ix_scramble_pool_audit_item_created
+ON scramble_pool_audit_logs(scramble_pool_item_id, created_at);
+
+CREATE INDEX IF NOT EXISTS ix_scramble_pool_audit_actor
+ON scramble_pool_audit_logs(actor_user_id, created_at)
+WHERE actor_user_id IS NOT NULL;
 
 
 -- =========================================================
@@ -391,6 +466,7 @@ CREATE TABLE IF NOT EXISTS scrambles (
     solve_number INTEGER NOT NULL,
     sequence TEXT NOT NULL,
     sort_order INTEGER NOT NULL,
+    source_scramble_pool_item_id UUID REFERENCES scramble_pool_items(id) ON DELETE SET NULL,
 
     CONSTRAINT uq_scrambles_set_solve_puzzle
         UNIQUE (scramble_set_id, solve_number, puzzle_type_id),
@@ -405,6 +481,9 @@ CREATE TABLE IF NOT EXISTS scrambles (
 
 CREATE INDEX IF NOT EXISTS idx_scrambles_set
 ON scrambles(scramble_set_id);
+
+CREATE INDEX IF NOT EXISTS ix_scrambles_source_scramble_pool_item_id
+ON scrambles(source_scramble_pool_item_id);
 
 
 CREATE TABLE IF NOT EXISTS results (
@@ -509,6 +588,7 @@ CREATE TABLE IF NOT EXISTS online_async_attempts (
     tournament_id UUID NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     scramble_sequence TEXT NOT NULL,
+    scramble_pool_item_id UUID REFERENCES scramble_pool_items(id) ON DELETE SET NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'INITIALIZED',
     review_status VARCHAR(32) NOT NULL DEFAULT 'PENDING_REVIEW',
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -542,6 +622,9 @@ CREATE INDEX IF NOT EXISTS ix_online_async_attempts_leaderboard
 CREATE INDEX IF NOT EXISTS ix_online_async_attempts_deadline
     ON online_async_attempts(attempt_deadline_at)
     WHERE attempt_deadline_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ix_online_async_attempts_scramble_pool_item_id
+    ON online_async_attempts(scramble_pool_item_id);
 
 
 -- =========================================================
@@ -639,6 +722,7 @@ CREATE TABLE IF NOT EXISTS online_matches (
     id UUID PRIMARY KEY,
     puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
     scramble_sequence TEXT NOT NULL,
+    scramble_pool_item_id UUID REFERENCES scramble_pool_items(id) ON DELETE SET NULL,
 
     player1_id UUID NOT NULL REFERENCES users(id),
     player2_id UUID NOT NULL REFERENCES users(id),
@@ -778,6 +862,9 @@ ON online_matches(player1_profile_id);
 
 CREATE INDEX IF NOT EXISTS idx_online_matches_player2_profile
 ON online_matches(player2_profile_id);
+
+CREATE INDEX IF NOT EXISTS ix_online_matches_scramble_pool_item_id
+ON online_matches(scramble_pool_item_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_online_matches_qr_session_code
 ON online_matches(qr_session_code)

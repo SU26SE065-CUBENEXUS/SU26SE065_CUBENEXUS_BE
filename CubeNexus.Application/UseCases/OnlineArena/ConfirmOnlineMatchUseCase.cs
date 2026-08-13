@@ -28,7 +28,7 @@ public class ConfirmOnlineMatchUseCase
     private readonly CubeNexus.Application.Interfaces.Repositories.IPuzzleTypeRepository _puzzleTypeRepo;
     private readonly IOnlineArenaRealtimeNotifier _notifier;
     private readonly IUnitOfWork _uow;
-    private readonly IScrambleGeneratorService _scrambleGenerator;
+    private readonly IScramblePoolService _scramblePool;
 
     public ConfirmOnlineMatchUseCase(
         IOnlineMatchConfirmationRepository confirmationRepo,
@@ -38,7 +38,7 @@ public class ConfirmOnlineMatchUseCase
         CubeNexus.Application.Interfaces.Repositories.IPuzzleTypeRepository puzzleTypeRepo,
         IOnlineArenaRealtimeNotifier notifier,
         IUnitOfWork uow,
-        IScrambleGeneratorService scrambleGenerator)
+        IScramblePoolService scramblePool)
     {
         _confirmationRepo = confirmationRepo;
         _queueRepo = queueRepo;
@@ -47,7 +47,7 @@ public class ConfirmOnlineMatchUseCase
         _puzzleTypeRepo = puzzleTypeRepo;
         _notifier = notifier;
         _uow = uow;
-        _scrambleGenerator = scrambleGenerator;
+        _scramblePool = scramblePool;
     }
 
     public async Task<MatchmakingStatusDto> ExecuteAsync(Guid userId, Guid confirmationId)
@@ -148,7 +148,10 @@ public class ConfirmOnlineMatchUseCase
             var puzzleTypeId = confirmation.PuzzleTypeId;
             var puzzleType = await _puzzleTypeRepo.GetByIdAsync(puzzleTypeId)
                 ?? throw new InvalidOperationException($"PuzzleType {puzzleTypeId} not found.");
-            var scramble = _scrambleGenerator.GenerateScramble(puzzleType.Code, puzzleType.ScrambleLength);
+            var matchId = Guid.NewGuid();
+            var reservation = await _scramblePool.ReserveAsync("ONLINE_MATCH", puzzleTypeId,
+                "ONLINE_MATCH", matchId, userId);
+            var scramble = reservation.Sequence;
 
             // Load profiles to get their IDs
             var p1Profile = await _profileRepo.GetProfileAsync(confirmation.Player1UserId, puzzleTypeId)
@@ -158,13 +161,14 @@ public class ConfirmOnlineMatchUseCase
 
             // Create the OnlineMatch
             var setupDeadline = DateTime.UtcNow.AddMinutes(5);
-            var expectedState = RubikCubeStateValidator.BuildExpectedCubeStateForScramble(scramble);
-            var expectedStateJson = System.Text.Json.JsonSerializer.Serialize(expectedState);
+            var expectedStateJson = reservation.ExpectedStateJson ?? System.Text.Json.JsonSerializer.Serialize(
+                RubikCubeStateValidator.BuildExpectedCubeStateForScramble(scramble));
 
             var match = new OnlineMatch
             {
-                Id = Guid.NewGuid(),
+                Id = matchId,
                 PuzzleTypeId = puzzleTypeId,
+                ScramblePoolItemId = reservation.Id,
                 Player1Id = confirmation.Player1UserId,
                 Player2Id = confirmation.Player2UserId,
                 Player1ProfileId = p1Profile.Id,
@@ -180,6 +184,7 @@ public class ConfirmOnlineMatchUseCase
                 CreatedAt = DateTime.UtcNow
             };
             await _matchRepo.AddAsync(match);
+            await _scramblePool.MarkUsedAsync(reservation.Id, userId);
 
             // Update confirmation
             confirmation.Status = "CONFIRMED";

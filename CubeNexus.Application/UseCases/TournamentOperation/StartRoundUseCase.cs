@@ -11,11 +11,13 @@ public class StartRoundUseCase : IStartRoundUseCase
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly IRealtimeNotifier _realtimeNotifier;
+    private readonly IScramblePoolService _scramblePool;
 
-    public StartRoundUseCase(IUnitOfWork unitOfWork, IRealtimeNotifier realtimeNotifier)
+    public StartRoundUseCase(IUnitOfWork unitOfWork, IRealtimeNotifier realtimeNotifier, IScramblePoolService scramblePool)
     {
         _unitOfWork = unitOfWork;
         _realtimeNotifier = realtimeNotifier;
+        _scramblePool = scramblePool;
     }
 
     public async Task<StartRoundResponseDto> ExecuteAsync(Guid eventId, int roundNumber, StartRoundRequestDto dto)
@@ -29,8 +31,8 @@ public class StartRoundUseCase : IStartRoundUseCase
             throw new CustomException("GROUPS_NOT_FOUND", "No groups found for this round.", 400);
 
         var groupIds = groups.Select(g => g.Id).ToList();
-        var scramblesExist = await _unitOfWork.ScrambleSets.AnyAsync(ss => groupIds.Contains(ss.GroupId));
-        if (!scramblesExist)
+        var scrambleSets = await _unitOfWork.ScrambleSets.FindAsync(ss => groupIds.Contains(ss.GroupId));
+        if (!scrambleSets.Any())
             throw new CustomException("SCRAMBLES_NOT_FOUND", "Scrambles must be generated before starting the round.", 400);
 
         var competitors = await _unitOfWork.GroupCompetitors.FindAsync(gc => groupIds.Contains(gc.GroupId));
@@ -114,6 +116,12 @@ public class StartRoundUseCase : IStartRoundUseCase
         }
 
         await _unitOfWork.SaveChangesAsync();
+
+        var scrambleSetIds = scrambleSets.Select(x => x.Id).ToList();
+        var roundScrambles = await _unitOfWork.Scrambles.FindAsync(x => scrambleSetIds.Contains(x.ScrambleSetId));
+        foreach (var sourceId in roundScrambles.Where(x => x.SourceScramblePoolItemId.HasValue)
+                     .Select(x => x.SourceScramblePoolItemId!.Value).Distinct())
+            await _scramblePool.MarkUsedAsync(sourceId);
 
         // Broadcast Realtime Event
         var noShowCompetitorIds = competitors
