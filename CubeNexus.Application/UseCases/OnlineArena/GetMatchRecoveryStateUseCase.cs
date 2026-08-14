@@ -51,9 +51,15 @@ public class GetMatchRecoveryStateUseCase
             "INSPECTION" or "SOLVING" or "FINISH_CHECKING" or "PENDING_EVIDENCE" =>
                 myFinishStatus == "PASSED"
                 ? "WAITING_OPPONENT"
-                : (myResultStatus == PlayerResultStatus.PENDING.ToString()
-                    ? (isInspectingActive ? "INSPECTION" : "SOLVING")
-                    : "FINISH_SCANNING"),
+                // DNF / DISCONNECTED players skip the finish check entirely — go straight to waiting.
+                // Also covers NOT_REQUIRED finish status set by server when isDnf is true.
+                : (myResultStatus == PlayerResultStatus.DNF.ToString()
+                   || myResultStatus == PlayerResultStatus.DISCONNECTED.ToString()
+                   || myFinishStatus == "NOT_REQUIRED"
+                    ? "WAITING_OPPONENT"
+                    : (myResultStatus == PlayerResultStatus.PENDING.ToString()
+                        ? (isInspectingActive ? "INSPECTION" : "SOLVING")
+                        : "FINISH_SCANNING")),
             "NEEDS_REVIEW" => "NEEDS_REVIEW",
             "COMPLETED" or "CANCELLED" => "COMPLETED",
             _ => "SETUP"
