@@ -216,6 +216,34 @@ public class TournamentOperationService : ITournamentOperationService
         if (!registeredEvents.Any())
             throw new InvalidOperationException("No eligible competitors found to generate groups for this round.");
 
+        int totalEligible = registeredEvents.Count;
+        if (dto.CompetitorsPerGroup <= 0)
+            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", "Số thí sinh trong 1 nhóm phải lớn hơn 0.", 400);
+
+        if (dto.CompetitorsPerGroup > totalEligible)
+            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", $"Số thí sinh trong 1 nhóm ({dto.CompetitorsPerGroup}) không được lớn hơn tổng số thí sinh tham gia ({totalEligible}).", 400);
+
+        // Check if any judges/stations are assigned for this tournament
+        var assignedJudges = await _unitOfWork.TournamentJudges.FindAsync(
+            tj => tj.TournamentId == ev.TournamentId && tj.AssignedStationNumber.HasValue,
+            ct
+        );
+
+        if (!assignedJudges.Any())
+        {
+            throw new Application.Exceptions.CustomException(
+                "NO_JUDGES_OR_STATIONS_ASSIGNED",
+                "Chưa phân công trọng tài và bàn thi đấu cho giải đấu! Vui lòng thực hiện bước 'Phân công Trọng tài & Bàn thi' trước khi khởi tạo nhóm.",
+                400
+            );
+        }
+
+        int detectedStationCount = assignedJudges.Max(tj => tj.AssignedStationNumber!.Value);
+        int finalStationCount = dto.StationCount > 0 ? dto.StationCount : detectedStationCount;
+
+        if (dto.CompetitorsPerGroup < finalStationCount)
+            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", $"Số thí sinh/nhóm ({dto.CompetitorsPerGroup}) không thể nhỏ hơn số bàn thi hiện có ({finalStationCount} bàn).", 400);
+
         // Fetch display names for competitors
         var regIds = registeredEvents.Select(re => re.RegistrationId).Distinct().ToList();
         var registrations = await _unitOfWork.Registrations.FindAsync(r => regIds.Contains(r.Id), ct);
@@ -231,7 +259,7 @@ public class TournamentOperationService : ITournamentOperationService
             dto.RoundNumber,
             registeredEvents,
             dto.CompetitorsPerGroup,
-            dto.StationCount
+            finalStationCount
         );
 
         var groupMap = new Dictionary<int, Group>();

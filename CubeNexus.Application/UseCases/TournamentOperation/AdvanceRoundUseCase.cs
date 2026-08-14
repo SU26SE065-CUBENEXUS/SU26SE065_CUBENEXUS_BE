@@ -108,7 +108,21 @@ public class AdvanceRoundUseCase : IAdvanceRoundUseCase
             .ThenBy(c => c.GroupCompetitorId)
             .ToList();
 
-        var advancedCompetitors = sortedEligible.Take(dto.TopN).ToList();
+        List<LiveBoardCompetitorDto> advancedCompetitors;
+        if (dto.SelectedRegistrationEventIds != null && dto.SelectedRegistrationEventIds.Any())
+        {
+            var selectedSet = dto.SelectedRegistrationEventIds.ToHashSet();
+            advancedCompetitors = sortedEligible
+                .Where(c => {
+                    var compEntity = competitorEntities[c.GroupCompetitorId];
+                    return selectedSet.Contains(compEntity.RegistrationEventId);
+                })
+                .ToList();
+        }
+        else
+        {
+            advancedCompetitors = sortedEligible.Take(dto.TopN).ToList();
+        }
 
         if (!advancedCompetitors.Any())
             throw new CustomException("NO_ELIGIBLE_COMPETITORS", "No eligible competitors found to advance.", 400);
@@ -118,13 +132,40 @@ public class AdvanceRoundUseCase : IAdvanceRoundUseCase
             return offlineRegEventMap[compEntity.RegistrationEventId];
         }).ToList();
 
+        int totalAdvanced = advancedOffRegs.Count;
+        if (dto.CompetitorsPerGroup <= 0)
+            throw new CustomException("INVALID_GROUP_SIZE", "Số thí sinh trong 1 nhóm phải lớn hơn 0.", 400);
+
+        if (dto.CompetitorsPerGroup > totalAdvanced)
+            throw new CustomException("INVALID_GROUP_SIZE", $"Số thí sinh trong 1 nhóm ({dto.CompetitorsPerGroup}) không được lớn hơn tổng số thí sinh được đi tiếp ({totalAdvanced}).", 400);
+
+        // Check assigned judges/stations for tournament
+        var assignedJudges = await _unitOfWork.TournamentJudges.FindAsync(
+            tj => tj.TournamentId == ev.TournamentId && tj.AssignedStationNumber.HasValue
+        );
+
+        if (!assignedJudges.Any())
+        {
+            throw new CustomException(
+                "NO_JUDGES_OR_STATIONS_ASSIGNED",
+                "Chưa phân công trọng tài và bàn thi đấu cho giải đấu! Vui lòng thực hiện 'Phân công Trọng tài & Bàn thi' trước khi thăng hạng thí sinh.",
+                400
+            );
+        }
+
+        int detectedStationCount = assignedJudges.Max(tj => tj.AssignedStationNumber!.Value);
+        int finalStationCount = dto.StationCount > 0 ? dto.StationCount : detectedStationCount;
+
+        if (dto.CompetitorsPerGroup < finalStationCount)
+            throw new CustomException("INVALID_GROUP_SIZE", $"Số thí sinh/nhóm ({dto.CompetitorsPerGroup}) không thể nhỏ hơn số bàn thi hiện có ({finalStationCount} bàn).", 400);
+
         // Generate Groups
         var assignments = _groupAssignmentService.AssignGroups(
             eventId,
             dto.NextRoundNumber,
             advancedOffRegs,
             dto.CompetitorsPerGroup,
-            dto.StationCount
+            finalStationCount
         );
 
         var groupMap = new Dictionary<int, Group>();

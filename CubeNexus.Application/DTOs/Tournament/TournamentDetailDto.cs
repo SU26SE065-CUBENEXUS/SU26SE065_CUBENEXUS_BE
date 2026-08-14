@@ -33,6 +33,8 @@ public class EventDetailDto
     public int? TimeLimitMs { get; set; }
     public int? CutoffTimeMs { get; set; }
     public int SolveCount { get; set; }
+    public int TotalRounds { get; set; } = 1;
+    public int? AdvanceTopN { get; set; } = 16;
     public int? SortOrder { get; set; }
     public int? MaxCapacity { get; set; }
     

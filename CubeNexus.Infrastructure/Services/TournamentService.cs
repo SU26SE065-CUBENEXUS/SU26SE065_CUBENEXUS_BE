@@ -180,6 +180,8 @@ public class TournamentService : ITournamentService
                 TimeLimitMs = evDto.TimeLimitMs,
                 CutoffTimeMs = evDto.CutoffTimeMs,
                 SolveCount = evDto.SolveCount,
+                TotalRounds = evDto.TotalRounds > 0 ? evDto.TotalRounds : 1,
+                AdvanceTopN = evDto.AdvanceTopN > 0 ? evDto.AdvanceTopN : 16,
                 SortOrder = evDto.SortOrder,
                 MaxCapacity = evDto.MaxCapacity,
                 CreatedAt = DateTime.UtcNow
@@ -297,6 +299,8 @@ public class TournamentService : ITournamentService
                 TimeLimitMs = e.TimeLimitMs,
                 CutoffTimeMs = e.CutoffTimeMs,
                 SolveCount = e.SolveCount,
+                TotalRounds = e.TotalRounds > 0 ? e.TotalRounds : 1,
+                AdvanceTopN = e.AdvanceTopN > 0 ? e.AdvanceTopN : 16,
                 SortOrder = e.SortOrder,
                 MaxCapacity = e.MaxCapacity,
                 MedleyPuzzles = e.MedleyPuzzles.OrderBy(mp => mp.SortOrder).Select(mp => new MedleyPuzzleDetailDto
@@ -716,6 +720,26 @@ public class TournamentService : ITournamentService
             if (tj.User != null)
             {
                 tj.User.IsActive = false;
+                tj.User.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
+        await _context.SaveChangesAsync(ct);
+        return await GetTournamentJudgesAsync(tournamentId, ct);
+    }
+
+    public async Task<List<TournamentJudgeDto>> ActivateAllJudgesAsync(Guid tournamentId, Guid managerId, CancellationToken ct = default)
+    {
+        var judges = await _context.TournamentJudges
+            .Include(x => x.User)
+            .Where(x => x.TournamentId == tournamentId)
+            .ToListAsync(ct);
+
+        foreach (var tj in judges)
+        {
+            if (tj.User != null)
+            {
+                tj.User.IsActive = true;
                 tj.User.UpdatedAt = DateTime.UtcNow;
             }
         }

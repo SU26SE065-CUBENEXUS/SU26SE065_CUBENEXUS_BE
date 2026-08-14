@@ -40,6 +40,8 @@ public class CreateEventDto
     public int? CutoffTimeMs { get; set; }
     
     public int SolveCount { get; set; } = 5;
+    public int TotalRounds { get; set; } = 1;
+    public int? AdvanceTopN { get; set; } = 16;
     public int? SortOrder { get; set; }
     public int? MaxCapacity { get; set; }
 

@@ -403,9 +403,50 @@ public class TournamentOperationController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Lấy danh sách thí sinh đã CONFIRMED/CHECKED_IN của giải đấu dành cho Check-in Desk (JUDGE, MANAGER, ADMIN).
+    /// </summary>
+    [HttpGet("api/tournament-operation/judge/check-in-roster")]
+    [Authorize(Roles = "JUDGE,MANAGER,ADMIN")]
+    public async Task<IActionResult> GetCheckInRoster([FromQuery] Guid tournamentId, CancellationToken ct)
+    {
+        try
+        {
+            var registrations = await _unitOfWork.Registrations.FindAsync(
+                r => r.TournamentId == tournamentId &&
+                     (r.StatusCode == "CONFIRMED" || r.StatusCode == "CHECKED_IN"),
+                ct
+            );
+
+            // Batch load user display names
+            var userIds = registrations.Select(r => r.UserId).Distinct().ToList();
+            var users = await _unitOfWork.Users.FindAsync(u => userIds.Contains(u.Id), ct);
+            var userMap = users.ToDictionary(u => u.Id, u => u.DisplayName ?? u.Email ?? "-");
+
+            var result = registrations
+                .OrderBy(r => r.StatusCode == "CHECKED_IN" ? 0 : 1)
+                .ThenBy(r => userMap.GetValueOrDefault(r.UserId, "-"))
+                .Select(r => new
+                {
+                    RegistrationId = r.Id,
+                    CompetitorName = userMap.GetValueOrDefault(r.UserId, "-"),
+                    StatusCode = r.StatusCode,
+                    CheckedInAt = r.CheckedInAt,
+                    IsCheckedIn = r.CheckedInAt.HasValue || r.StatusCode == "CHECKED_IN",
+                })
+                .ToList();
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while fetching check-in roster.", detail = ex.Message });
+        }
+    }
 
     /// <summary>
     /// Xác thực thông tin đấu thủ qua mã QR và tự động resolve GroupId theo trạm của trọng tài (JUDGE, MANAGER, ADMIN).
+
     /// </summary>
     [HttpPost("api/tournament-operation/judge/verify-by-station")]
     [Authorize(Roles = "JUDGE,MANAGER,ADMIN")]

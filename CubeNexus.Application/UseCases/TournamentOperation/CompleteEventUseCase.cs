@@ -60,8 +60,19 @@ public class CompleteEventUseCase : ICompleteEventUseCase
             );
         }
 
-        // Validate that all results for the final/current active round are locked
+        // Validate configured total rounds vs current max round
+        int configuredRounds = ev.TotalRounds > 0 ? ev.TotalRounds : 1;
         var finalRoundNumber = groups.Max(g => g.RoundNumber);
+        if (finalRoundNumber < configuredRounds)
+        {
+            throw new CustomException(
+                "UNCOMPLETED_ROUNDS_REMAINING",
+                $"Không thể hoàn thành môn thi! Môn thi này được cấu hình {configuredRounds} vòng đấu nhưng hiện tại mới thực hiện xong Vòng {finalRoundNumber}. Vui lòng bấm 'Advance Round' để tuyển chọn thí sinh thi tiếp Vòng {finalRoundNumber + 1}.",
+                409
+            );
+        }
+
+        // Validate that all results for the final/current active round are locked
         var finalRoundGroups = groups.Where(g => g.RoundNumber == finalRoundNumber).Select(g => g.Id).ToList();
         var competitors = await _unitOfWork.GroupCompetitors.FindAsync(gc => finalRoundGroups.Contains(gc.GroupId));
         var competitorIds = competitors.Select(c => c.Id).ToList();

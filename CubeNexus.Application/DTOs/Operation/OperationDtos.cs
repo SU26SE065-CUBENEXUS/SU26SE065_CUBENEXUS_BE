@@ -121,6 +121,7 @@ public class AdvanceRoundRequestDto
     public int TopN { get; set; }
     public int CompetitorsPerGroup { get; set; }
     public int StationCount { get; set; }
+    public List<Guid>? SelectedRegistrationEventIds { get; set; }
 }
 
 

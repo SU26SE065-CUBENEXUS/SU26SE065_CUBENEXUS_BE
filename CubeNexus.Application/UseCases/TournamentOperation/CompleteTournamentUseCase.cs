@@ -35,24 +35,59 @@ public class CompleteTournamentUseCase : ICompleteTournamentUseCase
         }
 
         var events = await _unitOfWork.Events.FindAsync(e => e.TournamentId == tournamentId);
+        var eventList = events.ToList();
 
         if (tournament.TournamentType != "ONLINE_ASYNC")
         {
-            var eventIds = events.Select(e => e.Id).ToList();
-            if (eventIds.Any())
+            if (!eventList.Any())
             {
-                var groups = await _unitOfWork.Groups.FindAsync(g => eventIds.Contains(g.EventId));
-                if (groups.Any())
+                throw new CustomException(
+                    "TOURNAMENT_NO_EVENTS",
+                    "Không thể hoàn thành giải đấu vì chưa có môn thi nào.",
+                    400
+                );
+            }
+
+            var puzzleTypes = await _unitOfWork.PuzzleTypes.GetAllAsync();
+            var puzzleTypeMap = puzzleTypes.ToDictionary(p => p.Id, p => p.Name);
+
+            var eventIds = eventList.Select(e => e.Id).ToList();
+            var allGroups = await _unitOfWork.Groups.FindAsync(g => eventIds.Contains(g.EventId));
+            var groupsList = allGroups.ToList();
+
+            foreach (var ev in eventList)
+            {
+                var puzzleName = puzzleTypeMap.GetValueOrDefault(ev.PuzzleTypeId, "Môn thi");
+                var evGroups = groupsList.Where(g => g.EventId == ev.Id).ToList();
+
+                if (!evGroups.Any())
                 {
-                    var uncompletedGroups = groups.Where(g => g.StatusCode != "COMPLETED").ToList();
-                    if (uncompletedGroups.Any())
-                    {
-                        throw new CustomException(
-                            "TOURNAMENT_NOT_READY_TO_COMPLETE",
-                            "Không thể hoàn thành giải đấu vì còn vòng thi hoặc nhóm thi đấu chưa hoàn tất (chưa Complete Round). Vui lòng nhập điểm và hoàn thành các vòng thi trước.",
-                            400
-                        );
-                    }
+                    throw new CustomException(
+                        "EVENT_NOT_STARTED",
+                        $"Không thể hoàn thành giải đấu! Môn thi '{puzzleName}' chưa được khởi tạo nhóm hay tạo vòng thi nào.",
+                        400
+                    );
+                }
+
+                var uncompletedGroups = evGroups.Where(g => g.StatusCode != "COMPLETED").ToList();
+                if (uncompletedGroups.Any())
+                {
+                    throw new CustomException(
+                        "TOURNAMENT_NOT_READY_TO_COMPLETE",
+                        $"Không thể hoàn thành giải đấu! Môn thi '{puzzleName}' còn nhóm/vòng thi chưa hoàn tất (chưa Complete Round). Vui lòng nhập điểm và hoàn thành các vòng thi trước.",
+                        400
+                    );
+                }
+
+                int configuredRounds = ev.TotalRounds > 0 ? ev.TotalRounds : 1;
+                int maxRoundNumber = evGroups.Max(g => g.RoundNumber);
+                if (maxRoundNumber < configuredRounds)
+                {
+                    throw new CustomException(
+                        "UNCOMPLETED_ROUNDS_REMAINING",
+                        $"Không thể hoàn thành giải đấu! Môn thi '{puzzleName}' được cấu hình {configuredRounds} vòng đấu nhưng hiện tại mới thực hiện xong Vòng {maxRoundNumber}. Vui lòng thực hiện 'Advance Round' để tuyển chọn thí sinh thi tiếp Vòng {maxRoundNumber + 1}.",
+                        400
+                    );
                 }
             }
         }

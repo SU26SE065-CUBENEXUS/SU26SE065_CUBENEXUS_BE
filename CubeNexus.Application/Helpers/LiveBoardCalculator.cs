@@ -122,6 +122,7 @@ public static class LiveBoardCalculator
             competitorDtos.Add(new LiveBoardCompetitorDto
             {
                 GroupCompetitorId = c.Id,
+                RegistrationEventId = c.RegistrationEventId,
                 CompetitorName = user?.DisplayName ?? "Unknown Competitor",
                 CompetitorUserCode = user?.UserCode ?? string.Empty,
                 CompetitorAvatarUrl = user?.AvatarUrl,

@@ -278,6 +278,8 @@ CREATE TABLE IF NOT EXISTS events (
     time_limit_ms INTEGER,
     cutoff_time_ms INTEGER,
     solve_count INTEGER NOT NULL DEFAULT 5,
+    total_rounds INTEGER NOT NULL DEFAULT 1,
+    advance_top_n INTEGER NOT NULL DEFAULT 16,
     sort_order INTEGER,
     max_capacity INTEGER,
     registration_status_code VARCHAR(20) NOT NULL DEFAULT 'NOT_OPEN',
