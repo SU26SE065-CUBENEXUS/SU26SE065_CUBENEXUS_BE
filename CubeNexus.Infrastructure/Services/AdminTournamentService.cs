@@ -246,6 +246,28 @@ public class AdminTournamentService : IAdminTournamentService
         t.StatusCode = normalizedStatus;
         t.UpdatedAt = DateTime.UtcNow;
 
+        if (normalizedStatus == "REGISTRATION_OPEN")
+        {
+            if (t.RegistrationOpenAt > DateTime.UtcNow)
+            {
+                t.RegistrationOpenAt = DateTime.UtcNow;
+            }
+        }
+        else if (normalizedStatus == "REGISTRATION_CLOSED")
+        {
+            if (t.RegistrationCloseAt > DateTime.UtcNow)
+            {
+                t.RegistrationCloseAt = DateTime.UtcNow;
+            }
+        }
+        else if (normalizedStatus == "ONGOING")
+        {
+            if (t.StartDate > DateTime.UtcNow)
+            {
+                t.StartDate = DateTime.UtcNow;
+            }
+        }
+
         // Auto-activate judge accounts if tournament is CHECKING_IN
         if (normalizedStatus == "CHECKING_IN")
         {

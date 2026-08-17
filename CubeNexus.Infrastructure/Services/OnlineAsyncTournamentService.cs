@@ -77,7 +77,7 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
             RegistrationCloseAt = request.RegistrationCloseAt,
             StartDate = request.StartDate,
             EndDate = request.EndDate,
-            StatusCode = "DRAFT",
+            StatusCode = "PUBLISHED",
             CreatedBy = managerUserId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -169,11 +169,12 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
             throw new CustomException("TOURNAMENT_NOT_FOUND", "Online async tournament not found.", 404);
 
         var now = DateTime.UtcNow;
-        if (now < tournament.RegistrationOpenAt)
-            throw new CustomException("REGISTRATION_NOT_OPEN", "Registration is not open yet.", 400);
+        var computedStatus = GetComputedStatus(tournament, now);
+        if (computedStatus is "DRAFT" or "PUBLISHED")
+            throw new CustomException("REGISTRATION_NOT_OPEN", "Thời gian mở đăng ký chưa bắt đầu.", 400);
 
-        if (now > tournament.RegistrationCloseAt)
-            throw new CustomException("REGISTRATION_CLOSED", "Registration period has ended.", 400);
+        if (computedStatus is "REGISTRATION_CLOSED" or "COMPLETED" or "CANCELLED" or "DISABLED")
+            throw new CustomException("REGISTRATION_CLOSED", "Thời gian đăng ký đã kết thúc.", 400);
 
         var existingReg = await _uow.Registrations.FirstOrDefaultAsync(r => r.TournamentId == tournamentId && r.UserId == userId, ct);
         if (existingReg != null)
@@ -697,6 +698,26 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
     {
         if (tournament.StatusCode is "DRAFT" or "CANCELLED" or "DISABLED" or "COMPLETED")
             return tournament.StatusCode;
+
+        if (tournament.StatusCode == "REGISTRATION_OPEN")
+        {
+            if (now > tournament.RegistrationCloseAt) return "REGISTRATION_CLOSED";
+            return "REGISTRATION_OPEN";
+        }
+
+        if (tournament.StatusCode == "REGISTRATION_CLOSED")
+        {
+            if (now >= tournament.StartDate && now <= tournament.EndDate) return "ONGOING";
+            if (now > tournament.EndDate) return "COMPLETED";
+            return "REGISTRATION_CLOSED";
+        }
+
+        if (tournament.StatusCode == "ONGOING")
+        {
+            if (now > tournament.EndDate) return "COMPLETED";
+            return "ONGOING";
+        }
+
         if (now < tournament.RegistrationOpenAt) return "PUBLISHED";
         if (now <= tournament.RegistrationCloseAt) return "REGISTRATION_OPEN";
         if (now < tournament.StartDate) return "REGISTRATION_CLOSED";
