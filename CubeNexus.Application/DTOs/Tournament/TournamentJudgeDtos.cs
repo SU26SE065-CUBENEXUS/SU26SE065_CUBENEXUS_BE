@@ -12,7 +12,7 @@ public class TournamentJudgeDto
     public string RoleCode { get; set; } = "STATION_JUDGE";
     public int? AssignedStationNumber { get; set; }
     public DateTime AssignedAt { get; set; }
-    public bool IsActive { get; set; } = true;
+    public bool IsActive { get; set; } = false;
     
     /// <summary>
     /// Mật khẩu thật dạng plain-text (chỉ trả về khi mới tạo hoặc vừa reset để Manager sao chép bàn giao).

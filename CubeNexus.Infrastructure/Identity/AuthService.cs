@@ -239,8 +239,9 @@ public partial class AuthService : IAuthService
 
     public async Task<LoginResponseDto> LoginAsync(LoginRequestDto request)
     {
+        var identifier = (request.Email ?? string.Empty).Trim().ToLower();
         var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Email == request.Email);
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == identifier || (u.UserCode != null && u.UserCode.ToLower() == identifier));
 
         if (user == null)
             throw new UnauthorizedAccessException("Email hoặc mật khẩu không đúng.");

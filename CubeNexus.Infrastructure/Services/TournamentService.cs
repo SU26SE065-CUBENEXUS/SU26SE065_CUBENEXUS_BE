@@ -365,24 +365,58 @@ public class TournamentService : ITournamentService
         if (string.IsNullOrWhiteSpace(dto.DisplayName))
             throw new InvalidOperationException("DisplayName is required for Judge.");
 
-        var random = new Random();
-        var shortSuffix = random.Next(100, 999).ToString();
-        var username = !string.IsNullOrWhiteSpace(dto.Username) 
-            ? dto.Username.Trim() 
-            : $"judge_{tournamentId.ToString()[..4]}_{shortSuffix}";
+        string username;
+        string email;
+        string userCode;
 
-        var email = username.Contains('@') ? username : $"{username}@cubenexus.local";
+        if (!string.IsNullOrWhiteSpace(dto.Username))
+        {
+            username = dto.Username.Trim();
+            email = username.Contains('@') ? username : $"{username}@cubenexus.com";
+            userCode = username.Contains('@') ? username.Split('@')[0] : username;
 
-        var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Email == email || u.UserCode == username, ct);
-        if (existingUser != null)
-            throw new InvalidOperationException($"Username/Email '{username}' already exists. Please choose a different username.");
+            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower() || (u.UserCode != null && u.UserCode.ToLower() == userCode.ToLower()), ct);
+            if (existingUser != null)
+                throw new InvalidOperationException($"Username/Email '{username}' already exists. Please choose a different username.");
+        }
+        else
+        {
+            var existingJudgeUsers = await _context.Users
+                .Where(u => u.Email.StartsWith("judge") || (u.UserCode != null && u.UserCode.StartsWith("judge")))
+                .Select(u => new { u.Email, u.UserCode })
+                .ToListAsync(ct);
+
+            var usedNumbers = new HashSet<int>();
+            var regex = new System.Text.RegularExpressions.Regex(@"^judge(\d+)(@|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            foreach (var item in existingJudgeUsers)
+            {
+                var m1 = regex.Match(item.Email ?? "");
+                if (m1.Success && int.TryParse(m1.Groups[1].Value, out int n1))
+                    usedNumbers.Add(n1);
+
+                var m2 = regex.Match(item.UserCode ?? "");
+                if (m2.Success && int.TryParse(m2.Groups[1].Value, out int n2))
+                    usedNumbers.Add(n2);
+            }
+
+            int nextSeq = 1;
+            while (usedNumbers.Contains(nextSeq))
+            {
+                nextSeq++;
+            }
+
+            username = $"judge{nextSeq}";
+            email = $"judge{nextSeq}@cubenexus.com";
+            userCode = $"judge{nextSeq}";
+        }
 
         var rawPassword = !string.IsNullOrWhiteSpace(dto.Password) 
             ? dto.Password.Trim() 
-            : $"Judge@{random.Next(100000, 999999)}";
+            : "Judge@123456";
 
         var now = DateTime.UtcNow;
-        var userCode = $"J{random.Next(100000, 999999)}";
+        bool isTournamentLive = tournament.StatusCode == "CHECKING_IN" || tournament.StatusCode == "ONGOING";
 
         var user = new User
         {
@@ -392,7 +426,7 @@ public class TournamentService : ITournamentService
             PasswordHash = CubeNexus.Infrastructure.Identity.AuthService.HashPassword(rawPassword),
             DisplayName = dto.DisplayName.Trim(),
             UserRole = "JUDGE",
-            IsActive = true,
+            IsActive = isTournamentLive,
             EmailConfirmed = true,
             EmailConfirmedAt = now,
             CreatedAt = now,
@@ -425,6 +459,7 @@ public class TournamentService : ITournamentService
             RoleCode = tournamentJudge.RoleCode,
             AssignedStationNumber = tournamentJudge.AssignedStationNumber,
             AssignedAt = tournamentJudge.AssignedAt,
+            IsActive = user.IsActive,
             RawPassword = rawPassword
         };
     }
@@ -469,9 +504,30 @@ public class TournamentService : ITournamentService
             }
         }
 
-        var random = new Random();
+        var existingJudgeUsers = await _context.Users
+            .Where(u => u.Email.StartsWith("judge") || (u.UserCode != null && u.UserCode.StartsWith("judge")))
+            .Select(u => new { u.Email, u.UserCode })
+            .ToListAsync(ct);
+
+        var usedNumbers = new HashSet<int>();
+        var regex = new System.Text.RegularExpressions.Regex(@"^judge(\d+)(@|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        foreach (var item in existingJudgeUsers)
+        {
+            var m1 = regex.Match(item.Email ?? "");
+            if (m1.Success && int.TryParse(m1.Groups[1].Value, out int n1))
+                usedNumbers.Add(n1);
+
+            var m2 = regex.Match(item.UserCode ?? "");
+            if (m2.Success && int.TryParse(m2.Groups[1].Value, out int n2))
+                usedNumbers.Add(n2);
+        }
+
+        int nextJudgeSeq = 1;
         var now = DateTime.UtcNow;
         var resultList = new List<TournamentJudgeDto>();
+        bool isTournamentLive = tournament.StatusCode == "CHECKING_IN" || tournament.StatusCode == "ONGOING";
+        const string defaultPassword = "Judge@123456";
 
         for (int i = 0; i < assignments.Count; i++)
         {
@@ -480,12 +536,16 @@ public class TournamentService : ITournamentService
                 ? dto.CustomNames[i].Trim()
                 : assignment.DefaultName;
 
-            var shortCode = tournamentId.ToString()[..4];
-            var randomNum = random.Next(1000, 9999);
-            var username = $"judge_{shortCode}_{(i + 1):D2}_{randomNum}";
-            var email = $"{username}@cubenexus.local";
-            var rawPassword = $"Judge@{random.Next(100000, 999999)}";
-            var userCode = $"J{random.Next(100000, 999999)}";
+            while (usedNumbers.Contains(nextJudgeSeq))
+            {
+                nextJudgeSeq++;
+            }
+            usedNumbers.Add(nextJudgeSeq);
+
+            var username = $"judge{nextJudgeSeq}";
+            var email = $"judge{nextJudgeSeq}@cubenexus.com";
+            var userCode = $"judge{nextJudgeSeq}";
+            var rawPassword = defaultPassword;
 
             var user = new User
             {
@@ -495,7 +555,7 @@ public class TournamentService : ITournamentService
                 PasswordHash = CubeNexus.Infrastructure.Identity.AuthService.HashPassword(rawPassword),
                 DisplayName = displayName,
                 UserRole = "JUDGE",
-                IsActive = true,
+                IsActive = isTournamentLive,
                 EmailConfirmed = true,
                 EmailConfirmedAt = now,
                 CreatedAt = now,
@@ -527,6 +587,7 @@ public class TournamentService : ITournamentService
                 RoleCode = tournamentJudge.RoleCode,
                 AssignedStationNumber = tournamentJudge.AssignedStationNumber,
                 AssignedAt = now,
+                IsActive = user.IsActive,
                 RawPassword = rawPassword
             });
         }
@@ -571,6 +632,7 @@ public class TournamentService : ITournamentService
             RoleCode = tj.RoleCode,
             AssignedStationNumber = tj.AssignedStationNumber,
             AssignedAt = tj.AssignedAt,
+            IsActive = tj.User.IsActive,
             RawPassword = null
         };
     }
@@ -643,6 +705,7 @@ public class TournamentService : ITournamentService
             RoleCode = tj.RoleCode,
             AssignedStationNumber = tj.AssignedStationNumber,
             AssignedAt = tj.AssignedAt,
+            IsActive = tj.User.IsActive,
             RawPassword = null
         }).ToList();
     }
@@ -656,10 +719,9 @@ public class TournamentService : ITournamentService
         if (tj == null)
             throw new KeyNotFoundException("Judge assignment not found in this tournament.");
 
-        var random = new Random();
         var rawPassword = !string.IsNullOrWhiteSpace(dto.NewPassword)
             ? dto.NewPassword.Trim()
-            : $"Judge@{random.Next(100000, 999999)}";
+            : "Judge@123456";
 
         tj.User.PasswordHash = CubeNexus.Infrastructure.Identity.AuthService.HashPassword(rawPassword);
         tj.User.UpdatedAt = DateTime.UtcNow;
@@ -678,6 +740,7 @@ public class TournamentService : ITournamentService
             RoleCode = tj.RoleCode,
             AssignedStationNumber = tj.AssignedStationNumber,
             AssignedAt = tj.AssignedAt,
+            IsActive = tj.User.IsActive,
             RawPassword = rawPassword
         };
     }
