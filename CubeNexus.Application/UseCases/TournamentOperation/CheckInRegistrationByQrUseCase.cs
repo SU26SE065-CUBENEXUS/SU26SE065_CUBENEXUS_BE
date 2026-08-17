@@ -73,9 +73,9 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
             throw new CustomException("QR_INVALID", "Invalid QR code credentials or token mismatch.", 400);
         }
 
-        if (registration.Tournament.StatusCode == "CANCELLED")
+        if (registration.Tournament.StatusCode != "CHECKING_IN" && registration.Tournament.StatusCode != "ONGOING")
         {
-            throw new CustomException("TOURNAMENT_CANCELLED", "The tournament is cancelled.", 400);
+            throw new CustomException("INVALID_TOURNAMENT_STATE", "Chỉ được phép check-in khi giải đấu đang ở trạng thái CHECKING_IN hoặc ONGOING.", 400);
         }
 
         if (registration.StatusCode == "CANCELLED")

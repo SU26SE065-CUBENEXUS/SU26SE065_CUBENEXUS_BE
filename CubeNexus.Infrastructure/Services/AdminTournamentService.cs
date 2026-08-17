@@ -200,8 +200,72 @@ public class AdminTournamentService : IAdminTournamentService
             throw new ArgumentException("Trạng thái không được để trống.");
         }
 
+        var currentStatus = (t.StatusCode ?? "").Trim().ToUpper();
+        if (currentStatus != normalizedStatus)
+        {
+            bool isValidTransition = false;
+            if (normalizedStatus == "PUBLISHED")
+            {
+                isValidTransition = currentStatus == "DRAFT" || currentStatus == "DISABLED";
+            }
+            else if (normalizedStatus == "REGISTRATION_OPEN")
+            {
+                isValidTransition = currentStatus == "PUBLISHED" || currentStatus == "DRAFT" || currentStatus == "DISABLED";
+            }
+            else if (normalizedStatus == "REGISTRATION_CLOSED")
+            {
+                isValidTransition = currentStatus == "REGISTRATION_OPEN" || currentStatus == "PUBLISHED";
+            }
+            else if (normalizedStatus == "CHECKING_IN")
+            {
+                isValidTransition = currentStatus == "REGISTRATION_CLOSED";
+            }
+            else if (normalizedStatus == "ONGOING")
+            {
+                isValidTransition = currentStatus == "CHECKING_IN";
+            }
+            else if (normalizedStatus == "COMPLETED")
+            {
+                isValidTransition = currentStatus == "ONGOING";
+            }
+            else if (normalizedStatus == "CANCELLED")
+            {
+                isValidTransition = currentStatus == "DRAFT" || currentStatus == "PUBLISHED" || currentStatus == "REGISTRATION_OPEN" || currentStatus == "REGISTRATION_CLOSED" || currentStatus == "CHECKING_IN";
+            }
+            else if (normalizedStatus == "DISABLED")
+            {
+                isValidTransition = currentStatus == "DRAFT" || currentStatus == "PUBLISHED" || currentStatus == "REGISTRATION_OPEN" || currentStatus == "REGISTRATION_CLOSED";
+            }
+
+            if (!isValidTransition)
+            {
+                throw new InvalidOperationException($"Không thể chuyển trạng thái giải đấu từ {currentStatus} sang {normalizedStatus}.");
+            }
+        }
+
         t.StatusCode = normalizedStatus;
         t.UpdatedAt = DateTime.UtcNow;
+
+        // Auto-activate judge accounts if tournament is CHECKING_IN
+        if (normalizedStatus == "CHECKING_IN")
+        {
+            var judgeUserIds = await _context.TournamentJudges
+                .Where(tj => tj.TournamentId == id)
+                .Select(tj => tj.UserId)
+                .ToListAsync(ct);
+
+            if (judgeUserIds.Any())
+            {
+                var judgeUsers = await _context.Users
+                    .Where(u => judgeUserIds.Contains(u.Id))
+                    .ToListAsync(ct);
+
+                foreach (var judgeUser in judgeUsers)
+                {
+                    judgeUser.IsActive = true;
+                }
+            }
+        }
 
         // Auto-deactivate judge accounts if tournament is COMPLETED or CANCELLED
         if (normalizedStatus == "COMPLETED" || normalizedStatus == "CANCELLED")

@@ -111,6 +111,10 @@ public class StartRoundUseCase : IStartRoundUseCase
         var tournament = await _unitOfWork.Tournaments.GetByIdAsync(ev.TournamentId);
         if (tournament != null && tournament.StatusCode != "ONGOING")
         {
+            if (tournament.StatusCode != "CHECKING_IN")
+            {
+                throw new CustomException("INVALID_TOURNAMENT_STATE", "Không thể bắt đầu lượt thi vì giải đấu chưa ở trạng thái CHECKING_IN.", 400);
+            }
             tournament.StatusCode = "ONGOING";
             _unitOfWork.Tournaments.Update(tournament);
         }

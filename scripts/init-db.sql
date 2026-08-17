@@ -212,7 +212,7 @@ CREATE TABLE IF NOT EXISTS tournaments (
     updated_at TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT ck_tournaments_status
-        CHECK (status_code IN ('DRAFT', 'PUBLISHED', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'ONGOING', 'COMPLETED', 'CANCELLED', 'DISABLED')),
+        CHECK (status_code IN ('DRAFT', 'PUBLISHED', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'CHECKING_IN', 'ONGOING', 'COMPLETED', 'CANCELLED', 'DISABLED')),
 
     CONSTRAINT ck_tournaments_date
         CHECK (end_date > start_date),
