@@ -24,6 +24,9 @@ public class AiRubikClient : IAiRubikClient
         _options = options.Value;
         _httpClient.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/') + "/");
         _httpClient.Timeout = TimeSpan.FromSeconds(Math.Max(1, _options.TimeoutSeconds));
+        _httpClient.DefaultRequestHeaders.Remove("ngrok-skip-browser-warning");
+        _httpClient.DefaultRequestHeaders.Add("ngrok-skip-browser-warning", "true");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("CubeNexusBackend/1.0");
         if (!string.IsNullOrWhiteSpace(_options.ApiKey))
         {
             _httpClient.DefaultRequestHeaders.Remove("X-Api-Key");
@@ -213,7 +216,14 @@ public class AiRubikClient : IAiRubikClient
     private static async Task<AiRubikScannerSessionDto> ReadScannerResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException($"AI Service returned {(int)response.StatusCode} ({response.StatusCode}): {body}");
+        }
+        if (body.TrimStart().StartsWith("<"))
+        {
+            throw new InvalidOperationException("AI Service returned HTML instead of JSON.");
+        }
         return JsonSerializer.Deserialize<AiRubikScannerSessionDto>(body, JsonOptions)
                ?? throw new InvalidOperationException("AI scanner session response was empty.");
     }
@@ -240,7 +250,16 @@ public class AiRubikClient : IAiRubikClient
 
             using var response = await _httpClient.PostAsync(relativeUrl, form, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("AI scanner endpoint {RelativeUrl} failed with status {StatusCode}: {Body}", relativeUrl, response.StatusCode, body);
+                throw new HttpRequestException($"AI service returned {(int)response.StatusCode}: {body}");
+            }
+            if (body.TrimStart().StartsWith("<"))
+            {
+                _logger.LogWarning("AI scanner endpoint {RelativeUrl} returned HTML: {Body}", relativeUrl, body);
+                throw new InvalidOperationException("AI service returned HTML instead of JSON.");
+            }
             return JsonSerializer.Deserialize<AiRubikScannerPreviewDto>(body, JsonOptions)
                    ?? throw new InvalidOperationException("AI scanner preview response was empty.");
         }

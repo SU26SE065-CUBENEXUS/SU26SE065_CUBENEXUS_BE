@@ -5,7 +5,9 @@ using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Application.UseCases.OnlineArena;
 using CubeNexus.Domain.Entities;
 using CubeNexus.Application.Exceptions;
+using CubeNexus.Infrastructure.Options;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace CubeNexus.Infrastructure.Services;
@@ -19,13 +21,20 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
     private readonly IScramblePoolService _scramblePool;
     private readonly IAiRubikClient _aiRubikClient;
     private readonly IRecordingStorageService _recordingStorage;
+    private readonly R2Options _r2Options;
 
-    public OnlineAsyncTournamentService(IUnitOfWork uow, IScramblePoolService scramblePool, IAiRubikClient aiRubikClient, IRecordingStorageService recordingStorage)
+    public OnlineAsyncTournamentService(
+        IUnitOfWork uow,
+        IScramblePoolService scramblePool,
+        IAiRubikClient aiRubikClient,
+        IRecordingStorageService recordingStorage,
+        IOptions<R2Options> r2Options)
     {
         _uow = uow;
         _scramblePool = scramblePool;
         _aiRubikClient = aiRubikClient;
         _recordingStorage = recordingStorage;
+        _r2Options = r2Options.Value;
     }
 
     public async Task<OnlineAsyncTournamentDto> CreateTournamentAsync(Guid managerUserId, CreateOnlineAsyncTournamentRequest request, CancellationToken ct = default)
@@ -33,17 +42,21 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         if (string.IsNullOrWhiteSpace(request.Name))
             throw new CustomException("INVALID_NAME", "Tournament name is required.", 400);
 
+        var now = DateTime.UtcNow;
+        if (request.RegistrationOpenAt < now.AddMinutes(-5))
+            throw new CustomException("INVALID_DATES", "Thời gian mở đăng ký không được ở trong quá khứ.", 400);
+
         if (request.RegistrationOpenAt >= request.RegistrationCloseAt)
-            throw new CustomException("INVALID_DATES", "Registration open date must be before registration close date.", 400);
+            throw new CustomException("INVALID_DATES", "Thời gian mở đăng ký phải trước thời gian đóng đăng ký.", 400);
+
+        if (request.StartDate < request.RegistrationCloseAt)
+            throw new CustomException("INVALID_DATES", "Thời gian bắt đầu giải đấu phải sau hoặc cùng thời gian đóng đăng ký.", 400);
 
         if (request.StartDate >= request.EndDate)
-            throw new CustomException("INVALID_DATES", "Competition start date must be before competition end date.", 400);
-
-        if (request.RegistrationCloseAt > request.StartDate)
-            throw new CustomException("INVALID_DATES", "Registration must close on or before the competition start time.", 400);
+            throw new CustomException("INVALID_DATES", "Thời gian bắt đầu giải đấu phải trước thời gian kết thúc giải đấu.", 400);
 
         if (request.AttemptTimeLimitMs is < 1 or > 3_600_000)
-            throw new CustomException("INVALID_TIME_LIMIT", "Attempt time limit must be between 1 ms and 60 minutes.", 400);
+            throw new CustomException("INVALID_TIME_LIMIT", "Thời gian làm bài mỗi attempt phải từ 1 ms đến 60 phút.", 400);
 
         var puzzleType = await _uow.PuzzleTypes.GetByIdAsync(request.PuzzleTypeId, ct);
         if (puzzleType == null)
@@ -64,9 +77,7 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
             RegistrationCloseAt = request.RegistrationCloseAt,
             StartDate = request.StartDate,
             EndDate = request.EndDate,
-            // PUBLISHED is the persisted equivalent of the pre-registration state.
-            // The public DTO derives REGISTRATION_OPEN/CLOSED and ONGOING from dates.
-            StatusCode = "PUBLISHED",
+            StatusCode = "DRAFT",
             CreatedBy = managerUserId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -782,7 +793,7 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         };
     }
 
-    private static List<AsyncLeaderboardEntryDto> MapToLeaderboardList(List<OnlineAsyncAttempt> attempts)
+    private List<AsyncLeaderboardEntryDto> MapToLeaderboardList(List<OnlineAsyncAttempt> attempts)
     {
         var list = new List<AsyncLeaderboardEntryDto>();
         int rank = 1;
@@ -793,13 +804,21 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         return list;
     }
 
-    private static AsyncLeaderboardEntryDto MapToLeaderboardEntry(OnlineAsyncAttempt a, User? user, int rank)
+    private AsyncLeaderboardEntryDto MapToLeaderboardEntry(OnlineAsyncAttempt a, User? user, int rank)
     {
         string display = a.IsDnf
             ? "DNF"
             : a.PenaltyCode == "PLUS2"
                 ? $"{((a.RawTimeMs ?? 0) / 1000.0):F2}s +2 = {((a.FinalTimeMs ?? 0) / 1000.0):F2}s"
                 : $"{((a.FinalTimeMs ?? 0) / 1000.0):F2}s";
+
+        var videoUrl = a.VideoEvidenceUrl;
+        if (!string.IsNullOrWhiteSpace(videoUrl)
+            && !videoUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            && !videoUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            videoUrl = _r2Options?.GetPublicUrl(videoUrl) ?? videoUrl;
+        }
 
         return new AsyncLeaderboardEntryDto
         {
@@ -815,7 +834,7 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
             FinalTimeMs = a.FinalTimeMs,
             DisplayResult = display,
             ReviewStatus = a.ReviewStatus,
-            VideoEvidenceUrl = a.VideoEvidenceUrl,
+            VideoEvidenceUrl = videoUrl,
             SolveFinishedAt = a.SolveFinishedAt ?? a.CreatedAt
         };
     }

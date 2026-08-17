@@ -210,7 +210,7 @@ public class AdminTournamentService : IAdminTournamentService
             }
             else if (normalizedStatus == "REGISTRATION_OPEN")
             {
-                isValidTransition = currentStatus == "PUBLISHED" || currentStatus == "DRAFT" || currentStatus == "DISABLED";
+                isValidTransition = currentStatus == "PUBLISHED" || currentStatus == "DRAFT" || currentStatus == "DISABLED" || currentStatus == "REGISTRATION_CLOSED";
             }
             else if (normalizedStatus == "REGISTRATION_CLOSED")
             {
@@ -218,11 +218,11 @@ public class AdminTournamentService : IAdminTournamentService
             }
             else if (normalizedStatus == "CHECKING_IN")
             {
-                isValidTransition = currentStatus == "REGISTRATION_CLOSED";
+                isValidTransition = currentStatus == "REGISTRATION_CLOSED" && t.TournamentType != "ONLINE_ASYNC";
             }
             else if (normalizedStatus == "ONGOING")
             {
-                isValidTransition = currentStatus == "CHECKING_IN";
+                isValidTransition = currentStatus == "CHECKING_IN" || (t.TournamentType == "ONLINE_ASYNC" && (currentStatus == "REGISTRATION_CLOSED" || currentStatus == "REGISTRATION_OPEN" || currentStatus == "PUBLISHED" || currentStatus == "DRAFT"));
             }
             else if (normalizedStatus == "COMPLETED")
             {

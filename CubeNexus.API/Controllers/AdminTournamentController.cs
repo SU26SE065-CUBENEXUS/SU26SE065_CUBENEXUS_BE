@@ -7,7 +7,7 @@ namespace CubeNexus.API.Controllers;
 
 [ApiController]
 [Route("api/admin/tournaments")]
-[Authorize(Roles = "ADMIN")]
+[Authorize(Roles = "ADMIN,MANAGER")]
 public class AdminTournamentController : ControllerBase
 {
     private readonly IAdminTournamentService _adminTournamentService;

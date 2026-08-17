@@ -27,8 +27,8 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         if (now < tournament.RegistrationOpenAt || now > tournament.RegistrationCloseAt)
             throw new InvalidOperationException("Registration is currently closed for this tournament.");
 
-        if (tournament.StatusCode == "REGISTRATION_CLOSED" || (tournament.StatusCode != "DRAFT" && tournament.StatusCode != "PUBLISHED" && tournament.StatusCode != "REGISTRATION_OPEN" && tournament.StatusCode != "ONGOING"))
-            throw new InvalidOperationException("This tournament is not open for registration.");
+        if (tournament.StatusCode != "REGISTRATION_OPEN")
+            throw new InvalidOperationException("Giải đấu hiện chưa mở cổng đăng ký.");
 
         if (tournament.MaxParticipants.HasValue && tournament.MaxParticipants.Value > 0)
         {

@@ -68,19 +68,25 @@ public class TournamentService : ITournamentService
     public async Task<TournamentDetailDto> CreateTournamentAsync(CreateTournamentDto dto, Guid managerId, CancellationToken ct = default)
     {
         // 1. Validate Dates
-        if (dto.StartDate >= dto.EndDate)
+        var now = DateTime.UtcNow;
+        if (dto.RegistrationOpenAt < now.AddMinutes(-5))
         {
-            throw new InvalidOperationException("StartDate must be earlier than EndDate.");
+            throw new InvalidOperationException("Thời gian mở đăng ký không được ở trong quá khứ.");
         }
-        
+
         if (dto.RegistrationOpenAt >= dto.RegistrationCloseAt)
         {
-            throw new InvalidOperationException("RegistrationOpenAt must be earlier than RegistrationCloseAt.");
+            throw new InvalidOperationException("Thời gian mở đăng ký phải trước thời gian đóng đăng ký.");
         }
-        
-        if (dto.RegistrationCloseAt > dto.StartDate)
+
+        if (dto.StartDate < dto.RegistrationCloseAt)
         {
-            throw new InvalidOperationException("RegistrationCloseAt must be earlier than or equal to tournament StartDate.");
+            throw new InvalidOperationException("Thời gian bắt đầu giải đấu phải sau hoặc cùng thời gian đóng đăng ký.");
+        }
+
+        if (dto.StartDate >= dto.EndDate)
+        {
+            throw new InvalidOperationException("Thời gian bắt đầu giải đấu phải trước thời gian kết thúc giải đấu.");
         }
 
         // Validate creator user exists in database (handle stale tokens after DB reset)
@@ -163,7 +169,7 @@ public class TournamentService : ITournamentService
             EndDate = dto.EndDate,
             RegistrationOpenAt = dto.RegistrationOpenAt,
             RegistrationCloseAt = dto.RegistrationCloseAt,
-            StatusCode = "PUBLISHED", // Set to PUBLISHED so competitors can view and register
+            StatusCode = "DRAFT", // Start as DRAFT until Manager clicks Publish
             CreatedBy = managerId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -212,7 +218,7 @@ public class TournamentService : ITournamentService
 
     public async Task<List<TournamentDetailDto>> GetPublicTournamentsAsync(CancellationToken ct = default)
     {
-        var publicStatuses = new[] { "DRAFT", "REGISTRATION_OPEN", "REGISTRATION_CLOSED", "PUBLISHED", "ONGOING", "COMPLETED" };
+        var publicStatuses = new[] { "REGISTRATION_OPEN", "REGISTRATION_CLOSED", "PUBLISHED", "ONGOING", "COMPLETED" };
 
         // Single SQL round-trip: load tournaments with events + eager-count registrations via navigation
         var tournaments = await _context.Set<Tournament>()

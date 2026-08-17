@@ -52,7 +52,21 @@ public class AiScannerTestController : ControllerBase
         if (gate is not null)
             return gate;
 
-        return Ok(await aiRubikClient.StartScannerTestSessionAsync(cancellationToken));
+        try
+        {
+            return Ok(await aiRubikClient.StartScannerTestSessionAsync(cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                sessionId = string.Empty,
+                scannerState = "AI_UNAVAILABLE",
+                reason = $"Không thể khởi tạo session với AI Service: {ex.Message}",
+                capturedFaceCount = 0,
+                faces = Array.Empty<object>()
+            });
+        }
     }
 
     [HttpGet("sessions/{sessionId}")]
@@ -62,7 +76,19 @@ public class AiScannerTestController : ControllerBase
         if (gate is not null)
             return gate;
 
-        return Ok(await aiRubikClient.GetScannerTestSessionAsync(sessionId, cancellationToken));
+        try
+        {
+            return Ok(await aiRubikClient.GetScannerTestSessionAsync(sessionId, cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                sessionId,
+                scannerState = "AI_UNAVAILABLE",
+                reason = $"Không thể lấy thông tin session: {ex.Message}"
+            });
+        }
     }
 
     [HttpPost("sessions/{sessionId}/preview")]
@@ -77,8 +103,20 @@ public class AiScannerTestController : ControllerBase
         if (gate is not null)
             return gate;
 
-        var imageBytes = await ReadAsBytesAsync(request.Snapshot, cancellationToken);
-        return Ok(await aiRubikClient.PreviewScannerTestFrameAsync(sessionId, imageBytes, request.Snapshot.FileName, request.Snapshot.ContentType, BuildScannerMetadata(request), cancellationToken));
+        try
+        {
+            var imageBytes = await ReadAsBytesAsync(request.Snapshot, cancellationToken);
+            return Ok(await aiRubikClient.PreviewScannerTestFrameAsync(sessionId, imageBytes, request.Snapshot.FileName, request.Snapshot.ContentType, BuildScannerMetadata(request), cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                sessionId,
+                scannerState = "AI_UNAVAILABLE",
+                reason = $"AI Preview gặp lỗi: {ex.Message}"
+            });
+        }
     }
 
     [HttpPost("sessions/{sessionId}/observe")]
@@ -93,8 +131,23 @@ public class AiScannerTestController : ControllerBase
         if (gate is not null)
             return gate;
 
-        var imageBytes = await ReadAsBytesAsync(request.Snapshot, cancellationToken);
-        return Ok(await aiRubikClient.ObserveScannerTestFrameAsync(sessionId, imageBytes, request.Snapshot.FileName, request.Snapshot.ContentType, BuildScannerMetadata(request), cancellationToken));
+        try
+        {
+            var imageBytes = await ReadAsBytesAsync(request.Snapshot, cancellationToken);
+            return Ok(await aiRubikClient.ObserveScannerTestFrameAsync(sessionId, imageBytes, request.Snapshot.FileName, request.Snapshot.ContentType, BuildScannerMetadata(request), cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                sessionId,
+                scannerState = "AI_UNAVAILABLE",
+                reason = $"AI Observe gặp lỗi: {ex.Message}",
+                stickers = Array.Empty<object>(),
+                stableFrames = 0,
+                requiredStableFrames = 3
+            });
+        }
     }
 
     [HttpPost("sessions/{sessionId}/scan-face")]
@@ -112,13 +165,25 @@ public class AiScannerTestController : ControllerBase
         if (request.Frames is null || request.Frames.Count == 0)
             return BadRequest(new { code = "BAD_REQUEST", message = "At least one frame is required." });
 
-        var framesBase64 = new List<string>(request.Frames.Count);
-        foreach (var frame in request.Frames)
+        try
         {
-            framesBase64.Add(await ReadAsBase64Async(frame, cancellationToken));
-        }
+            var framesBase64 = new List<string>(request.Frames.Count);
+            foreach (var frame in request.Frames)
+            {
+                framesBase64.Add(await ReadAsBase64Async(frame, cancellationToken));
+            }
 
-        return Ok(await aiRubikClient.ScanScannerTestFaceAsync(sessionId, framesBase64, cancellationToken));
+            return Ok(await aiRubikClient.ScanScannerTestFaceAsync(sessionId, framesBase64, cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                sessionId,
+                scannerState = "AI_UNAVAILABLE",
+                reason = $"AI Scan Face gặp lỗi: {ex.Message}"
+            });
+        }
     }
 
     [HttpPost("sessions/{sessionId}/retry-face")]
@@ -128,7 +193,19 @@ public class AiScannerTestController : ControllerBase
         if (gate is not null)
             return gate;
 
-        return Ok(await aiRubikClient.RetryScannerTestFaceAsync(sessionId, cancellationToken));
+        try
+        {
+            return Ok(await aiRubikClient.RetryScannerTestFaceAsync(sessionId, cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                sessionId,
+                scannerState = "AI_UNAVAILABLE",
+                reason = $"AI Retry Face gặp lỗi: {ex.Message}"
+            });
+        }
     }
 
     [HttpPost("sessions/{sessionId}/reset")]
@@ -138,7 +215,19 @@ public class AiScannerTestController : ControllerBase
         if (gate is not null)
             return gate;
 
-        return Ok(await aiRubikClient.ResetScannerTestSessionAsync(sessionId, cancellationToken));
+        try
+        {
+            return Ok(await aiRubikClient.ResetScannerTestSessionAsync(sessionId, cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                sessionId,
+                scannerState = "AI_UNAVAILABLE",
+                reason = $"AI Reset Session gặp lỗi: {ex.Message}"
+            });
+        }
     }
 
     private IActionResult? EnsureEnabled()
