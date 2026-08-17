@@ -388,10 +388,11 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         if (!attempt.HandTimerStartedAt.HasValue)
             throw new CustomException("HAND_TIMER_NOT_STARTED", "Penalty timer has not started.", 400);
 
-        // Penalty is authoritative on the server. The client value is display-only
-        // and must not be trusted to decide NONE / PLUS2 / DNF.
-        var elapsedDouble = Math.Max(0, (now - attempt.HandTimerStartedAt.Value).TotalMilliseconds);
-        var handTimerMs = (int)Math.Min(int.MaxValue, Math.Round(elapsedDouble));
+        // Penalty calculation: use client's measured HandTimerMs if provided and reasonable, otherwise fallback to server elapsed
+        var serverElapsed = Math.Max(0, (now - attempt.HandTimerStartedAt.Value).TotalMilliseconds);
+        var handTimerMs = (request.HandTimerMs >= 0 && request.HandTimerMs <= serverElapsed + 5000)
+            ? request.HandTimerMs
+            : (int)Math.Min(int.MaxValue, Math.Round(serverElapsed));
 
         attempt.UpdatedAt = now;
         if (handTimerMs > DnfThresholdMs)
