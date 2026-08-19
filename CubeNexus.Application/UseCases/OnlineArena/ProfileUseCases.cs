@@ -30,6 +30,7 @@ public class InitOnlineProfileUseCase
         Id = profile.Id,
         UserId = profile.UserId,
         PuzzleTypeId = puzzleTypeId,
+        DisplayName = profile.User?.DisplayName ?? string.Empty,
         Elo = profile.EloStandard,
         PeakElo = profile.PeakEloStandard,
         PlacementMatchesDone = profile.PlacementMatchesDoneStandard,
