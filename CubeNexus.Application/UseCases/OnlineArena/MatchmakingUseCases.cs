@@ -610,6 +610,9 @@ public class ApplyConfirmationTimeoutUseCase
 
         await _uow.SaveChangesAsync(ct);
 
+        var p1Profile = await _profileRepo.GetProfileAsync(confirmation.Player1UserId, confirmation.PuzzleTypeId);
+        var p2Profile = await _profileRepo.GetProfileAsync(confirmation.Player2UserId, confirmation.PuzzleTypeId);
+
         // Notify both players — requeueAvailable so frontend can show "Search again" button
         await _notifier.NotifyMatchConfirmationExpiredAsync(
             confirmation.Player1UserId,
@@ -619,34 +622,34 @@ public class ApplyConfirmationTimeoutUseCase
                 confirmationId = confirmation.Id,
                 reason,
                 requeueAvailable = true,  // backend does NOT auto-requeue
+                player1UserId = confirmation.Player1UserId,
+                player2UserId = confirmation.Player2UserId,
                 player1Confirmed = p1DidConfirm,
                 player2Confirmed = p2DidConfirm,
+                player1CooldownUntil = p1Profile?.MatchmakingCooldownUntil,
+                player2CooldownUntil = p2Profile?.MatchmakingCooldownUntil,
                 serverNow = DateTime.UtcNow
             });
 
         // Apply cooldown notification to non-confirming players
-        if (!p1DidConfirm)
+        if (!p1DidConfirm && p1Profile != null)
         {
-            var p1Profile = await _profileRepo.GetProfileAsync(confirmation.Player1UserId, confirmation.PuzzleTypeId);
-            if (p1Profile != null)
-                await _notifier.NotifyMatchmakingCooldownAppliedAsync(confirmation.Player1UserId, new
-                {
-                    reason = "FAILED_TO_CONFIRM",
-                    cooldownUntil = p1Profile.MatchmakingCooldownUntil,
-                    serverNow = DateTime.UtcNow
-                });
+            await _notifier.NotifyMatchmakingCooldownAppliedAsync(confirmation.Player1UserId, new
+            {
+                reason = "FAILED_TO_CONFIRM",
+                cooldownUntil = p1Profile.MatchmakingCooldownUntil,
+                serverNow = DateTime.UtcNow
+            });
         }
 
-        if (!p2DidConfirm)
+        if (!p2DidConfirm && p2Profile != null)
         {
-            var p2Profile = await _profileRepo.GetProfileAsync(confirmation.Player2UserId, confirmation.PuzzleTypeId);
-            if (p2Profile != null)
-                await _notifier.NotifyMatchmakingCooldownAppliedAsync(confirmation.Player2UserId, new
-                {
-                    reason = "FAILED_TO_CONFIRM",
-                    cooldownUntil = p2Profile.MatchmakingCooldownUntil,
-                    serverNow = DateTime.UtcNow
-                });
+            await _notifier.NotifyMatchmakingCooldownAppliedAsync(confirmation.Player2UserId, new
+            {
+                reason = "FAILED_TO_CONFIRM",
+                cooldownUntil = p2Profile.MatchmakingCooldownUntil,
+                serverNow = DateTime.UtcNow
+            });
         }
     }
 
