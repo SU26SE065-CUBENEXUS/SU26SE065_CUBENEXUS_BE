@@ -22,7 +22,7 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationByStationUseCase
     }
 
     // New verify-by-station flow (resolving GroupId automatically)
-    public async Task<VerifyJudgeStationResponseDto> ExecuteAsync(VerifyJudgeStationByStationDto dto, CancellationToken ct = default)
+    public async Task<VerifyJudgeStationResponseDto> ExecuteAsync(VerifyJudgeStationByStationDto dto, Guid? judgeUserId = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(dto.QrToken))
             throw new CustomException("INVALID_QR_TOKEN", "QR code token is empty.", 400);
@@ -68,6 +68,20 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationByStationUseCase
             registration = await _unitOfWork.Registrations.GetByQrTokenAsync(dto.QrToken, ct);
             if (registration == null)
                 throw new CustomException("INVALID_QR_TOKEN", "Invalid QR code credentials.", 400);
+        }
+
+        if (judgeUserId.HasValue)
+        {
+            var caller = await _unitOfWork.Users.GetByIdAsync(judgeUserId.Value, ct);
+            if (caller != null && string.Equals(caller.UserRole, "JUDGE", StringComparison.OrdinalIgnoreCase))
+            {
+                var isAssigned = await _unitOfWork.TournamentJudges.AnyAsync(
+                    tj => tj.TournamentId == registration.TournamentId && tj.UserId == judgeUserId.Value, ct);
+                if (!isAssigned)
+                {
+                    throw new CustomException("JUDGE_NOT_ASSIGNED_TO_TOURNAMENT", "Trọng tài không có quyền quét xác nhận thí sinh cho giải đấu này.", 403);
+                }
+            }
         }
 
         if (registration.StatusCode == "CANCELLED")

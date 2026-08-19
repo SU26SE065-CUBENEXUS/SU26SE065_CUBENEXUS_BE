@@ -245,23 +245,6 @@ builder.Services.AddRateLimiter(options =>
 
 var app = builder.Build();
 
-// Auto-migrate new events table schema columns
-using (var scope = app.Services.CreateScope())
-{
-    try
-    {
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        db.Database.ExecuteSqlRaw(@"
-            ALTER TABLE events ADD COLUMN IF NOT EXISTS total_rounds INTEGER NOT NULL DEFAULT 1;
-            ALTER TABLE events ADD COLUMN IF NOT EXISTS advance_top_n INTEGER NOT NULL DEFAULT 16;
-        ");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[Schema Migration Warning] {ex.Message}");
-    }
-}
-
 // Initialize the MatchTransitionScheduler static helper for RAM-based timers
 CubeNexus.Application.UseCases.OnlineArena.MatchTransitionScheduler.Instance = 
     app.Services.GetRequiredService<CubeNexus.Application.UseCases.OnlineArena.IMatchTransitionScheduler>();

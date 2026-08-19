@@ -219,6 +219,14 @@ public class AdminTournamentService : IAdminTournamentService
             else if (normalizedStatus == "CHECKING_IN")
             {
                 isValidTransition = currentStatus == "REGISTRATION_CLOSED" && t.TournamentType != "ONLINE_ASYNC";
+                if (isValidTransition)
+                {
+                    var hasJudges = await _context.TournamentJudges.AnyAsync(tj => tj.TournamentId == id, ct);
+                    if (!hasJudges)
+                    {
+                        throw new InvalidOperationException("Tournament has no judge accounts created. Please create judge accounts before opening Check-in.");
+                    }
+                }
             }
             else if (normalizedStatus == "ONGOING")
             {

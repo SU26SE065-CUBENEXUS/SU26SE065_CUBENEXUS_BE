@@ -4,5 +4,5 @@ namespace CubeNexus.Application.Interfaces.UseCases.TournamentOperation;
 
 public interface ICheckInRegistrationByQrUseCase
 {
-    Task<CheckInResponseDto> ExecuteAsync(CheckInRequestDto dto);
+    Task<CheckInResponseDto> ExecuteAsync(CheckInRequestDto dto, Guid? judgeUserId = null);
 }

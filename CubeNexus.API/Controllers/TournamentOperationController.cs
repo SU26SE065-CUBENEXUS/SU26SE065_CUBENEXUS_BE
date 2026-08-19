@@ -154,7 +154,14 @@ public class TournamentOperationController : ControllerBase
     {
         try
         {
-            var result = await _checkInUseCase.ExecuteAsync(dto);
+            Guid? judgeUserId = null;
+            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (Guid.TryParse(userIdStr, out var parsedUserId))
+            {
+                judgeUserId = parsedUserId;
+            }
+
+            var result = await _checkInUseCase.ExecuteAsync(dto, judgeUserId);
 
             // Push real-time notification to competitor's mobile via SignalR
             // The competitor listens on group "competitor:{registrationId}"
@@ -412,6 +419,20 @@ public class TournamentOperationController : ControllerBase
     {
         try
         {
+            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (Guid.TryParse(userIdStr, out var userId))
+            {
+                var caller = await _unitOfWork.Users.GetByIdAsync(userId, ct);
+                if (caller != null && string.Equals(caller.UserRole, "JUDGE", StringComparison.OrdinalIgnoreCase))
+                {
+                    var isAssigned = await _unitOfWork.TournamentJudges.AnyAsync(tj => tj.TournamentId == tournamentId && tj.UserId == userId, ct);
+                    if (!isAssigned)
+                    {
+                        return StatusCode(403, new { message = "Trọng tài không có quyền xem danh sách giải đấu này." });
+                    }
+                }
+            }
+
             var registrations = await _unitOfWork.Registrations.FindAsync(
                 r => r.TournamentId == tournamentId &&
                      (r.StatusCode == "CONFIRMED" || r.StatusCode == "CHECKED_IN"),
@@ -454,7 +475,14 @@ public class TournamentOperationController : ControllerBase
     {
         try
         {
-            var result = await _verifyJudgeStationByStationUseCase.ExecuteAsync(dto, ct);
+            Guid? judgeUserId = null;
+            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (Guid.TryParse(userIdStr, out var parsedUserId))
+            {
+                judgeUserId = parsedUserId;
+            }
+
+            var result = await _verifyJudgeStationByStationUseCase.ExecuteAsync(dto, judgeUserId, ct);
             return Ok(result);
         }
         catch (CubeNexus.Application.Exceptions.CustomException ex)
@@ -481,7 +509,14 @@ public class TournamentOperationController : ControllerBase
     {
         try
         {
-            var result = await _operationService.GetJudgeStationRosterAsync(eventId, roundNumber, groupNumber, stationNumber, ct);
+            Guid? judgeUserId = null;
+            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (Guid.TryParse(userIdStr, out var parsedUserId))
+            {
+                judgeUserId = parsedUserId;
+            }
+
+            var result = await _operationService.GetJudgeStationRosterAsync(eventId, roundNumber, groupNumber, stationNumber, judgeUserId, ct);
             return Ok(result);
         }
         catch (CubeNexus.Application.Exceptions.CustomException ex)

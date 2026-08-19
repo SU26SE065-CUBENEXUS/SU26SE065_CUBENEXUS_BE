@@ -18,7 +18,7 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
         _unitOfWork = unitOfWork;
     }
 
-    public async Task<CheckInResponseDto> ExecuteAsync(CheckInRequestDto dto)
+    public async Task<CheckInResponseDto> ExecuteAsync(CheckInRequestDto dto, Guid? judgeUserId = null)
     {
         if (string.IsNullOrWhiteSpace(dto.QrToken))
         {
@@ -71,6 +71,20 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
         if (registration == null)
         {
             throw new CustomException("QR_INVALID", "Invalid QR code credentials or token mismatch.", 400);
+        }
+
+        if (judgeUserId.HasValue)
+        {
+            var caller = await _unitOfWork.Users.GetByIdAsync(judgeUserId.Value);
+            if (caller != null && string.Equals(caller.UserRole, "JUDGE", StringComparison.OrdinalIgnoreCase))
+            {
+                var isAssigned = await _unitOfWork.TournamentJudges.AnyAsync(
+                    tj => tj.TournamentId == registration.TournamentId && tj.UserId == judgeUserId.Value);
+                if (!isAssigned)
+                {
+                    throw new CustomException("JUDGE_NOT_ASSIGNED_TO_TOURNAMENT", "Trọng tài không có quyền điểm danh thí sinh cho giải đấu này.", 403);
+                }
+            }
         }
 
         if (registration.Tournament.StatusCode != "CHECKING_IN" && registration.Tournament.StatusCode != "ONGOING")

@@ -39,6 +39,20 @@ public sealed class AdminScrambleController : ControllerBase
     public Task<IActionResult> Retire(Guid id, CancellationToken ct) =>
         ExecuteAsync(() => _service.RetireAsync(id, GetUserId(), ct));
 
+    [HttpGet("mode")]
+    public async Task<IActionResult> GetMode(CancellationToken ct)
+    {
+        var mode = await _service.GetScrambleGenerationModeAsync(ct);
+        return Ok(new { mode });
+    }
+
+    [HttpPost("mode")]
+    public async Task<IActionResult> SetMode([FromBody] SetScrambleModeRequest request, CancellationToken ct)
+    {
+        var mode = await _service.SetScrambleGenerationModeAsync(request.Mode, GetUserId(), ct);
+        return Ok(new { mode });
+    }
+
     private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action)
     {
         try
@@ -69,4 +83,9 @@ public sealed class AdminScrambleController : ControllerBase
                   User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(raw, out var id) ? id : throw new UnauthorizedAccessException("Token không chứa user id hợp lệ.");
     }
+}
+
+public class SetScrambleModeRequest
+{
+    public string Mode { get; set; } = "MANUAL";
 }
