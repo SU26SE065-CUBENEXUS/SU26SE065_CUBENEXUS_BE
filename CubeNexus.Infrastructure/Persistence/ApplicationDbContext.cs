@@ -63,6 +63,10 @@ public class ApplicationDbContext : DbContext
     // 8. User Tokens (email confirmation, password reset)
     public DbSet<UserToken> UserTokens => Set<UserToken>();
 
+    // 9. Face verification (business state; templates live in FastAPI)
+    public DbSet<FaceEnrollment> FaceEnrollments => Set<FaceEnrollment>();
+    public DbSet<FaceVerificationSession> FaceVerificationSessions => Set<FaceVerificationSession>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -107,6 +111,8 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<Notification>().ToTable("notifications");
         modelBuilder.Entity<RefreshToken>().ToTable("refresh_tokens");
         modelBuilder.Entity<UserToken>().ToTable("user_tokens");
+        modelBuilder.Entity<FaceEnrollment>().ToTable("face_enrollments");
+        modelBuilder.Entity<FaceVerificationSession>().ToTable("face_verification_sessions");
 
         // Configure relationships with multiple FK to User
         modelBuilder.Entity<Tournament>(entity =>
@@ -141,8 +147,25 @@ public class ApplicationDbContext : DbContext
         {
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
             entity.HasOne(e => e.Tournament).WithMany(t => t.Registrations).HasForeignKey(e => e.TournamentId);
+            entity.HasOne(e => e.FaceVerificationSession).WithMany().HasForeignKey(e => e.FaceVerificationSessionId).OnDelete(DeleteBehavior.SetNull);
             // Index to speed up participant count queries per tournament
             entity.HasIndex(e => new { e.TournamentId, e.StatusCode }).HasDatabaseName("ix_registrations_tournament_status");
+        });
+
+        modelBuilder.Entity<FaceEnrollment>(entity =>
+        {
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.UserId).IsUnique();
+        });
+
+        modelBuilder.Entity<FaceVerificationSession>(entity =>
+        {
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Tournament).WithMany().HasForeignKey(e => e.TournamentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.Registration).WithMany().HasForeignKey(e => e.RegistrationId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.InitiatedByUser).WithMany().HasForeignKey(e => e.InitiatedByUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => e.ExternalSessionId);
+            entity.HasIndex(e => e.RegistrationId);
         });
 
         modelBuilder.Entity<OfflineRegistrationEvent>(entity =>

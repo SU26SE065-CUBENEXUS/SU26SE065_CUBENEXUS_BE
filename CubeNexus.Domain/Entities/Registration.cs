@@ -9,8 +9,11 @@ public class Registration
     public string QrToken { get; set; } = string.Empty;
     public DateTime RegisteredAt { get; set; }
     public DateTime? CheckedInAt { get; set; }
+    public DateTime? FaceVerifiedAt { get; set; }
+    public Guid? FaceVerificationSessionId { get; set; }
 
     public Tournament Tournament { get; set; } = null!;
     public User User { get; set; } = null!;
+    public FaceVerificationSession? FaceVerificationSession { get; set; }
     public ICollection<OfflineRegistrationEvent> OfflineRegistrationEvents { get; set; } = new List<OfflineRegistrationEvent>();
 }

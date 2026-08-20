@@ -10,7 +10,8 @@
 -- Manual install:
 --   psql -h localhost -p 5432 -U cubenexus -d CubeNexus -f scripts/init-db.sql
 --
--- This file contains the complete latest schema for a brand-new database.
+-- This file contains the complete latest schema for a brand-new database
+-- (including face_enrollments, face_verification_sessions, hieu2 tables).
 -- Existing database (created before this version):
 --   Apply only migrations newer than the schema version already deployed.
 --   Or reset dev DB: docker compose down -v && docker compose up -d
@@ -342,6 +343,8 @@ CREATE TABLE IF NOT EXISTS registrations (
     qr_token TEXT UNIQUE NOT NULL,
     registered_at TIMESTAMPTZ NOT NULL,
     checked_in_at TIMESTAMPTZ,
+    face_verified_at TIMESTAMPTZ,
+    face_verification_session_id UUID,
 
     CONSTRAINT uq_registrations_tournament_user
         UNIQUE (tournament_id, user_id),
@@ -1228,6 +1231,77 @@ ON user_tokens(token_hash);
 
 CREATE INDEX IF NOT EXISTS idx_user_tokens_expires
 ON user_tokens(expires_at);
+
+
+-- =========================================================
+-- 7.1 FACE VERIFICATION (offline check-in / profile enroll)
+-- Business enrollment + session state. Embeddings stay in FastAPI.
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS face_enrollments (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'ENROLLED',
+    model_version TEXT,
+    quality_score DOUBLE PRECISION,
+    templates_count INTEGER NOT NULL DEFAULT 0,
+    last_external_session_id TEXT,
+    enrolled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_face_enrollments_status
+        CHECK (status IN ('ENROLLED', 'REVOKED'))
+);
+
+CREATE INDEX IF NOT EXISTS ix_face_enrollments_status
+ON face_enrollments(status);
+
+CREATE TABLE IF NOT EXISTS face_verification_sessions (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    purpose TEXT NOT NULL,
+    context_type TEXT NOT NULL,
+    tournament_id UUID REFERENCES tournaments(id) ON DELETE SET NULL,
+    registration_id UUID REFERENCES registrations(id) ON DELETE SET NULL,
+    initiated_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    external_session_id TEXT NOT NULL,
+    upload_token TEXT NOT NULL,
+    challenge_json TEXT,
+    state TEXT NOT NULL DEFAULT 'POSITIONING',
+    result_json TEXT,
+    failure_reason TEXT,
+    liveness_passed BOOLEAN,
+    face_matched BOOLEAN,
+    similarity DOUBLE PRECISION,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+
+    CONSTRAINT ck_face_verification_sessions_purpose
+        CHECK (purpose IN ('ENROLLMENT', 'VERIFICATION')),
+
+    CONSTRAINT ck_face_verification_sessions_context
+        CHECK (context_type IN ('PROFILE', 'CHECK_IN', 'STATION', 'LOGIN'))
+);
+
+CREATE INDEX IF NOT EXISTS ix_face_verification_sessions_user_id
+ON face_verification_sessions(user_id);
+
+CREATE INDEX IF NOT EXISTS ix_face_verification_sessions_external_session_id
+ON face_verification_sessions(external_session_id);
+
+CREATE INDEX IF NOT EXISTS ix_face_verification_sessions_registration_id
+ON face_verification_sessions(registration_id);
+
+CREATE INDEX IF NOT EXISTS ix_face_verification_sessions_state
+ON face_verification_sessions(state);
+
+ALTER TABLE registrations
+    ADD CONSTRAINT fk_registrations_face_verification_session
+    FOREIGN KEY (face_verification_session_id)
+    REFERENCES face_verification_sessions(id)
+    ON DELETE SET NULL;
+
 
 CREATE INDEX IF NOT EXISTS idx_offline_registration_events_event_seed
 ON offline_registration_events(event_id, seed_time_ms);
