@@ -1,17 +1,21 @@
 using CubeNexus.Application.DTOs.Admin;
 using CubeNexus.Application.Interfaces.Services;
+using CubeNexus.Domain.Entities;
 using CubeNexus.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace CubeNexus.Infrastructure.Services;
 
 public class AdminTournamentService : IAdminTournamentService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IRealtimeNotifier _realtimeNotifier;
 
-    public AdminTournamentService(ApplicationDbContext context)
+    public AdminTournamentService(ApplicationDbContext context, IRealtimeNotifier realtimeNotifier)
     {
         _context = context;
+        _realtimeNotifier = realtimeNotifier;
     }
 
     public async Task<AdminTournamentPagedResultDto> GetTournamentsAsync(
@@ -254,6 +258,44 @@ public class AdminTournamentService : IAdminTournamentService
         t.StatusCode = normalizedStatus;
         t.UpdatedAt = DateTime.UtcNow;
 
+        Notification? statusNotification = null;
+        if (currentStatus != normalizedStatus)
+        {
+            var adminIds = await _context.Users
+                .Where(u => u.UserRole == "ADMIN" && u.IsActive && !u.IsBanned)
+                .Select(u => u.Id)
+                .ToListAsync(ct);
+
+            var title = $"Tournament status changed: {normalizedStatus.Replace('_', ' ')}";
+            var body = $"{t.Name} changed from {currentStatus} to {normalizedStatus}.";
+            var payload = JsonSerializer.Serialize(new
+            {
+                tournamentId = t.Id,
+                tournamentName = t.Name,
+                previousStatus = currentStatus,
+                statusCode = normalizedStatus
+            });
+
+            var createdAt = DateTime.UtcNow;
+            var notifications = adminIds.Select(adminId => new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = adminId,
+                TypeCode = "TOURNAMENT_STATUS_CHANGED",
+                Title = title,
+                Body = body,
+                Payload = payload,
+                IsRead = false,
+                CreatedAt = createdAt
+            }).ToList();
+
+            if (notifications.Count > 0)
+            {
+                _context.Notifications.AddRange(notifications);
+                statusNotification = notifications[0];
+            }
+        }
+
         if (normalizedStatus == "REGISTRATION_OPEN")
         {
             if (t.RegistrationOpenAt > DateTime.UtcNow)
@@ -334,6 +376,19 @@ public class AdminTournamentService : IAdminTournamentService
         }
 
         await _context.SaveChangesAsync(ct);
+
+        if (statusNotification != null)
+        {
+            await _realtimeNotifier.BroadcastAdminNotificationAsync(new
+            {
+                id = statusNotification.Id,
+                typeCode = statusNotification.TypeCode,
+                title = statusNotification.Title,
+                body = statusNotification.Body,
+                payload = statusNotification.Payload,
+                createdAt = statusNotification.CreatedAt
+            }, ct);
+        }
 
         var regCount = await _context.Registrations
             .AsNoTracking()

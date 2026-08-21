@@ -99,6 +99,24 @@ public class FaceVerificationController : ControllerBase
         }
     }
 
+    /// <summary>Competitor: validate tournament/registration, then start Face Verification before showing QR.</summary>
+    [HttpPost("api/face-verification/competitor/check-in/sessions")]
+    [Authorize(Roles = "COMPETITOR")]
+    public async Task<IActionResult> StartCompetitorCheckInSession(
+        [FromBody] StartCompetitorCheckInFaceRequestDto dto,
+        CancellationToken ct)
+    {
+        try
+        {
+            var userId = RequireUserId();
+            return Ok(await _service.StartCompetitorCheckInVerificationAsync(userId, dto.TournamentId, ct));
+        }
+        catch (CustomException ex)
+        {
+            return StatusCode(ex.StatusCode, new { errorCode = ex.ErrorCode, message = ex.Message });
+        }
+    }
+
     /// <summary>Judge desk: QR → create face verification session for that competitor.</summary>
     [HttpPost("api/face-verification/check-in/sessions")]
     [Authorize(Roles = "JUDGE,MANAGER,ADMIN")]

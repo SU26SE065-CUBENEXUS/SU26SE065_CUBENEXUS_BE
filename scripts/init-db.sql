@@ -1167,7 +1167,7 @@ ON practice_solves(solved_at DESC);
 
 CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     type_code VARCHAR(50) NOT NULL,
     title VARCHAR(255) NOT NULL,
     body TEXT,
@@ -1178,6 +1178,10 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notifications_user_read
+ON notifications(user_id, is_read, created_at DESC);
+
+-- Supports the admin unread-notification query efficiently.
+CREATE INDEX IF NOT EXISTS ix_notifications_user_unread_created
 ON notifications(user_id, is_read, created_at DESC);
 
 

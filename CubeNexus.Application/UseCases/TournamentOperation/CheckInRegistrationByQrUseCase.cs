@@ -13,14 +13,10 @@ namespace CubeNexus.Application.UseCases.TournamentOperation;
 public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
 {
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IFaceVerificationService _faceVerificationService;
-
     public CheckInRegistrationByQrUseCase(
-        IUnitOfWork unitOfWork,
-        IFaceVerificationService faceVerificationService)
+        IUnitOfWork unitOfWork)
     {
         _unitOfWork = unitOfWork;
-        _faceVerificationService = faceVerificationService;
     }
 
     public async Task<CheckInResponseDto> ExecuteAsync(CheckInRequestDto dto, Guid? judgeUserId = null)
@@ -148,24 +144,8 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
             return response;
         }
 
-        if (!dto.FaceVerificationSessionId.HasValue)
-        {
-            await _faceVerificationService.EnsureCheckInFaceGateAsync(null, registration.Id);
-        }
-        else
-        {
-            await _faceVerificationService.EnsureCheckInFaceGateAsync(
-                dto.FaceVerificationSessionId.Value,
-                registration.Id);
-        }
-
         registration.StatusCode = "CHECKED_IN";
         registration.CheckedInAt = DateTime.UtcNow;
-        if (dto.FaceVerificationSessionId.HasValue)
-        {
-            registration.FaceVerifiedAt = DateTime.UtcNow;
-            registration.FaceVerificationSessionId = dto.FaceVerificationSessionId.Value;
-        }
 
         _unitOfWork.Registrations.Update(registration);
         await _unitOfWork.SaveChangesAsync();

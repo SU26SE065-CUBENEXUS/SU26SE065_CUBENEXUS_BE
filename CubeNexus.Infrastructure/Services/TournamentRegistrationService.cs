@@ -42,6 +42,18 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         if (await _unitOfWork.Registrations.HasUserRegisteredAsync(tournamentId, userId, ct))
             throw new InvalidOperationException("User is already registered for this tournament.");
 
+        // Check Face ID enrollment requirement
+        var hasFaceEnrolled = await _unitOfWork.FaceEnrollments.AnyAsync(
+            f => f.UserId == userId && f.Status == "ENROLLED",
+            ct
+        );
+        if (!hasFaceEnrolled)
+        {
+            throw new InvalidOperationException(
+                "Bạn cần phải hoàn tất đăng ký Face ID trong Hồ sơ cá nhân (Profile -> Face ID) trước khi đăng ký tham gia giải đấu."
+            );
+        }
+
         // Check for schedule overlap with other registered active tournaments
         var userRegs = await _unitOfWork.Registrations.FindAsync(
             r => r.UserId == userId && r.TournamentId != tournamentId && r.StatusCode != "CANCELLED",
@@ -169,7 +181,7 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             .GroupBy(r => r.GroupCompetitorId)
             .ToDictionary(g => g.Key, g => g.OrderBy(r => r.SolveNumber).ToList());
 
-        return registrations.Select(r => MapToDto(r, gcList, groupMap, resultMap)).ToList();
+        return registrations.Select(r => MapToDto(r, gcList, groupMap, resultMap, includeQrToken: false)).ToList();
     }
 
     public async Task<RegistrationResultDto> GetUserRegistrationByIdAsync(Guid registrationId, Guid userId, CancellationToken ct = default)
@@ -198,7 +210,7 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             .GroupBy(r => r.GroupCompetitorId)
             .ToDictionary(g => g.Key, g => g.OrderBy(r => r.SolveNumber).ToList());
 
-        return MapToDto(reg, gcList, groupMap, resultMap);
+        return MapToDto(reg, gcList, groupMap, resultMap, includeQrToken: false);
     }
 
     private RegistrationResultDto MapToDto(Registration r)
@@ -210,7 +222,8 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         Registration r, 
         List<GroupCompetitor> gcList, 
         Dictionary<Guid, Group> groupMap,
-        Dictionary<Guid, List<Result>> resultMap
+        Dictionary<Guid, List<Result>> resultMap,
+        bool includeQrToken = true
     )
     {
         return new RegistrationResultDto
@@ -221,7 +234,7 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             UserId = r.UserId,
             StatusCode = r.StatusCode,
             RegisteredAt = r.RegisteredAt,
-            QrToken = r.QrToken,
+            QrToken = includeQrToken ? r.QrToken : null,
             TournamentStartDate = r.Tournament?.StartDate,
             TournamentEndDate = r.Tournament?.EndDate,
             TournamentStatusCode = r.Tournament?.StatusCode ?? string.Empty,

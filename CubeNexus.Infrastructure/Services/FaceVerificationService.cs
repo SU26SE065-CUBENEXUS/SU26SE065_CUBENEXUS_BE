@@ -136,6 +136,24 @@ public class FaceVerificationService : IFaceVerificationService
             throw new CustomException("QR_INVALID", "Invalid QR code credentials or token mismatch.", 400);
         }
 
+        // Basic check-in conditions must pass before any Face Verification session is created.
+        if (string.Equals(registration.StatusCode, "CANCELLED", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CustomException("REGISTRATION_CANCELLED", "This registration has been cancelled.", 400);
+        }
+
+        if (!string.Equals(registration.StatusCode, "CONFIRMED", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(registration.StatusCode, "CHECKED_IN", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CustomException("REGISTRATION_NOT_CONFIRMED", "Only a confirmed registration can proceed to check-in.", 400);
+        }
+
+        if (!string.Equals(registration.Tournament.StatusCode, "CHECKING_IN", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(registration.Tournament.StatusCode, "ONGOING", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CustomException("INVALID_TOURNAMENT_STATE", "Face Verification is available only while the tournament is CHECKING_IN or ONGOING.", 400);
+        }
+
         if (judgeUserId.HasValue)
         {
             await EnsureJudgeAssignedAsync(judgeUserId.Value, registration.TournamentId);
@@ -172,6 +190,91 @@ public class FaceVerificationService : IFaceVerificationService
             tournamentId: registration.TournamentId,
             registrationId: registration.Id,
             initiatedByUserId: judgeUserId,
+            ai: ai,
+            ct);
+
+        return ToStartResponse(
+            session,
+            playerName: registration.User.DisplayName,
+            faceEnrolled: true);
+    }
+
+    public async Task<FaceSessionStartResponseDto> StartCompetitorCheckInVerificationAsync(
+        Guid userId,
+        Guid tournamentId,
+        CancellationToken ct = default)
+    {
+        var registration = await _db.Registrations
+            .Include(r => r.User)
+            .Include(r => r.Tournament)
+            .FirstOrDefaultAsync(r => r.UserId == userId && r.TournamentId == tournamentId, ct);
+
+        if (registration is null)
+        {
+            throw new CustomException(
+                "REGISTRATION_NOT_FOUND",
+                "You are not registered for this tournament.",
+                404);
+        }
+
+        // CANCELLED remains a valid registration state in the system, but it can
+        // never pass the competitor QR gate. Competitors do not change this state here.
+        if (string.Equals(registration.StatusCode, "CANCELLED", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CustomException(
+                "REGISTRATION_CANCELLED",
+                "This registration has been cancelled.",
+                400);
+        }
+
+        if (!string.Equals(registration.StatusCode, "CONFIRMED", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(registration.StatusCode, "CHECKED_IN", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CustomException(
+                "REGISTRATION_NOT_CONFIRMED",
+                "Only a confirmed registration can open a check-in QR ticket.",
+                400);
+        }
+
+        if (!string.Equals(registration.Tournament.StatusCode, "CHECKING_IN", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(registration.Tournament.StatusCode, "ONGOING", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CustomException(
+                "INVALID_TOURNAMENT_STATE",
+                "QR check-in is available only while the tournament is CHECKING_IN or ONGOING.",
+                400);
+        }
+
+        var enrollment = await _db.FaceEnrollments.AsNoTracking()
+            .FirstOrDefaultAsync(e => e.UserId == userId && e.Status == "ENROLLED", ct);
+        if (enrollment is null)
+        {
+            throw new CustomException(
+                "FACE_NOT_ENROLLED",
+                "Please register Face ID in Profile before opening the check-in QR.",
+                409);
+        }
+
+        var ai = await _client.CreateVerificationSessionAsync(new FaceAiCreateSessionRequest
+        {
+            UserId = userId.ToString(),
+            CallbackUrl = BuildCallbackUrl(),
+            Metadata = new Dictionary<string, object?>
+            {
+                ["verificationType"] = "CHECK_IN",
+                ["registrationId"] = registration.Id.ToString(),
+                ["tournamentId"] = tournamentId.ToString(),
+                ["source"] = "cubenexus-api-competitor",
+            },
+        }, ct);
+
+        var session = await PersistSessionAsync(
+            userId: userId,
+            purpose: "VERIFICATION",
+            contextType: "CHECK_IN",
+            tournamentId: tournamentId,
+            registrationId: registration.Id,
+            initiatedByUserId: userId,
             ai: ai,
             ct);
 

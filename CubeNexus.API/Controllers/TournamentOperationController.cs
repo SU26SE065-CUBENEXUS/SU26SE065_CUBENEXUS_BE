@@ -25,6 +25,7 @@ public class TournamentOperationController : ControllerBase
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase _verifyJudgeStationByStationUseCase;
     private readonly CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase _correctResultUseCase;
     private readonly CubeNexus.Application.Interfaces.Repositories.IUnitOfWork _unitOfWork;
+    private readonly IFaceVerificationService _faceVerificationService;
     private readonly IHubContext<TournamentHub> _hubContext;
 
     public TournamentOperationController(
@@ -38,7 +39,8 @@ public class TournamentOperationController : ControllerBase
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase verifyJudgeStationByStationUseCase,
         CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase correctResultUseCase,
         CubeNexus.Application.Interfaces.Repositories.IUnitOfWork unitOfWork,
-        IHubContext<TournamentHub> hubContext)
+        IHubContext<TournamentHub> hubContext,
+        IFaceVerificationService faceVerificationService)
     {
         _operationService = operationService;
         _checkInUseCase = checkInUseCase;
@@ -51,6 +53,7 @@ public class TournamentOperationController : ControllerBase
         _correctResultUseCase = correctResultUseCase;
         _unitOfWork = unitOfWork;
         _hubContext = hubContext;
+        _faceVerificationService = faceVerificationService;
     }
 
     /// <summary>
@@ -379,8 +382,11 @@ public class TournamentOperationController : ControllerBase
     /// Lấy mã QR ticket của competitor đã đăng ký giải đấu (COMPETITOR, JUDGE, MANAGER, ADMIN).
     /// </summary>
     [HttpGet("api/tournament-operation/competitor/qr-ticket")]
-    [Authorize]
-    public async Task<IActionResult> GetCompetitorQrTicket([FromQuery] Guid tournamentId, CancellationToken ct)
+    [Authorize(Roles = "COMPETITOR")]
+    public async Task<IActionResult> GetCompetitorQrTicket(
+        [FromQuery] Guid tournamentId,
+        [FromQuery] Guid faceVerificationSessionId,
+        CancellationToken ct)
     {
         try
         {
@@ -395,6 +401,24 @@ public class TournamentOperationController : ControllerBase
 
             if (registration == null)
                 return NotFound(new { message = "You are not registered for this tournament." });
+
+            if (registration.StatusCode == "CANCELLED")
+                return BadRequest(new { errorCode = "REGISTRATION_CANCELLED", message = "This registration has been cancelled." });
+
+            if (registration.StatusCode != "CONFIRMED" && registration.StatusCode != "CHECKED_IN")
+                return BadRequest(new { errorCode = "REGISTRATION_NOT_CONFIRMED", message = "Only a confirmed registration can open a QR ticket." });
+
+            var tournament = await _unitOfWork.Tournaments.GetByIdAsync(tournamentId, ct);
+            if (tournament is null)
+                return NotFound(new { message = "Tournament not found." });
+
+            if (tournament.StatusCode != "CHECKING_IN" && tournament.StatusCode != "ONGOING")
+                return BadRequest(new { errorCode = "INVALID_TOURNAMENT_STATE", message = "QR check-in is available only while the tournament is CHECKING_IN or ONGOING." });
+
+            await _faceVerificationService.EnsureValidCheckInFaceSessionAsync(
+                faceVerificationSessionId,
+                registration.Id,
+                ct);
 
             return Ok(new
             {

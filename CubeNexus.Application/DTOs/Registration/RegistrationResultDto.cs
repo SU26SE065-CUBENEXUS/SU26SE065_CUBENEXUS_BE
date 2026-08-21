@@ -10,10 +10,10 @@ public class RegistrationResultDto
     public Guid UserId { get; set; }
     public string StatusCode { get; set; } = string.Empty;
     public DateTime RegisteredAt { get; set; }
-    
-    // Serialized JSON of RegistrationQrPayload or similar representation
-    public string QrToken { get; set; } = string.Empty;
 
+    // Deliberately omitted from the competitor registration list; returned only by the Face-gated QR endpoint.
+    public string? QrToken { get; set; }
+    
     public DateTime? TournamentStartDate { get; set; }
     public DateTime? TournamentEndDate { get; set; }
     public string TournamentStatusCode { get; set; } = string.Empty;

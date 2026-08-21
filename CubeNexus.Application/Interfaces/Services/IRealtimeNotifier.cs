@@ -11,4 +11,5 @@ public interface IRealtimeNotifier
     Task BroadcastResultCorrectedAsync(ResultCorrectedEventDto payload, CancellationToken ct = default);
     Task SendStationCommandAsync(Guid eventId, int roundNumber, int stationNumber, string command, object? data = null, CancellationToken ct = default);
     Task BroadcastScramblePoolDepletedAsync(object payload, CancellationToken ct = default);
+    Task BroadcastAdminNotificationAsync(object payload, CancellationToken ct = default);
 }

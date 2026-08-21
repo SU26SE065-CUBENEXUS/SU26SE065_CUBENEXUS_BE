@@ -21,6 +21,12 @@ public interface IFaceVerificationService
         Guid? judgeUserId,
         CancellationToken ct = default);
 
+    /// <summary>Competitor: validate own registration and start a face gate before displaying its QR ticket.</summary>
+    Task<FaceSessionStartResponseDto> StartCompetitorCheckInVerificationAsync(
+        Guid userId,
+        Guid tournamentId,
+        CancellationToken ct = default);
+
     /// <summary>Competitor self-test: verify live face against their enrolled Face ID template.</summary>
     Task<FaceSessionStartResponseDto> StartSelfTestVerificationAsync(Guid userId, CancellationToken ct = default);
 

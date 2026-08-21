@@ -117,4 +117,16 @@ public class RealtimeNotifier : IRealtimeNotifier
             Console.WriteLine($"[Realtime Hub ERROR] Failed to broadcast ScramblePoolDepleted: {ex.Message}");
         }
     }
+
+    public async Task BroadcastAdminNotificationAsync(object payload, CancellationToken ct = default)
+    {
+        try
+        {
+            await _hubContext.Clients.All.SendAsync("AdminNotificationCreated", payload, ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Realtime Hub ERROR] Failed to broadcast admin notification: {ex.Message}");
+        }
+    }
 }

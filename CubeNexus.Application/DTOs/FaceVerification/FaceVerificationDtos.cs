@@ -59,6 +59,11 @@ public class StartCheckInFaceRequestDto
     public string QrToken { get; set; } = string.Empty;
 }
 
+public class StartCompetitorCheckInFaceRequestDto
+{
+    public Guid TournamentId { get; set; }
+}
+
 public class FaceCallbackRequestDto
 {
     public string SessionId { get; set; } = string.Empty;

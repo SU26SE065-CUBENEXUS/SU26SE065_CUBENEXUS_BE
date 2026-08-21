@@ -31,6 +31,7 @@ public interface IUnitOfWork : IDisposable
     IRepository<ResultAuditLog> ResultAuditLogs { get; }
     IRepository<TournamentJudge> TournamentJudges { get; }
     IRepository<TournamentManager> TournamentManagers { get; }
+    IRepository<FaceEnrollment> FaceEnrollments { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
     Task BeginTransactionAsync();

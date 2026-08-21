@@ -127,6 +127,11 @@ public class UnitOfWork : IUnitOfWork, IAppUnitOfWork
     public IRepository<TournamentManager> TournamentManagers
         => _tournamentManagers ??= new Repository<TournamentManager>(_db);
 
+    private IRepository<FaceEnrollment>? _faceEnrollments;
+
+    public IRepository<FaceEnrollment> FaceEnrollments
+        => _faceEnrollments ??= new Repository<FaceEnrollment>(_db);
+
     // ── Persist ───────────────────────────────────────────────
 
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)
