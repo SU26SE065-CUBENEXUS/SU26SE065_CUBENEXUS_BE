@@ -5,6 +5,7 @@ public class OnlineProfileDto
     public Guid Id { get; set; }
     public Guid UserId { get; set; }
     public Guid PuzzleTypeId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
     public int Elo { get; set; }
     public int? PeakElo { get; set; }
     public int PlacementMatchesDone { get; set; }

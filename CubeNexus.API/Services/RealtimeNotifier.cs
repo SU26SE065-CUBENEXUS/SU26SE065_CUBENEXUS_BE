@@ -104,4 +104,17 @@ public class RealtimeNotifier : IRealtimeNotifier
             Console.WriteLine($"[Realtime Hub ERROR] Failed to send station command: {ex.Message}");
         }
     }
+
+    public async Task BroadcastScramblePoolDepletedAsync(object payload, CancellationToken ct = default)
+    {
+        try
+        {
+            Console.WriteLine("[Realtime Hub] Broadcasting ScramblePoolDepleted to all clients");
+            await _hubContext.Clients.All.SendAsync("ScramblePoolDepleted", payload, ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Realtime Hub ERROR] Failed to broadcast ScramblePoolDepleted: {ex.Message}");
+        }
+    }
 }

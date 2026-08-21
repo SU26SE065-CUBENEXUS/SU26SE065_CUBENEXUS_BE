@@ -456,7 +456,6 @@ public class TournamentOperationService : ITournamentOperationService
 
     public async Task<SubmitResultResponseDto> SubmitTraditionalResultAsync(SubmitTraditionalResultDto dto, Guid userId, CancellationToken ct = default)
     {
-        await EnsureActiveJudgeAsync(userId, ct);
         Console.WriteLine($"[Validation Stage] SubmitTraditionalResultAsync started. GroupCompetitorId={dto.GroupCompetitorId}, ScrambleId={dto.ScrambleId}, SolveNumber={dto.SolveNumber}");
 
         var groupCompetitor = await _unitOfWork.GroupCompetitors.GetByIdAsync(dto.GroupCompetitorId, ct);
@@ -488,6 +487,8 @@ public class TournamentOperationService : ITournamentOperationService
         var ev = await _unitOfWork.Events.GetByIdAsync(group.EventId, ct);
         if (ev == null)
             throw new KeyNotFoundException($"Event with ID {group.EventId} not found.");
+
+        await EnsureActiveJudgeAsync(userId, ev.TournamentId, ct);
 
         if (ev.EventFormatCode != "TRADITIONAL")
             throw new InvalidOperationException("Event format must be TRADITIONAL.");
@@ -721,6 +722,8 @@ public class TournamentOperationService : ITournamentOperationService
         var ev = await _unitOfWork.Events.GetByIdAsync(group.EventId, ct);
         if (ev == null)
             throw new KeyNotFoundException($"Event with ID {group.EventId} not found.");
+
+        await EnsureActiveJudgeAsync(userId, ev.TournamentId, ct);
 
         if (ev.EventFormatCode != "MEDLEY")
             throw new InvalidOperationException("Event format must be MEDLEY.");
@@ -1134,11 +1137,16 @@ public class TournamentOperationService : ITournamentOperationService
         }
         return result;
     }
-    public async Task<JudgeStationRosterResponseDto> GetJudgeStationRosterAsync(Guid eventId, int roundNumber, int groupNumber, int stationNumber, CancellationToken ct = default)
+    public async Task<JudgeStationRosterResponseDto> GetJudgeStationRosterAsync(Guid eventId, int roundNumber, int groupNumber, int stationNumber, Guid? userId = null, CancellationToken ct = default)
     {
         var ev = await _unitOfWork.Events.GetByIdAsync(eventId, ct);
         if (ev == null)
             throw new KeyNotFoundException($"Event with ID {eventId} not found.");
+
+        if (userId.HasValue)
+        {
+            await EnsureActiveJudgeAsync(userId.Value, ev.TournamentId, ct);
+        }
 
         var puzzle = await _unitOfWork.PuzzleTypes.GetByIdAsync(ev.PuzzleTypeId, ct);
         var eventName = puzzle?.Name ?? "Unknown Event";
@@ -1236,12 +1244,25 @@ public class TournamentOperationService : ITournamentOperationService
         };
     }
 
-    private async Task EnsureActiveJudgeAsync(Guid userId, CancellationToken ct)
+    private async Task EnsureActiveJudgeAsync(Guid userId, Guid? tournamentId = null, CancellationToken ct = default)
     {
         var user = await _unitOfWork.Users.GetByIdAsync(userId, ct);
-        if (user != null && user.UserRole == "JUDGE" && !user.IsActive)
+        if (user != null && string.Equals(user.UserRole, "JUDGE", StringComparison.OrdinalIgnoreCase))
         {
-            throw new Application.Exceptions.CustomException("JUDGE_ACCOUNT_DISABLED", "Tài khoản trọng tài này đã bị vô hiệu hóa hoặc giải đấu đã kết thúc.", 403);
+            if (!user.IsActive)
+            {
+                throw new Application.Exceptions.CustomException("JUDGE_ACCOUNT_DISABLED", "Tài khoản trọng tài này đã bị vô hiệu hóa hoặc giải đấu đã kết thúc.", 403);
+            }
+
+            if (tournamentId.HasValue)
+            {
+                var isAssigned = await _unitOfWork.TournamentJudges.AnyAsync(
+                    tj => tj.TournamentId == tournamentId.Value && tj.UserId == userId, ct);
+                if (!isAssigned)
+                {
+                    throw new Application.Exceptions.CustomException("JUDGE_NOT_ASSIGNED_TO_TOURNAMENT", "Trọng tài không có quyền thao tác trên giải đấu này.", 403);
+                }
+            }
         }
     }
 }

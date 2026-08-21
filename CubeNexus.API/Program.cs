@@ -139,12 +139,16 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IPracticeRe
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineArenaRealtimeNotifier, CubeNexus.API.Services.OnlineArenaRealtimeNotifier>();
 builder.Services.AddScoped<CubeNexus.Domain.Services.IEloCalculator, CubeNexus.Domain.Services.EloCalculator>();
 builder.Services.Configure<AiRubikOptions>(builder.Configuration.GetSection(AiRubikOptions.SectionName));
+builder.Services.Configure<CubeNexus.Infrastructure.Options.FaceVerificationOptions>(
+    builder.Configuration.GetSection(CubeNexus.Infrastructure.Options.FaceVerificationOptions.SectionName));
 builder.Services.AddOptions<R2Options>()
     .Bind(builder.Configuration.GetSection(R2Options.SectionName))
     .ValidateDataAnnotations()
     .Validate(options => options.UploadUrlExpirationMinutes == 15, "R2:UploadUrlExpirationMinutes must be 15.")
     .Validate(options => options.PlaybackUrlExpirationMinutes == 60, "R2:PlaybackUrlExpirationMinutes must be 60.");
 builder.Services.AddHttpClient<CubeNexus.Application.Interfaces.Services.IAiRubikClient, AiRubikClient>();
+builder.Services.AddHttpClient<CubeNexus.Application.Interfaces.Services.IFaceVerificationClient, CubeNexus.Infrastructure.Services.FaceVerificationClient>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IFaceVerificationService, CubeNexus.Infrastructure.Services.FaceVerificationService>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IRecordingStorageService, R2RecordingStorageService>();
 
 // Repositories (Since they are created via UnitOfWork or registered individually, let's register the specific repositories for DI if any use case injects them directly)
@@ -245,23 +249,6 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
-
-// Auto-migrate new events table schema columns
-using (var scope = app.Services.CreateScope())
-{
-    try
-    {
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        db.Database.ExecuteSqlRaw(@"
-            ALTER TABLE events ADD COLUMN IF NOT EXISTS total_rounds INTEGER NOT NULL DEFAULT 1;
-            ALTER TABLE events ADD COLUMN IF NOT EXISTS advance_top_n INTEGER NOT NULL DEFAULT 16;
-        ");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[Schema Migration Warning] {ex.Message}");
-    }
-}
 
 // Initialize the MatchTransitionScheduler static helper for RAM-based timers
 CubeNexus.Application.UseCases.OnlineArena.MatchTransitionScheduler.Instance = 

@@ -1,4 +1,28 @@
--- ==========================================
+-- =========================================================
+-- CubeNexus Database Schema + Master Seed Data
+-- PostgreSQL
+--
+-- Fresh install (recommended):
+--   docker compose up -d
+--   → Postgres mounts this file to /docker-entrypoint-initdb.d/
+--   → runs once on empty volume (schema + seed below)
+--
+-- Manual install:
+--   psql -h localhost -p 5432 -U cubenexus -d CubeNexus -f scripts/init-db.sql
+--
+-- This file contains the complete latest schema for a brand-new database
+-- (including face_enrollments, face_verification_sessions, hieu2 tables).
+-- Existing database (created before this version):
+--   Apply only migrations newer than the schema version already deployed.
+--   Or reset dev DB: docker compose down -v && docker compose up -d
+-- =========================================================
+
+BEGIN;
+
+-- Optional: needed only if you want PostgreSQL to generate UUIDs with gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- =========================================================
 -- 1. MASTER DATA & IDENTITY
 -- ==========================================
 
@@ -87,7 +111,19 @@ CREATE TABLE offline_registrations (
     status_code VARCHAR(20) NOT NULL,
     qr_token VARCHAR(255) UNIQUE NOT NULL,
     registered_at TIMESTAMPTZ NOT NULL,
+<<<<<<< HEAD
     checked_in_at TIMESTAMPTZ
+=======
+    checked_in_at TIMESTAMPTZ,
+    face_verified_at TIMESTAMPTZ,
+    face_verification_session_id UUID,
+
+    CONSTRAINT uq_registrations_tournament_user
+        UNIQUE (tournament_id, user_id),
+
+    CONSTRAINT ck_registrations_status
+        CHECK (status_code IN ('PENDING', 'CONFIRMED', 'CANCELLED', 'CHECKED_IN'))
+>>>>>>> 42cd0430219596e4936ffedcfed65e3dc4437053
 );
 
 CREATE TABLE offline_groups (
@@ -318,6 +354,7 @@ CREATE TABLE refresh_tokens (
 -- INDEXES
 -- ==========================================
 
+<<<<<<< HEAD
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_role ON users(role);
 CREATE INDEX idx_online_profiles_user_puzzle ON online_profiles(user_id, puzzle_type_id);
@@ -329,3 +366,170 @@ CREATE INDEX idx_offline_results_competitor ON offline_results(group_competitor_
 CREATE INDEX idx_practice_solves_user_puzzle ON practice_solves(user_id, puzzle_type_id);
 CREATE INDEX idx_notifications_user_unread ON notifications(user_id, is_read);
 CREATE INDEX idx_video_challenge_submissions_challenge ON video_challenge_submissions(challenge_id);
+=======
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires
+ON refresh_tokens(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_revoked
+ON refresh_tokens(revoked_at);
+
+CREATE TABLE IF NOT EXISTS user_tokens (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    token_type VARCHAR(30) NOT NULL,
+    token_hash VARCHAR(128) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_user_tokens_type
+        CHECK (token_type IN ('EMAIL_CONFIRMATION', 'PASSWORD_RESET')),
+
+    CONSTRAINT ck_user_tokens_expiry
+        CHECK (expires_at > created_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_tokens_user_type
+ON user_tokens(user_id, token_type);
+
+CREATE INDEX IF NOT EXISTS idx_user_tokens_hash
+ON user_tokens(token_hash);
+
+CREATE INDEX IF NOT EXISTS idx_user_tokens_expires
+ON user_tokens(expires_at);
+
+
+-- =========================================================
+-- 7.1 FACE VERIFICATION (offline check-in / profile enroll)
+-- Business enrollment + session state. Embeddings stay in FastAPI.
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS face_enrollments (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'ENROLLED',
+    model_version TEXT,
+    quality_score DOUBLE PRECISION,
+    templates_count INTEGER NOT NULL DEFAULT 0,
+    last_external_session_id TEXT,
+    enrolled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_face_enrollments_status
+        CHECK (status IN ('ENROLLED', 'REVOKED'))
+);
+
+CREATE INDEX IF NOT EXISTS ix_face_enrollments_status
+ON face_enrollments(status);
+
+CREATE TABLE IF NOT EXISTS face_verification_sessions (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    purpose TEXT NOT NULL,
+    context_type TEXT NOT NULL,
+    tournament_id UUID REFERENCES tournaments(id) ON DELETE SET NULL,
+    registration_id UUID REFERENCES registrations(id) ON DELETE SET NULL,
+    initiated_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    external_session_id TEXT NOT NULL,
+    upload_token TEXT NOT NULL,
+    challenge_json TEXT,
+    state TEXT NOT NULL DEFAULT 'POSITIONING',
+    result_json TEXT,
+    failure_reason TEXT,
+    liveness_passed BOOLEAN,
+    face_matched BOOLEAN,
+    similarity DOUBLE PRECISION,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+
+    CONSTRAINT ck_face_verification_sessions_purpose
+        CHECK (purpose IN ('ENROLLMENT', 'VERIFICATION')),
+
+    CONSTRAINT ck_face_verification_sessions_context
+        CHECK (context_type IN ('PROFILE', 'CHECK_IN', 'STATION', 'LOGIN'))
+);
+
+CREATE INDEX IF NOT EXISTS ix_face_verification_sessions_user_id
+ON face_verification_sessions(user_id);
+
+CREATE INDEX IF NOT EXISTS ix_face_verification_sessions_external_session_id
+ON face_verification_sessions(external_session_id);
+
+CREATE INDEX IF NOT EXISTS ix_face_verification_sessions_registration_id
+ON face_verification_sessions(registration_id);
+
+CREATE INDEX IF NOT EXISTS ix_face_verification_sessions_state
+ON face_verification_sessions(state);
+
+ALTER TABLE registrations
+    ADD CONSTRAINT fk_registrations_face_verification_session
+    FOREIGN KEY (face_verification_session_id)
+    REFERENCES face_verification_sessions(id)
+    ON DELETE SET NULL;
+
+
+CREATE INDEX IF NOT EXISTS idx_offline_registration_events_event_seed
+ON offline_registration_events(event_id, seed_time_ms);
+
+CREATE TABLE IF NOT EXISTS result_audit_logs (
+    id UUID PRIMARY KEY,
+    result_id UUID NOT NULL REFERENCES results(id),
+    changed_by UUID NOT NULL REFERENCES users(id),
+    old_raw_time_ms INTEGER,
+    new_raw_time_ms INTEGER,
+    old_final_time_ms INTEGER,
+    new_final_time_ms INTEGER,
+    old_penalty_type_id UUID REFERENCES penalty_types(id),
+    new_penalty_type_id UUID REFERENCES penalty_types(id),
+    old_is_dnf BOOLEAN NOT NULL DEFAULT false,
+    new_is_dnf BOOLEAN NOT NULL DEFAULT false,
+    reason TEXT NOT NULL,
+    changed_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_result_audit_logs_result
+ON result_audit_logs(result_id);
+
+
+-- =========================================================
+-- 8. MASTER SEED DATA (idempotent — safe to re-run)
+-- Required for register, practice, matchmaking, tournaments.
+-- Stable UUIDs so Postman/docs can reference puzzleTypeId.
+-- =========================================================
+
+INSERT INTO puzzle_types (id, name, code, scramble_length, is_active, created_at)
+VALUES
+    ('7dd820d8-6be0-4197-bc29-0026c578cdf5', '2x2x2 Cube', '222', 10, true, NOW()),
+    ('f4ddb522-426f-4dd0-a98d-20f21b192470', '3x3x3 Cube', '333', 20, true, NOW()),
+    ('167d6142-48e9-436a-a42c-53427bcad8a7', '4x4x4 Cube', '444', 40, true, NOW()),
+    ('1e36b408-c8d4-4e1a-9908-44fb7905e502', '5x5x5 Cube', '555', 60, true, NOW()),
+    ('84b0f049-9b3e-4b40-8930-e764ea9d4121', '6x6x6 Cube', '666', 80, true, NOW())
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO penalty_types (id, code, label, time_addition_ms, is_disqualified)
+VALUES
+    ('a1000001-0000-4000-8000-000000000001', 'OK',     'OK',  0,    false),
+    ('a1000001-0000-4000-8000-000000000002', 'PLUS_2', '+2',  2000, false),
+    ('a1000001-0000-4000-8000-000000000003', 'DNF',    'DNF', 0,    true)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO elo_config (
+    id,
+    k_factor_placement,
+    k_factor_standard,
+    placement_match_count,
+    default_elo,
+    updated_at
+)
+SELECT
+    'b2000001-0000-4000-8000-000000000001',
+    100,
+    20,
+    5,
+    1000,
+    NOW()
+WHERE NOT EXISTS (SELECT 1 FROM elo_config);
+
+COMMIT;
+>>>>>>> 42cd0430219596e4936ffedcfed65e3dc4437053

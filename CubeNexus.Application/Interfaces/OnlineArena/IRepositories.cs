@@ -18,6 +18,12 @@ public interface IMatchmakingQueueRepository
     Task<MatchmakingQueue?> GetConfirmingQueueAsync(Guid userId, Guid puzzleTypeId);
     Task<MatchmakingQueue?> GetLatestNonCancelledQueueAsync(Guid userId, Guid puzzleTypeId);
     Task<MatchmakingQueue?> FindMatchForUpdateAsync(Guid puzzleTypeId, Guid currentUserId, int currentElo, int eloRange);
+    /// <summary>
+    /// Re-checks inside an open transaction whether the user already has an active
+    /// (QUEUED or CONFIRMING) queue entry. Guards against concurrent FindMatch requests
+    /// for the same user that both pass the pre-transaction check.
+    /// </summary>
+    Task<MatchmakingQueue?> GetActiveQueueInsideTransactionAsync(Guid userId, Guid puzzleTypeId);
     Task AddAsync(MatchmakingQueue queue);
     void Update(MatchmakingQueue queue);
 }

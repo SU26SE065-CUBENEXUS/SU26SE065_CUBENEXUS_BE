@@ -28,7 +28,7 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             throw new InvalidOperationException("Registration is currently closed for this tournament.");
 
         if (tournament.StatusCode != "REGISTRATION_OPEN")
-            throw new InvalidOperationException("Giải đấu hiện chưa mở cổng đăng ký.");
+            throw new InvalidOperationException("Tournament registration is not currently open.");
 
         if (tournament.MaxParticipants.HasValue && tournament.MaxParticipants.Value > 0)
         {
@@ -41,6 +41,35 @@ public class TournamentRegistrationService : ITournamentRegistrationService
 
         if (await _unitOfWork.Registrations.HasUserRegisteredAsync(tournamentId, userId, ct))
             throw new InvalidOperationException("User is already registered for this tournament.");
+
+        // Check for schedule overlap with other registered active tournaments
+        var userRegs = await _unitOfWork.Registrations.FindAsync(
+            r => r.UserId == userId && r.TournamentId != tournamentId && r.StatusCode != "CANCELLED",
+            ct
+        );
+        var registeredTourIds = userRegs.Select(r => r.TournamentId).Distinct().ToList();
+        if (registeredTourIds.Any())
+        {
+            var conflictingTournaments = await _unitOfWork.Tournaments.FindAsync(
+                t => registeredTourIds.Contains(t.Id) &&
+                     t.StatusCode != "CANCELLED" &&
+                     t.StatusCode != "DISABLED" &&
+                     t.StatusCode != "COMPLETED" &&
+                     tournament.StartDate < t.EndDate &&
+                     tournament.EndDate > t.StartDate,
+                ct
+            );
+
+            var conflict = conflictingTournaments.FirstOrDefault();
+            if (conflict != null)
+            {
+                var fmtStart = conflict.StartDate.AddHours(7).ToString("dd/MM/yyyy HH:mm");
+                var fmtEnd = conflict.EndDate.AddHours(7).ToString("dd/MM/yyyy HH:mm");
+                throw new InvalidOperationException(
+                    $"Cannot register: You are already registered for tournament '{conflict.Name}' which takes place during the same timeframe (from {fmtStart} to {fmtEnd}). Each competitor can only participate in 1 tournament during overlapping competition times."
+                );
+            }
+        }
 
         if (dto.Events == null || !dto.Events.Any())
             throw new InvalidOperationException("You must register for at least one event.");
@@ -59,7 +88,7 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         {
             RegistrationId = registrationId,
             Token = Guid.NewGuid().ToString("N"), // Random token
-            ExpiresAt = tournament.EndDate.AddDays(7) // Example expiration
+            ExpiresAt = tournament.EndDate
         };
 
         var registration = new Registration
@@ -87,8 +116,8 @@ public class TournamentRegistrationService : ITournamentRegistrationService
                 );
                 if (eventRegCount >= eventEntity.MaxCapacity.Value)
                 {
-                    var puzzleName = eventEntity.PuzzleType?.Name ?? "Hạng mục";
-                    throw new InvalidOperationException($"Hạng mục '{puzzleName}' đã đạt giới hạn đăng ký tối đa ({eventEntity.MaxCapacity.Value} thí sinh).");
+                    var puzzleName = eventEntity.PuzzleType?.Name ?? "Event";
+                    throw new InvalidOperationException($"Event '{puzzleName}' has reached maximum registration capacity ({eventEntity.MaxCapacity.Value} competitors).");
                 }
             }
 

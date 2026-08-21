@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using CubeNexus.Application.DTOs.Registration;
 using CubeNexus.Application.Exceptions;
 using CubeNexus.Application.Interfaces.Repositories;
+using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Application.Interfaces.UseCases.TournamentOperation;
 
 namespace CubeNexus.Application.UseCases.TournamentOperation;
@@ -12,13 +13,17 @@ namespace CubeNexus.Application.UseCases.TournamentOperation;
 public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IFaceVerificationService _faceVerificationService;
 
-    public CheckInRegistrationByQrUseCase(IUnitOfWork unitOfWork)
+    public CheckInRegistrationByQrUseCase(
+        IUnitOfWork unitOfWork,
+        IFaceVerificationService faceVerificationService)
     {
         _unitOfWork = unitOfWork;
+        _faceVerificationService = faceVerificationService;
     }
 
-    public async Task<CheckInResponseDto> ExecuteAsync(CheckInRequestDto dto)
+    public async Task<CheckInResponseDto> ExecuteAsync(CheckInRequestDto dto, Guid? judgeUserId = null)
     {
         if (string.IsNullOrWhiteSpace(dto.QrToken))
         {
@@ -43,23 +48,21 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
                 throw new CustomException("QR_EXPIRED", "The competitor's QR ticket has expired.", 400);
             }
 
-            // Look up by registration ID first (eager loading all entities)
             registration = await _unitOfWork.Registrations.GetRegistrationWithDetailsAsync(payload.RegistrationId);
 
             if (registration != null)
             {
-                // Verify the payload token matches the one stored in the DB (resolves whitespace differences)
                 try
                 {
                     var dbPayload = System.Text.Json.JsonSerializer.Deserialize<RegistrationQrPayload>(registration.QrToken);
                     if (dbPayload == null || dbPayload.Token != payload.Token)
                     {
-                        registration = null; // Token mismatch
+                        registration = null;
                     }
                 }
                 catch
                 {
-                    registration = null; // Invalid DB JSON token
+                    registration = null;
                 }
             }
         }
@@ -73,6 +76,20 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
             throw new CustomException("QR_INVALID", "Invalid QR code credentials or token mismatch.", 400);
         }
 
+        if (judgeUserId.HasValue)
+        {
+            var caller = await _unitOfWork.Users.GetByIdAsync(judgeUserId.Value);
+            if (caller != null && string.Equals(caller.UserRole, "JUDGE", StringComparison.OrdinalIgnoreCase))
+            {
+                var isAssigned = await _unitOfWork.TournamentJudges.AnyAsync(
+                    tj => tj.TournamentId == registration.TournamentId && tj.UserId == judgeUserId.Value);
+                if (!isAssigned)
+                {
+                    throw new CustomException("JUDGE_NOT_ASSIGNED_TO_TOURNAMENT", "Trọng tài không có quyền điểm danh thí sinh cho giải đấu này.", 403);
+                }
+            }
+        }
+
         if (registration.Tournament.StatusCode != "CHECKING_IN" && registration.Tournament.StatusCode != "ONGOING")
         {
             throw new CustomException("INVALID_TOURNAMENT_STATE", "Chỉ được phép check-in khi giải đấu đang ở trạng thái CHECKING_IN hoặc ONGOING.", 400);
@@ -83,7 +100,6 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
             throw new CustomException("REGISTRATION_CANCELLED", "The registration is cancelled.", 400);
         }
 
-        // Query assignments
         var regEventIds = registration.OfflineRegistrationEvents.Select(ore => ore.Id).ToList();
         var groupCompetitors = await _unitOfWork.GroupCompetitors.FindAsync(gc => regEventIds.Contains(gc.RegistrationEventId));
         var gcList = groupCompetitors.ToList();
@@ -132,8 +148,24 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
             return response;
         }
 
+        if (!dto.FaceVerificationSessionId.HasValue)
+        {
+            await _faceVerificationService.EnsureCheckInFaceGateAsync(null, registration.Id);
+        }
+        else
+        {
+            await _faceVerificationService.EnsureCheckInFaceGateAsync(
+                dto.FaceVerificationSessionId.Value,
+                registration.Id);
+        }
+
         registration.StatusCode = "CHECKED_IN";
         registration.CheckedInAt = DateTime.UtcNow;
+        if (dto.FaceVerificationSessionId.HasValue)
+        {
+            registration.FaceVerifiedAt = DateTime.UtcNow;
+            registration.FaceVerificationSessionId = dto.FaceVerificationSessionId.Value;
+        }
 
         _unitOfWork.Registrations.Update(registration);
         await _unitOfWork.SaveChangesAsync();

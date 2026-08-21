@@ -16,5 +16,5 @@ public interface ITournamentOperationService
     Task<SolveProgressDto> GetSolveProgressAsync(Guid groupCompetitorId, CancellationToken ct = default);
     Task<List<GroupScrambleDetailDto>> GetGroupScramblesAsync(Guid groupId, CancellationToken ct = default);
     Task<List<PenaltyTypeDto>> GetPenaltyTypesAsync(CancellationToken ct = default);
-    Task<JudgeStationRosterResponseDto> GetJudgeStationRosterAsync(Guid eventId, int roundNumber, int groupNumber, int stationNumber, CancellationToken ct = default);
+    Task<JudgeStationRosterResponseDto> GetJudgeStationRosterAsync(Guid eventId, int roundNumber, int groupNumber, int stationNumber, Guid? userId = null, CancellationToken ct = default);
 }

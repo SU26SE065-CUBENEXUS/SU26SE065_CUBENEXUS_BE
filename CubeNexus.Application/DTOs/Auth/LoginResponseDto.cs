@@ -9,6 +9,7 @@ public class LoginResponseDto
     public string Email { get; set; } = string.Empty;
     public string UserRole { get; set; } = string.Empty;
     public Guid? AssignedTournamentId { get; set; }
+    public string? AssignedTournamentName { get; set; }
     public string? JudgeRoleCode { get; set; }
     public int? AssignedStationNumber { get; set; }
 }

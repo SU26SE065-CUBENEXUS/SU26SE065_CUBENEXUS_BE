@@ -106,71 +106,135 @@ public class FindOnlineMatchUseCase
             };
         }
 
-        // 4. Already queued?
-        var queued = await _queueRepo.GetQueuedQueueAsync(userId, puzzleTypeId);
-        if (queued != null)
-        {
-            return new MatchmakingStatusDto
-            {
-                Status = "QUEUED",
-                QueueId = queued.Id,
-                ServerNow = now
-            };
-        }
+        // *** Step 4 (early-return for QUEUED) intentionally removed ***
+        //
+        // WHY: When multiple users join simultaneously (e.g. A, B, C, D), all 4 may find
+        // an empty queue and all insert QUEUED entries in the same instant — leaving all 4
+        // stuck QUEUED forever, because the old step-4 early-return prevented them from
+        // ever re-running the matching transaction on subsequent polls.
+        //
+        // FIX: Always proceed to the transaction, even if the user is already QUEUED.
+        // Inside the transaction we handle the already-QUEUED case idempotently:
+        //   • No opponent found + already QUEUED → commit with no changes (stay QUEUED)
+        //   • Opponent found + already QUEUED    → update existing entry to CONFIRMING
 
-        // 5. Try to match — inside a serializable transaction with row-lock
+        // 5. Transaction: try to match or join queue (idempotent if already QUEUED)
         await _uow.BeginTransactionAsync();
         try
         {
+            // Guard: if a CONFIRMING entry exists inside the transaction, another concurrent
+            // request already matched this user — return early without double-processing.
+            var confirmingEntry = await _queueRepo.GetConfirmingQueueAsync(userId, puzzleTypeId);
+            if (confirmingEntry != null)
+            {
+                await _uow.RollbackTransactionAsync();
+                // Re-read the confirmation that the other concurrent request created
+                var latestConf = await _confirmationRepo.GetPendingConfirmationAsync(userId, puzzleTypeId);
+                if (latestConf != null)
+                {
+                    var isP1 = latestConf.Player1UserId == userId;
+                    var opp = isP1 ? latestConf.Player2 : latestConf.Player1;
+                    var oppProf = await _profileRepo.GetProfileAsync(opp.Id, puzzleTypeId);
+                    return new MatchmakingStatusDto
+                    {
+                        Status = "MATCH_FOUND",
+                        ConfirmationId = latestConf.Id,
+                        Opponent = new OpponentDto
+                        {
+                            UserId = opp.Id,
+                            DisplayName = opp.DisplayName,
+                            Rating = oppProf?.EloStandard ?? 0
+                        },
+                        ConfirmDeadlineAt = latestConf.ConfirmDeadlineAt,
+                        RemainingSeconds = Math.Max(0, (int)(latestConf.ConfirmDeadlineAt - DateTime.UtcNow).TotalSeconds),
+                        Player1Confirmed = latestConf.Player1Confirmed,
+                        Player2Confirmed = latestConf.Player2Confirmed,
+                        MeUserId = userId,
+                        ServerNow = DateTime.UtcNow
+                    };
+                }
+                return new MatchmakingStatusDto { Status = "QUEUED", ServerNow = DateTime.UtcNow, MeUserId = userId };
+            }
+
+            // Check for user's own existing QUEUED entry (may have been inserted by a previous call)
+            var myExistingQueue = await _queueRepo.GetQueuedQueueAsync(userId, puzzleTypeId);
+
+            // Try to find an opponent (ORDER BY queued_at ASC, id ASC; FOR UPDATE SKIP LOCKED)
             var opponentQueue = await _queueRepo.FindMatchForUpdateAsync(puzzleTypeId, userId, profile.EloStandard, 200);
+
             if (opponentQueue == null)
             {
-                // No opponent yet — join the queue
-                var newQueue = new MatchmakingQueue
+                // No opponent available right now.
+                if (myExistingQueue == null)
+                {
+                    // Not yet queued — insert a new QUEUED entry.
+                    var newQueue = new MatchmakingQueue
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = userId,
+                        OnlineProfileId = profile.Id,
+                        PuzzleTypeId = puzzleTypeId,
+                        QueuedAt = DateTime.UtcNow,
+                        StatusCode = MatchmakingQueueStatus.QUEUED.ToString()
+                    };
+                    await _queueRepo.AddAsync(newQueue);
+                    await _uow.CommitTransactionAsync();
+
+                    await _notifier.NotifyMatchmakingQueuedAsync(userId, new
+                    {
+                        status = "QUEUED",
+                        queueId = newQueue.Id,
+                        puzzleTypeId,
+                        userId,
+                        serverNow = DateTime.UtcNow
+                    });
+
+                    return new MatchmakingStatusDto
+                    {
+                        Status = "QUEUED",
+                        QueueId = newQueue.Id,
+                        ServerNow = DateTime.UtcNow
+                    };
+                }
+                else
+                {
+                    // Already QUEUED — commit with no changes (idempotent keep-alive).
+                    await _uow.CommitTransactionAsync();
+                    return new MatchmakingStatusDto
+                    {
+                        Status = "QUEUED",
+                        QueueId = myExistingQueue.Id,
+                        ServerNow = DateTime.UtcNow
+                    };
+                }
+            }
+
+            // ── Opponent found ─────────────────────────────────────────────────────────
+            // Mark opponent's QUEUED entry as CONFIRMING.
+            opponentQueue.StatusCode = MatchmakingQueueStatus.CONFIRMING.ToString();
+            _queueRepo.Update(opponentQueue);
+
+            // Handle current user's queue entry:
+            //   • If already QUEUED (concurrent insert from earlier) → update to CONFIRMING.
+            //   • If not yet in queue (found opponent on first call) → insert CONFIRMING.
+            if (myExistingQueue != null)
+            {
+                myExistingQueue.StatusCode = MatchmakingQueueStatus.CONFIRMING.ToString();
+                _queueRepo.Update(myExistingQueue);
+            }
+            else
+            {
+                var myQueue = new MatchmakingQueue
                 {
                     Id = Guid.NewGuid(),
                     UserId = userId,
                     OnlineProfileId = profile.Id,
                     PuzzleTypeId = puzzleTypeId,
                     QueuedAt = DateTime.UtcNow,
-                    StatusCode = MatchmakingQueueStatus.QUEUED.ToString()
+                    StatusCode = MatchmakingQueueStatus.CONFIRMING.ToString()
                 };
-
-                await _queueRepo.AddAsync(newQueue);
-                await _uow.CommitTransactionAsync();
-
-                await _notifier.NotifyMatchmakingQueuedAsync(userId, new
-                {
-                    status = "QUEUED",
-                    queueId = newQueue.Id,
-                    puzzleTypeId,
-                    userId,
-                    serverNow = DateTime.UtcNow
-                });
-
-                return new MatchmakingStatusDto
-                {
-                    Status = "QUEUED",
-                    QueueId = newQueue.Id,
-                    ServerNow = DateTime.UtcNow
-                };
+                await _queueRepo.AddAsync(myQueue);
             }
-
-            // Opponent found — move BOTH queue entries to CONFIRMING (not MATCHED yet)
-            opponentQueue.StatusCode = MatchmakingQueueStatus.CONFIRMING.ToString();
-            _queueRepo.Update(opponentQueue);
-
-            // Current player also needs a queue entry marked CONFIRMING
-            var myQueue = new MatchmakingQueue
-            {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                OnlineProfileId = profile.Id,
-                PuzzleTypeId = puzzleTypeId,
-                QueuedAt = DateTime.UtcNow,
-                StatusCode = MatchmakingQueueStatus.CONFIRMING.ToString()
-            };
-            await _queueRepo.AddAsync(myQueue);
 
             // Create the confirmation record
             var deadline = DateTime.UtcNow.Add(MatchmakingCooldownPolicy.ConfirmationWindow);
@@ -193,22 +257,12 @@ public class FindOnlineMatchUseCase
             var opponentProfile = opponentQueue.OnlineProfile;
             var remainingSeconds = (int)(deadline - DateTime.UtcNow).TotalSeconds;
 
-            var basePayload = new
-            {
-                confirmationId = confirmation.Id,
-                confirmDeadlineAt = deadline,
-                remainingSeconds,
-                player1Confirmed = false,
-                player2Confirmed = false,
-                serverNow = DateTime.UtcNow
-            };
-
             var p1Payload = new
             {
                 confirmationId = confirmation.Id,
                 opponent = new
                 {
-                    userId = userId,  // player2 = current user = opponent for p1
+                    userId = userId,
                     displayName = profile.User?.DisplayName ?? string.Empty,
                     rating = profile.EloStandard
                 },
@@ -225,7 +279,7 @@ public class FindOnlineMatchUseCase
                 confirmationId = confirmation.Id,
                 opponent = new
                 {
-                    userId = opponentQueue.UserId,  // player1 = opponent for p2
+                    userId = opponentQueue.UserId,
                     displayName = opponentProfile?.User?.DisplayName ?? string.Empty,
                     rating = opponentProfile?.EloStandard ?? 0
                 },
@@ -241,7 +295,6 @@ public class FindOnlineMatchUseCase
                 opponentQueue.UserId, userId,
                 p1Payload, p2Payload);
 
-            // Load opponent profile for the return value
             var opponentUser = opponentQueue.User;
             return new MatchmakingStatusDto
             {
@@ -557,6 +610,9 @@ public class ApplyConfirmationTimeoutUseCase
 
         await _uow.SaveChangesAsync(ct);
 
+        var p1Profile = await _profileRepo.GetProfileAsync(confirmation.Player1UserId, confirmation.PuzzleTypeId);
+        var p2Profile = await _profileRepo.GetProfileAsync(confirmation.Player2UserId, confirmation.PuzzleTypeId);
+
         // Notify both players — requeueAvailable so frontend can show "Search again" button
         await _notifier.NotifyMatchConfirmationExpiredAsync(
             confirmation.Player1UserId,
@@ -566,34 +622,34 @@ public class ApplyConfirmationTimeoutUseCase
                 confirmationId = confirmation.Id,
                 reason,
                 requeueAvailable = true,  // backend does NOT auto-requeue
+                player1UserId = confirmation.Player1UserId,
+                player2UserId = confirmation.Player2UserId,
                 player1Confirmed = p1DidConfirm,
                 player2Confirmed = p2DidConfirm,
+                player1CooldownUntil = p1Profile?.MatchmakingCooldownUntil,
+                player2CooldownUntil = p2Profile?.MatchmakingCooldownUntil,
                 serverNow = DateTime.UtcNow
             });
 
         // Apply cooldown notification to non-confirming players
-        if (!p1DidConfirm)
+        if (!p1DidConfirm && p1Profile != null)
         {
-            var p1Profile = await _profileRepo.GetProfileAsync(confirmation.Player1UserId, confirmation.PuzzleTypeId);
-            if (p1Profile != null)
-                await _notifier.NotifyMatchmakingCooldownAppliedAsync(confirmation.Player1UserId, new
-                {
-                    reason = "FAILED_TO_CONFIRM",
-                    cooldownUntil = p1Profile.MatchmakingCooldownUntil,
-                    serverNow = DateTime.UtcNow
-                });
+            await _notifier.NotifyMatchmakingCooldownAppliedAsync(confirmation.Player1UserId, new
+            {
+                reason = "FAILED_TO_CONFIRM",
+                cooldownUntil = p1Profile.MatchmakingCooldownUntil,
+                serverNow = DateTime.UtcNow
+            });
         }
 
-        if (!p2DidConfirm)
+        if (!p2DidConfirm && p2Profile != null)
         {
-            var p2Profile = await _profileRepo.GetProfileAsync(confirmation.Player2UserId, confirmation.PuzzleTypeId);
-            if (p2Profile != null)
-                await _notifier.NotifyMatchmakingCooldownAppliedAsync(confirmation.Player2UserId, new
-                {
-                    reason = "FAILED_TO_CONFIRM",
-                    cooldownUntil = p2Profile.MatchmakingCooldownUntil,
-                    serverNow = DateTime.UtcNow
-                });
+            await _notifier.NotifyMatchmakingCooldownAppliedAsync(confirmation.Player2UserId, new
+            {
+                reason = "FAILED_TO_CONFIRM",
+                cooldownUntil = p2Profile.MatchmakingCooldownUntil,
+                serverNow = DateTime.UtcNow
+            });
         }
     }
 

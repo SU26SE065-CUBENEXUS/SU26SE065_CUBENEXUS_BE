@@ -20,4 +20,6 @@ public interface IAdminScrambleService
         Guid actorUserId, CancellationToken ct = default);
     Task<ScramblePoolItemDto> ApproveAsync(Guid id, Guid actorUserId, CancellationToken ct = default);
     Task<ScramblePoolItemDto> RetireAsync(Guid id, Guid actorUserId, CancellationToken ct = default);
+    Task<string> GetScrambleGenerationModeAsync(CancellationToken ct = default);
+    Task<string> SetScrambleGenerationModeAsync(string mode, Guid actorUserId, CancellationToken ct = default);
 }

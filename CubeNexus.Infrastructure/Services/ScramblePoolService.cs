@@ -15,13 +15,17 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
 {
     private static readonly HashSet<string> Modes = ["ONLINE_MATCH", "OFFLINE", "ONLINE_ASYNC"];
     private static readonly Regex MovePattern = new("^[2-9]?[RLUDFB](?:w)?(?:2|')?$", RegexOptions.Compiled);
+    private static string _scrambleGenerationMode = "MANUAL";
+
     private readonly ApplicationDbContext _db;
     private readonly IScrambleGeneratorService _generator;
+    private readonly IRealtimeNotifier? _realtimeNotifier;
 
-    public ScramblePoolService(ApplicationDbContext db, IScrambleGeneratorService generator)
+    public ScramblePoolService(ApplicationDbContext db, IScrambleGeneratorService generator, IRealtimeNotifier? realtimeNotifier = null)
     {
         _db = db;
         _generator = generator;
+        _realtimeNotifier = realtimeNotifier;
     }
 
     public async Task<ScrambleReservationDto> ReserveAsync(string competitionMode, Guid puzzleTypeId,
@@ -38,7 +42,48 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
                 .ThenBy(x => x.Id)
                 .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
             if (!id.HasValue)
-                throw new InvalidOperationException($"SCRAMBLE_POOL_EMPTY: Kho đề {mode} không còn đề hợp lệ cho loại cube này.");
+            {
+                var puzzle = await _db.PuzzleTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == puzzleTypeId, ct);
+                var puzzleCode = puzzle?.Code ?? "UNKNOWN";
+                var puzzleName = puzzle?.Name ?? "Rubik";
+
+                if (string.Equals(_scrambleGenerationMode, "AUTO", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (puzzle != null)
+                    {
+                        var autoSequence = NormalizeSequence(_generator.GenerateScramble(puzzle.Code, puzzle.ScrambleLength));
+                        var autoHash = Hash(autoSequence);
+                        var newItem = CreateItem(mode, puzzle, autoSequence, autoHash, "CUBENEXUS_AUTO_ON_DEMAND",
+                            "Auto-generated on demand", actorUserId ?? Guid.Empty, approved: true);
+
+                        newItem.Status = "RESERVED";
+                        newItem.AssignedTargetType = targetType;
+                        newItem.AssignedTargetId = targetId;
+                        newItem.AssignedAt = DateTime.UtcNow;
+
+                        _db.ScramblePoolItems.Add(newItem);
+                        AddAudit(newItem.Id, "AUTO_GENERATED_AND_RESERVED", actorUserId, targetType, targetId);
+                        await _db.SaveChangesAsync(ct);
+
+                        return new ScrambleReservationDto(newItem.Id, newItem.Sequence, newItem.ExpectedStateJson);
+                    }
+                }
+
+                if (_realtimeNotifier != null)
+                {
+                    await _realtimeNotifier.BroadcastScramblePoolDepletedAsync(new
+                    {
+                        CompetitionMode = mode,
+                        PuzzleTypeId = puzzleTypeId,
+                        PuzzleCode = puzzleCode,
+                        PuzzleName = puzzleName,
+                        Message = $"Scramble pool for {mode} ({puzzleCode}) is empty! Please generate scrambles or enable AUTO mode.",
+                        Timestamp = DateTime.UtcNow
+                    }, ct);
+                }
+
+                throw new InvalidOperationException($"SCRAMBLE_POOL_EMPTY: Scramble pool for {mode} ({puzzleCode}) has run out! Please generate scrambles or switch to AUTO mode.");
+            }
 
             var now = DateTime.UtcNow;
             var changed = await _db.ScramblePoolItems
@@ -76,10 +121,47 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
 
     public async Task<IReadOnlyList<ScramblePoolSummaryDto>> GetSummaryAsync(CancellationToken ct = default)
     {
-        // Project the join first, then aggregate in memory. Npgsql/EF can produce an
-        // invalid GROUP BY translation when a navigation property is part of the key.
-        // The pool only returns four small fields here, so this remains lightweight
-        // while being stable on both an empty fresh database and a populated one.
+        // 1. Active OFFLINE Tournament puzzle types
+        var activeOfflinePuzzleTypeIds = await _db.Events.AsNoTracking()
+            .Where(e => e.Tournament != null && 
+                        (e.Tournament.TournamentType == "OFFLINE" || string.IsNullOrEmpty(e.Tournament.TournamentType)) &&
+                        e.Tournament.StatusCode != "cancelled" && 
+                        e.Tournament.StatusCode != "draft" && 
+                        e.Tournament.StatusCode != "disabled" && 
+                        e.Tournament.StatusCode != "completed")
+            .Select(e => e.PuzzleTypeId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        // 2. Active ONLINE_ASYNC Tournament puzzle types
+        var activeOnlineAsyncPuzzleTypeIds = await _db.Events.AsNoTracking()
+            .Where(e => e.Tournament != null && 
+                        e.Tournament.TournamentType == "ONLINE_ASYNC" &&
+                        e.Tournament.StatusCode != "cancelled" && 
+                        e.Tournament.StatusCode != "draft" && 
+                        e.Tournament.StatusCode != "disabled" && 
+                        e.Tournament.StatusCode != "completed")
+            .Select(e => e.PuzzleTypeId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        // 3. Standard active puzzle types used for Online Arena Matches (PvP)
+        var onlineMatchPuzzleTypeIds = await _db.PuzzleTypes.AsNoTracking()
+            .Where(pt => pt.IsActive && (pt.Code == "3x3x3" || pt.Code == "2x2x2" || pt.Code == "4x4x4" || pt.Code == "Pyraminx" || pt.Code == "Skewb"))
+            .Select(pt => pt.Id)
+            .ToListAsync(ct);
+
+        var usedPuzzleTypeIds = activeOfflinePuzzleTypeIds
+            .Concat(activeOnlineAsyncPuzzleTypeIds)
+            .Concat(onlineMatchPuzzleTypeIds)
+            .Distinct()
+            .ToHashSet();
+
+        var puzzleTypes = await _db.PuzzleTypes.AsNoTracking()
+            .Where(pt => pt.IsActive && usedPuzzleTypeIds.Contains(pt.Id))
+            .Select(pt => new { pt.Id, pt.Code })
+            .ToListAsync(ct);
+
         var rows = await _db.ScramblePoolItems.AsNoTracking()
             .Select(x => new
             {
@@ -90,10 +172,49 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
             })
             .ToListAsync(ct);
 
-        return rows
+        var summaryList = rows
             .GroupBy(x => new { x.CompetitionMode, x.PuzzleTypeId, x.PuzzleCode, x.Status })
             .Select(g => new ScramblePoolSummaryDto(g.Key.CompetitionMode, g.Key.PuzzleTypeId,
                 g.Key.PuzzleCode, g.Key.Status, g.Count()))
+            .ToList();
+
+        var resultList = new List<ScramblePoolSummaryDto>(summaryList);
+
+        // Inject AVAILABLE = 0 warnings ONLY if the puzzle type is used in THAT specific active competition mode
+        foreach (var pt in puzzleTypes)
+        {
+            // For OFFLINE: only if used in an active OFFLINE tournament
+            if (activeOfflinePuzzleTypeIds.Contains(pt.Id))
+            {
+                var hasAvailable = resultList.Any(s => s.CompetitionMode == "OFFLINE" && s.PuzzleTypeId == pt.Id && s.Status == "AVAILABLE");
+                if (!hasAvailable)
+                {
+                    resultList.Add(new ScramblePoolSummaryDto("OFFLINE", pt.Id, pt.Code, "AVAILABLE", 0));
+                }
+            }
+
+            // For ONLINE_ASYNC: only if used in an active ONLINE_ASYNC tournament
+            if (activeOnlineAsyncPuzzleTypeIds.Contains(pt.Id))
+            {
+                var hasAvailable = resultList.Any(s => s.CompetitionMode == "ONLINE_ASYNC" && s.PuzzleTypeId == pt.Id && s.Status == "AVAILABLE");
+                if (!hasAvailable)
+                {
+                    resultList.Add(new ScramblePoolSummaryDto("ONLINE_ASYNC", pt.Id, pt.Code, "AVAILABLE", 0));
+                }
+            }
+
+            // For ONLINE_MATCH: only if used in online arena matches
+            if (onlineMatchPuzzleTypeIds.Contains(pt.Id))
+            {
+                var hasAvailable = resultList.Any(s => s.CompetitionMode == "ONLINE_MATCH" && s.PuzzleTypeId == pt.Id && s.Status == "AVAILABLE");
+                if (!hasAvailable)
+                {
+                    resultList.Add(new ScramblePoolSummaryDto("ONLINE_MATCH", pt.Id, pt.Code, "AVAILABLE", 0));
+                }
+            }
+        }
+
+        return resultList
             .OrderBy(x => x.CompetitionMode)
             .ThenBy(x => x.PuzzleCode)
             .ThenBy(x => x.Status)
@@ -201,6 +322,23 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
         item.Status = "RETIRED"; AddAudit(item.Id, "RETIRED", actorUserId);
         await _db.SaveChangesAsync(ct);
         return ToDto(item);
+    }
+
+    public Task<string> GetScrambleGenerationModeAsync(CancellationToken ct = default)
+    {
+        return Task.FromResult(_scrambleGenerationMode);
+    }
+
+    public Task<string> SetScrambleGenerationModeAsync(string mode, Guid actorUserId, CancellationToken ct = default)
+    {
+        var upper = (mode ?? string.Empty).Trim().ToUpperInvariant();
+        if (upper != "MANUAL" && upper != "AUTO")
+        {
+            throw new ArgumentException("Chế độ sinh đề chỉ có thể là 'MANUAL' hoặc 'AUTO'.");
+        }
+
+        _scrambleGenerationMode = upper;
+        return Task.FromResult(_scrambleGenerationMode);
     }
 
     private async Task<ScramblePoolItem> FindItemAsync(Guid id, CancellationToken ct) =>

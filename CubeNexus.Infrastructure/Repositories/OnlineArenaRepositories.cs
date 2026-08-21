@@ -39,12 +39,15 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
     public async Task<MatchmakingQueue?> FindMatchForUpdateAsync(Guid puzzleTypeId, Guid currentUserId, int currentElo, int eloRange)
     {
+        // ORDER BY queued_at ASC, id ASC ensures deterministic pick order when timestamps are equal
+        // (e.g. 4 users join simultaneously — id is the tie-breaker)
+        // FOR UPDATE SKIP LOCKED prevents two concurrent transactions from grabbing the same row
         const string sql = """
             SELECT * FROM matchmaking_queue
             WHERE status_code = 'QUEUED'
               AND puzzle_type_id = {0}
               AND user_id <> {1}
-            ORDER BY queued_at ASC
+            ORDER BY queued_at ASC, id ASC
             LIMIT 1
             FOR UPDATE SKIP LOCKED
             """;
@@ -52,6 +55,7 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
         var queue = await _context.Set<MatchmakingQueue>()
             .FromSqlRaw(sql, puzzleTypeId, currentUserId)
             .Include(item => item.OnlineProfile)
+                .ThenInclude(op => op.User)
             .FirstOrDefaultAsync();
 
         if (queue != null && Math.Abs(queue.OnlineProfile.EloStandard - currentElo) <= eloRange)
@@ -59,6 +63,19 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
         return null;
     }
+
+    /// <summary>
+    /// Re-checks inside an open transaction whether the user already has an active
+    /// (QUEUED or CONFIRMING) queue entry. Used to guard against race conditions
+    /// where two concurrent FindMatch requests for the same user both pass the
+    /// pre-transaction check but only one should succeed.
+    /// </summary>
+    public Task<MatchmakingQueue?> GetActiveQueueInsideTransactionAsync(Guid userId, Guid puzzleTypeId)
+        => _context.Set<MatchmakingQueue>()
+            .FirstOrDefaultAsync(q =>
+                q.UserId == userId
+                && q.PuzzleTypeId == puzzleTypeId
+                && (q.StatusCode == "QUEUED" || q.StatusCode == "CONFIRMING"));
 
     public Task AddAsync(MatchmakingQueue queue)
         => _context.Set<MatchmakingQueue>().AddAsync(queue).AsTask();

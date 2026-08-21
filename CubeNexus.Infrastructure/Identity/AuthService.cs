@@ -288,25 +288,13 @@ public partial class AuthService : IAuthService
             throw new UnauthorizedAccessException("Refresh token đã hết hạn hoặc bị thu hồi.");
 
         var user = refreshToken.User;
-
         refreshToken.RevokedAt = DateTime.UtcNow;
 
-        var newRefreshToken = GenerateRefreshToken(refreshToken.UserId);
-        refreshToken.ReplacedBy = newRefreshToken.Token;
-
-        await _context.RefreshTokens.AddAsync(newRefreshToken);
+        var tokenResponse = await GenerateTokenResponseAsync(user);
+        refreshToken.ReplacedBy = tokenResponse.RefreshToken;
         await _context.SaveChangesAsync();
 
-        var accessToken = GenerateAccessToken(user.Id, user.Email, user.DisplayName, user.UserRole.ToUpperInvariant());
-
-        return new LoginResponseDto
-        {
-            AccessToken = accessToken,
-            RefreshToken = newRefreshToken.Token,
-            AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenExpirationInMinutes),
-            DisplayName = user.DisplayName,
-            Email = user.Email
-        };
+        return tokenResponse;
     }
 
     public async Task<ForgotPasswordResponseDto> ForgotPasswordAsync(ForgotPasswordRequestDto request)
@@ -481,19 +469,22 @@ public partial class AuthService : IAuthService
     private async Task<LoginResponseDto> GenerateTokenResponseAsync(User user)
     {
         Guid? assignedTournamentId = null;
+        string? assignedTournamentName = null;
         string? judgeRoleCode = null;
         int? assignedStationNumber = null;
 
         if (string.Equals(user.UserRole, "JUDGE", StringComparison.OrdinalIgnoreCase))
         {
             var judgeAssoc = await _context.TournamentJudges
+                .Include(tj => tj.Tournament)
                 .FirstOrDefaultAsync(tj => tj.UserId == user.Id);
             assignedTournamentId = judgeAssoc?.TournamentId;
+            assignedTournamentName = judgeAssoc?.Tournament?.Name;
             judgeRoleCode = judgeAssoc?.RoleCode;
             assignedStationNumber = judgeAssoc?.AssignedStationNumber;
         }
 
-        var accessToken = GenerateAccessToken(user.Id, user.Email, user.DisplayName, user.UserRole.ToUpperInvariant(), assignedTournamentId, assignedStationNumber, judgeRoleCode);
+        var accessToken = GenerateAccessToken(user.Id, user.Email, user.DisplayName, user.UserRole.ToUpperInvariant(), assignedTournamentId, assignedStationNumber, judgeRoleCode, assignedTournamentName);
         var refreshToken = GenerateRefreshToken(user.Id);
 
         await _context.RefreshTokens.AddAsync(refreshToken);
@@ -508,12 +499,13 @@ public partial class AuthService : IAuthService
             Email = user.Email,
             UserRole = user.UserRole.ToUpperInvariant(),
             AssignedTournamentId = assignedTournamentId,
+            AssignedTournamentName = assignedTournamentName,
             JudgeRoleCode = judgeRoleCode,
             AssignedStationNumber = assignedStationNumber
         };
     }
 
-    private string GenerateAccessToken(Guid userId, string email, string displayName, string userRole, Guid? tournamentId = null, int? stationNumber = null, string? judgeRoleCode = null)
+    private string GenerateAccessToken(Guid userId, string email, string displayName, string userRole, Guid? tournamentId = null, int? stationNumber = null, string? judgeRoleCode = null, string? tournamentName = null)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -530,6 +522,10 @@ public partial class AuthService : IAuthService
         if (tournamentId.HasValue)
         {
             claimsList.Add(new Claim("tournament_id", tournamentId.Value.ToString()));
+        }
+        if (!string.IsNullOrWhiteSpace(tournamentName))
+        {
+            claimsList.Add(new Claim("tournament_name", tournamentName));
         }
         if (stationNumber.HasValue)
         {

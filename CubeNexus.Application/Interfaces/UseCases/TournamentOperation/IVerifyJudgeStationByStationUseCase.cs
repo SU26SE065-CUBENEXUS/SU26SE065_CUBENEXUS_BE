@@ -6,5 +6,5 @@ namespace CubeNexus.Application.Interfaces.UseCases.TournamentOperation;
 
 public interface IVerifyJudgeStationByStationUseCase
 {
-    Task<VerifyJudgeStationResponseDto> ExecuteAsync(VerifyJudgeStationByStationDto dto, CancellationToken ct = default);
+    Task<VerifyJudgeStationResponseDto> ExecuteAsync(VerifyJudgeStationByStationDto dto, Guid? judgeUserId = null, CancellationToken ct = default);
 }

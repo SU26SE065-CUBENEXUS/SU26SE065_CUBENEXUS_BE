@@ -171,14 +171,45 @@ public class OnlineAsyncTournamentService : IOnlineAsyncTournamentService
         var now = DateTime.UtcNow;
         var computedStatus = GetComputedStatus(tournament, now);
         if (computedStatus is "DRAFT" or "PUBLISHED")
-            throw new CustomException("REGISTRATION_NOT_OPEN", "Thời gian mở đăng ký chưa bắt đầu.", 400);
+            throw new CustomException("REGISTRATION_NOT_OPEN", "Registration window has not opened yet.", 400);
 
         if (computedStatus is "REGISTRATION_CLOSED" or "COMPLETED" or "CANCELLED" or "DISABLED")
-            throw new CustomException("REGISTRATION_CLOSED", "Thời gian đăng ký đã kết thúc.", 400);
+            throw new CustomException("REGISTRATION_CLOSED", "Registration for this tournament is closed.", 400);
 
         var existingReg = await _uow.Registrations.FirstOrDefaultAsync(r => r.TournamentId == tournamentId && r.UserId == userId, ct);
         if (existingReg != null)
             return true; // Already registered
+
+        // Check for schedule overlap with other registered active tournaments
+        var userRegs = await _uow.Registrations.FindAsync(
+            r => r.UserId == userId && r.TournamentId != tournamentId && r.StatusCode != "CANCELLED",
+            ct
+        );
+        var registeredTourIds = userRegs.Select(r => r.TournamentId).Distinct().ToList();
+        if (registeredTourIds.Any())
+        {
+            var conflictingTournaments = await _uow.Tournaments.FindAsync(
+                t => registeredTourIds.Contains(t.Id) &&
+                     t.StatusCode != "CANCELLED" &&
+                     t.StatusCode != "DISABLED" &&
+                     t.StatusCode != "COMPLETED" &&
+                     tournament.StartDate < t.EndDate &&
+                     tournament.EndDate > t.StartDate,
+                ct
+            );
+
+            var conflict = conflictingTournaments.FirstOrDefault();
+            if (conflict != null)
+            {
+                var fmtStart = conflict.StartDate.AddHours(7).ToString("dd/MM/yyyy HH:mm");
+                var fmtEnd = conflict.EndDate.AddHours(7).ToString("dd/MM/yyyy HH:mm");
+                throw new CustomException(
+                    "SCHEDULE_CONFLICT",
+                    $"Cannot register: You are already registered for tournament '{conflict.Name}' which takes place during the same timeframe (from {fmtStart} to {fmtEnd}). Each competitor can only participate in 1 tournament during overlapping competition times.",
+                    400
+                );
+            }
+        }
 
         var reg = new Registration
         {
