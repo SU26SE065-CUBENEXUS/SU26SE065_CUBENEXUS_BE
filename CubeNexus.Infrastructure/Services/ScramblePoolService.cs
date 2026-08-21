@@ -69,6 +69,46 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
                     }
                 }
 
+                var emptyMessage = $"Scramble pool for {mode} ({puzzleCode}) is empty! Please generate scrambles or enable AUTO mode.";
+                var payload = JsonSerializer.Serialize(new
+                {
+                    competitionMode = mode,
+                    puzzleTypeId,
+                    puzzleCode,
+                    puzzleName
+                });
+                var adminIds = await _db.Users
+                    .Where(u => u.UserRole == "ADMIN" && u.IsActive && !u.IsBanned)
+                    .Select(u => u.Id)
+                    .ToListAsync(ct);
+                var existingPayloads = await _db.Notifications.AsNoTracking()
+                    .Where(n => n.TypeCode == "SCRAMBLE_POOL_EMPTY" && adminIds.Contains(n.UserId))
+                    .Select(n => new { n.UserId, n.Payload })
+                    .ToListAsync(ct);
+                var notifications = adminIds
+                    .Where(adminId => !existingPayloads.Any(existing =>
+                        existing.UserId == adminId &&
+                        existing.Payload != null &&
+                        existing.Payload.Contains($"\"competitionMode\":\"{mode}\"") &&
+                        existing.Payload.Contains($"\"puzzleTypeId\":\"{puzzleTypeId}\"")))
+                    .Select(adminId => new Notification
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = adminId,
+                        TypeCode = "SCRAMBLE_POOL_EMPTY",
+                        Title = "Scramble pool empty",
+                        Body = emptyMessage,
+                        Payload = payload,
+                        IsRead = false,
+                        CreatedAt = DateTime.UtcNow
+                    })
+                    .ToList();
+                if (notifications.Count > 0)
+                {
+                    _db.Notifications.AddRange(notifications);
+                    await _db.SaveChangesAsync(ct);
+                }
+
                 if (_realtimeNotifier != null)
                 {
                     await _realtimeNotifier.BroadcastScramblePoolDepletedAsync(new
@@ -77,7 +117,7 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
                         PuzzleTypeId = puzzleTypeId,
                         PuzzleCode = puzzleCode,
                         PuzzleName = puzzleName,
-                        Message = $"Scramble pool for {mode} ({puzzleCode}) is empty! Please generate scrambles or enable AUTO mode.",
+                        Message = emptyMessage,
                         Timestamp = DateTime.UtcNow
                     }, ct);
                 }
@@ -280,7 +320,7 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
         _db.ScramblePoolItems.AddRange(created);
         foreach (var item in created) AddAudit(item.Id, request.AutoApprove ? "GENERATED_AND_APPROVED" : "GENERATED", actorUserId);
         await _db.SaveChangesAsync(ct);
-        return created.Select(x => ToDto(x)).ToList();
+        return created.Select(x => ToDto(x, puzzle)).ToList();
     }
 
     public async Task<IReadOnlyList<ScramblePoolItemDto>> ImportAsync(ImportScramblesRequestDto request,
@@ -300,7 +340,7 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
         _db.ScramblePoolItems.AddRange(created);
         foreach (var item in created) AddAudit(item.Id, "IMPORTED", actorUserId);
         await _db.SaveChangesAsync(ct);
-        return created.Select(x => ToDto(x)).ToList();
+        return created.Select(x => ToDto(x, puzzle)).ToList();
     }
 
     public async Task<ScramblePoolItemDto> ApproveAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
@@ -352,7 +392,10 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
         var now = DateTime.UtcNow;
         return new ScramblePoolItem
         {
-            Id = Guid.NewGuid(), CompetitionMode = mode, PuzzleTypeId = puzzle.Id, PuzzleType = puzzle,
+            // Set only the FK. The PuzzleType instance may already be tracked by
+            // this DbContext; assigning this detached navigation would make EF
+            // attach a second instance with the same key during AUTO generation.
+            Id = Guid.NewGuid(), CompetitionMode = mode, PuzzleTypeId = puzzle.Id,
             Sequence = sequence, SequenceHash = hash,
             ExpectedStateJson = puzzle.Code == "333" ? JsonSerializer.Serialize(RubikCubeStateValidator.BuildExpectedCubeStateForScramble(sequence)) : null,
             Status = approved ? "AVAILABLE" : "DRAFT", IsValidated = true, GeneratorName = generator,
@@ -394,6 +437,10 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
     }
 
     private static string Hash(string sequence) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sequence))).ToLowerInvariant();
+    private static ScramblePoolItemDto ToDto(ScramblePoolItem x, PuzzleType puzzle, int? queuePosition = null) => new(x.Id, x.CompetitionMode, x.PuzzleTypeId,
+        puzzle.Code, puzzle.Name, x.Sequence, x.Status, x.IsValidated, x.GeneratorName, x.Notes,
+        x.CreatedAt, x.ApprovedAt, x.AssignedTargetType, x.AssignedTargetId, x.AssignedAt, queuePosition);
+
     private static ScramblePoolItemDto ToDto(ScramblePoolItem x, int? queuePosition = null) => new(x.Id, x.CompetitionMode, x.PuzzleTypeId,
         x.PuzzleType.Code, x.PuzzleType.Name, x.Sequence, x.Status, x.IsValidated, x.GeneratorName, x.Notes,
         x.CreatedAt, x.ApprovedAt, x.AssignedTargetType, x.AssignedTargetId, x.AssignedAt, queuePosition);

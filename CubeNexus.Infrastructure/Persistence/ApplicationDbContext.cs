@@ -346,6 +346,10 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<Notification>(entity =>
         {
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+            // Payload is stored as PostgreSQL jsonb. Keep the domain property as
+            // a serialized JSON string, but explicitly tell Npgsql to bind it as
+            // jsonb instead of sending it as SQL text.
+            entity.Property(e => e.Payload).HasColumnType("jsonb");
         });
 
         modelBuilder.Entity<RefreshToken>(entity =>

@@ -370,6 +370,20 @@ public class FaceVerificationService : IFaceVerificationService
     {
         var session = await GetOwnedSessionAsync(sessionId, callerUserId, staffOverride: true, ct);
         EnsureSessionOpen(session);
+        if (session.Purpose == "VERIFICATION" && session.State is not ("CHALLENGE_REQUIRED" or "CHALLENGE"))
+        {
+            throw new CustomException(
+                "ACTIVE_CHALLENGE_NOT_EXPECTED",
+                "Active challenge evidence is accepted only after the verification service requests a challenge.",
+                409);
+        }
+        if (session.Purpose == "VERIFICATION" && evidenceVideo is null)
+        {
+            throw new CustomException(
+                "CHALLENGE_VIDEO_REQUIRED",
+                "Challenge verification requires a recorded video evidence file.",
+                422);
+        }
         if (finalFrames.Count is < 1 or > 5)
         {
             throw new CustomException("FINAL_FRAMES_REQUIRED", "Active verification requires 1 to 5 final frames.", 422);

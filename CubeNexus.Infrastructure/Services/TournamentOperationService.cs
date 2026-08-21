@@ -149,6 +149,21 @@ public class TournamentOperationService : ITournamentOperationService
         if (ev == null)
             throw new KeyNotFoundException($"Event with ID {eventId} not found.");
 
+        var tournament = await _unitOfWork.Tournaments.GetByIdAsync(ev.TournamentId, ct);
+        if (tournament == null)
+            throw new KeyNotFoundException($"Tournament with ID {ev.TournamentId} not found.");
+
+        // Groups must be generated from a final registration snapshot. Enforce
+        // this at the backend so callers cannot bypass the UI validation.
+        var tournamentStatus = (tournament.StatusCode ?? string.Empty).Trim().ToUpperInvariant();
+        if (tournamentStatus is "DRAFT" or "PUBLISHED" or "REGISTRATION_OPEN" or "DISABLED")
+        {
+            throw new Application.Exceptions.CustomException(
+                "REGISTRATION_NOT_CLOSED",
+                "Cannot generate groups until tournament registration is closed.",
+                409);
+        }
+
         // Check if groups already exist for this event and round number
         var existingGroups = await _unitOfWork.Groups.FindAsync(g => g.EventId == eventId && g.RoundNumber == dto.RoundNumber, ct);
         if (existingGroups.Any())

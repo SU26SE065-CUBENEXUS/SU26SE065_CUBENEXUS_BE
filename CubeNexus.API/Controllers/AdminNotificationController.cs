@@ -1,10 +1,8 @@
 using CubeNexus.Infrastructure.Persistence;
 using CubeNexus.API.Security;
-using CubeNexus.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace CubeNexus.API.Controllers;
 
@@ -22,9 +20,8 @@ public sealed class AdminNotificationController : ControllerBase
     {
         limit = Math.Clamp(limit, 1, 100);
         var userId = GetUserId();
-        await EnsureActiveTournamentNotifications(userId, ct);
         var items = await _db.Notifications.AsNoTracking()
-            .Where(n => n.UserId == userId)
+            .Where(n => n.UserId == userId && n.TypeCode == "SCRAMBLE_POOL_EMPTY")
             .OrderByDescending(n => n.CreatedAt)
             .Take(limit)
             .Select(n => new
@@ -40,52 +37,6 @@ public sealed class AdminNotificationController : ControllerBase
             .ToListAsync(ct);
 
         return Ok(items);
-    }
-
-    private async Task EnsureActiveTournamentNotifications(Guid userId, CancellationToken ct)
-    {
-        var activeTournaments = await _db.Tournaments.AsNoTracking()
-            .Where(t => t.StatusCode == "CHECKING_IN" || t.StatusCode == "ONGOING")
-            .Select(t => new { t.Id, t.Name, t.StatusCode })
-            .ToListAsync(ct);
-
-        if (activeTournaments.Count == 0)
-            return;
-
-        var existing = await _db.Notifications.AsNoTracking()
-            .Where(n => n.UserId == userId && n.TypeCode == "TOURNAMENT_STATUS_CHANGED")
-            .Select(n => n.Payload)
-            .ToListAsync(ct);
-
-        var newNotifications = activeTournaments
-            .Where(t => !existing.Any(payload =>
-                payload != null &&
-                payload.Contains($"\"tournamentId\":\"{t.Id}\"") &&
-                payload.Contains($"\"statusCode\":\"{t.StatusCode}\"")))
-            .Select(t => new Notification
-            {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                TypeCode = "TOURNAMENT_STATUS_CHANGED",
-                Title = $"Tournament is {t.StatusCode.Replace('_', ' ')}",
-                Body = $"{t.Name} is currently in {t.StatusCode} status.",
-                Payload = JsonSerializer.Serialize(new
-                {
-                    tournamentId = t.Id,
-                    tournamentName = t.Name,
-                    previousStatus = (string?)null,
-                    statusCode = t.StatusCode
-                }),
-                IsRead = false,
-                CreatedAt = DateTime.UtcNow
-            })
-            .ToList();
-
-        if (newNotifications.Count > 0)
-        {
-            _db.Notifications.AddRange(newNotifications);
-            await _db.SaveChangesAsync(ct);
-        }
     }
 
     [HttpPost("read-all")]
