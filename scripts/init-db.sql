@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS users (
     banned_until TIMESTAMPTZ,
     email_confirmed BOOLEAN NOT NULL DEFAULT true,
     email_confirmed_at TIMESTAMPTZ,
+    auth_provider VARCHAR(20) NOT NULL DEFAULT 'LOCAL',
+    google_sub VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
 
@@ -53,7 +55,10 @@ CREATE TABLE IF NOT EXISTS users (
         CHECK (
             (is_banned = false AND ban_reason IS NULL)
             OR (is_banned = true)
-        )
+        ),
+
+    CONSTRAINT ck_users_auth_provider
+        CHECK (auth_provider IN ('LOCAL', 'GOOGLE'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_role
@@ -61,6 +66,10 @@ ON users(user_role);
 
 CREATE INDEX IF NOT EXISTS idx_users_active
 ON users(is_active, is_banned);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_google_sub
+ON users(google_sub)
+WHERE google_sub IS NOT NULL;
 
 
 CREATE TABLE IF NOT EXISTS puzzle_types (
@@ -727,6 +736,8 @@ CREATE TABLE IF NOT EXISTS online_matches (
     id UUID PRIMARY KEY,
     puzzle_type_id UUID NOT NULL REFERENCES puzzle_types(id),
     scramble_sequence TEXT NOT NULL,
+    player1_scramble_sequence TEXT,
+    player2_scramble_sequence TEXT,
     scramble_pool_item_id UUID REFERENCES scramble_pool_items(id) ON DELETE SET NULL,
 
     player1_id UUID NOT NULL REFERENCES users(id),

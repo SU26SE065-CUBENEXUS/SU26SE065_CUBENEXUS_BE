@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace CubeNexus.API.BackgroundServices;
 
 /// <summary>
-/// BackgroundService chạy mỗi 120 giây để tự động chuyển phase theo deadline.
+/// BackgroundService chạy mỗi 15 giây để tự động chuyển phase theo deadline.
 /// Tất cả transitions đều idempotent — chạy nhiều lần không gây tác dụng phụ.
 /// 
 /// Phase transitions handled (deadline-based only — auto-ready is event-driven in use cases):

@@ -87,6 +87,18 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 public class OnlineMatchRepository : IOnlineMatchRepository
 {
     private static readonly string[] ActiveStatuses = ["CREATED", "READY", "ONGOING", "PENDING_EVIDENCE", "NEEDS_REVIEW"];
+    private static readonly string[] ReconcilePhases =
+    [
+        "ROOM_SETUP",
+        "WEBRTC_CONNECTING",
+        "MOBILE_TIMER_PAIRING",
+        "SCRAMBLE_CHECKING",
+        "COUNTDOWN",
+        "INSPECTION",
+        "SOLVING",
+        "FINISH_CHECKING",
+        "PENDING_EVIDENCE"
+    ];
 
     private readonly ApplicationDbContext _context;
 
@@ -135,7 +147,11 @@ public class OnlineMatchRepository : IOnlineMatchRepository
 
     public Task<List<OnlineMatch>> GetActiveMatchesForReconcileAsync(CancellationToken ct = default)
         => _context.Set<OnlineMatch>()
-            .Where(m => ActiveStatuses.Contains(m.StatusCode))
+            // Only load phases handled by OnlineArenaBackgroundService.
+            // NEEDS_REVIEW remains an active business status for user flows,
+            // but the reconciler intentionally has no work to perform there.
+            .Where(m => ActiveStatuses.Contains(m.StatusCode)
+                && ReconcilePhases.Contains(m.Phase))
             .ToListAsync(ct);
 
     public async Task<(List<OnlineMatch> Items, int TotalCount)> GetUserMatchHistoryAsync(Guid userId, Guid? puzzleTypeId, int page, int pageSize)
