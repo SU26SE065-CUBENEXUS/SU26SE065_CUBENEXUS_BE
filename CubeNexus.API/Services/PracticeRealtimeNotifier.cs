@@ -27,4 +27,22 @@ public class PracticeRealtimeNotifier : IPracticeRealtimeNotifier
             connectedAt = DateTime.UtcNow
         });
     }
+
+    public Task NotifyPracticeMobileDisconnectedAsync(Guid userId, Guid sessionId)
+    {
+        return _hubContext.Clients.Group($"user:{userId}").SendAsync("PracticeMobileDisconnected", new
+        {
+            sessionId,
+            disconnectedAt = DateTime.UtcNow
+        });
+    }
+
+    public Task NotifyPracticeSessionEndedAsync(Guid userId, Guid sessionId)
+    {
+        return _hubContext.Clients.Group($"user:{userId}").SendAsync("PracticeSessionEnded", new
+        {
+            sessionId,
+            endedAt = DateTime.UtcNow
+        });
+    }
 }
