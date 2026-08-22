@@ -232,8 +232,6 @@ public class AiScannerTestController : ControllerBase
 
     private IActionResult? EnsureEnabled()
     {
-        if (!_environment.IsDevelopment())
-            return NotFound();
         if (!_options.EnableUnauthenticatedScannerTest)
             return NotFound();
         return null;
