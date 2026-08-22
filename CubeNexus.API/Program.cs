@@ -255,9 +255,12 @@ CubeNexus.Application.UseCases.OnlineArena.MatchTransitionScheduler.Instance =
     app.Services.GetRequiredService<CubeNexus.Application.UseCases.OnlineArena.IMatchTransitionScheduler>();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Swagger is disabled by default in Production and can be enabled temporarily
+// through Swagger__Enabled=true for API verification.
+var swaggerEnabled = builder.Configuration.GetValue<bool?>("Swagger:Enabled")
+    ?? app.Environment.IsDevelopment();
+if (swaggerEnabled)
 {
-    app.Environment.EnvironmentName = "Development"; // Just a placeholder
     app.UseSwagger();
     app.UseSwaggerUI();
 }
