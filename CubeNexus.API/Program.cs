@@ -200,6 +200,7 @@ builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.SubmitOnli
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CompleteOnlineMatchUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.CreateFraudReportUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetPendingFraudReportsUseCase>();
+builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetAllFraudReportsUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.GetFraudReportDetailUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ReviewFraudReportUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.UseCases.OnlineArena.ApplySetupTimeoutUseCase>();

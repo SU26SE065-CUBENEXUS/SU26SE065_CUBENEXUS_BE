@@ -93,6 +93,7 @@ public interface IFraudReportRepository
 {
     Task<FraudReport?> GetByIdAsync(Guid id);
     Task<List<FraudReport>> GetPendingReportsAsync();
+    Task<List<FraudReport>> GetAllReportsAsync();
     Task<List<FraudReport>> GetByMatchAsync(Guid matchId);
     Task AddAsync(FraudReport report);
     void Update(FraudReport report);

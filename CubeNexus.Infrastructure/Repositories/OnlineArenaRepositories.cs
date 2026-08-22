@@ -361,6 +361,11 @@ public class FraudReportRepository : IFraudReportRepository
             .OrderBy(report => report.CreatedAt)
             .ToListAsync();
 
+    public Task<List<FraudReport>> GetAllReportsAsync()
+        => _context.Set<FraudReport>()
+            .OrderByDescending(report => report.CreatedAt)
+            .ToListAsync();
+
     public Task<List<FraudReport>> GetByMatchAsync(Guid matchId)
         => _context.Set<FraudReport>()
             .Where(report => report.MatchId == matchId)

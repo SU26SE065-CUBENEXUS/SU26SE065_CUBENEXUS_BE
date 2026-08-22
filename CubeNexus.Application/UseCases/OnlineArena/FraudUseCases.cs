@@ -117,6 +117,19 @@ public class GetPendingFraudReportsUseCase
         => (await _fraudRepo.GetPendingReportsAsync()).Select(FraudReportMapper.ToDto).ToList();
 }
 
+public class GetAllFraudReportsUseCase
+{
+    private readonly IFraudReportRepository _fraudRepo;
+
+    public GetAllFraudReportsUseCase(IFraudReportRepository fraudRepo)
+    {
+        _fraudRepo = fraudRepo;
+    }
+
+    public async Task<List<FraudReportDto>> ExecuteAsync()
+        => (await _fraudRepo.GetAllReportsAsync()).Select(FraudReportMapper.ToDto).ToList();
+}
+
 public class ReviewFraudReportUseCase
 {
     private readonly IFraudReportRepository _fraudRepo;
@@ -159,8 +172,22 @@ public class ReviewFraudReportUseCase
         var report = await _fraudRepo.GetByIdAsync(reportId);
         if (report == null)
             throw new KeyNotFoundException("Fraud report not found.");
+            
         if (report.StatusCode is not "OPEN" and not "REVIEWING" and not "PENDING")
-            throw new ConflictException("Only OPEN/REVIEWING fraud reports can be resolved.");
+        {
+            if (report.StatusCode == "RESOLVED")
+            {
+                var resolvedTime = report.ResolvedAt ?? report.ReviewedAt ?? report.CreatedAt;
+                if (DateTime.UtcNow > resolvedTime.AddHours(24))
+                {
+                    throw new ConflictException("Đã quá thời hạn 24 giờ kể từ khi chốt phán quyết. Báo cáo này đã bị khóa và không thể thay đổi xử lý.");
+                }
+            }
+            else
+            {
+                throw new ConflictException("Chỉ có thể xử lý các báo cáo đang mở hoặc đã xử lý trong vòng 24 giờ.");
+            }
+        }
 
         var decision = string.IsNullOrWhiteSpace(request.VerdictCode)
             ? FraudVerdict.INCONCLUSIVE.ToString()
@@ -414,7 +441,19 @@ public class GetFraudReportDetailUseCase
 internal static class FraudReportMapper
 {
     public static FraudReportDto ToDto(FraudReport report)
-        => new()
+    {
+        var resolvedTime = report.ResolvedAt ?? report.ReviewedAt;
+        bool canReReview = true;
+        double? hoursLeft = null;
+
+        if (report.StatusCode == "RESOLVED" && resolvedTime.HasValue)
+        {
+            var hoursPassed = (DateTime.UtcNow - resolvedTime.Value).TotalHours;
+            canReReview = hoursPassed <= 24.0;
+            hoursLeft = canReReview ? Math.Round(Math.Max(0, 24.0 - hoursPassed), 1) : 0;
+        }
+
+        return new()
         {
             Id = report.Id,
             MatchId = report.MatchId,
@@ -437,6 +476,9 @@ internal static class FraudReportMapper
             VerdictCode = report.VerdictCode,
             AdminNote = report.AdminNote,
             CreatedAt = report.CreatedAt,
-            ReviewedAt = report.ReviewedAt
+            ReviewedAt = report.ReviewedAt,
+            CanReReview = canReReview,
+            HoursLeftToReReview = hoursLeft
         };
+    }
 }

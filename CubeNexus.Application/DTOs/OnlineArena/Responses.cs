@@ -107,6 +107,8 @@ public class FraudReportDto
     public string? AdminNote { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? ReviewedAt { get; set; }
+    public bool CanReReview { get; set; } = true;
+    public double? HoursLeftToReReview { get; set; }
 }
 
 public class OnlineMatchAiCheckDto

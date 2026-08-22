@@ -37,6 +37,32 @@ public class OnlineArenaAdminController : ControllerBase
     };
 
     [HttpGet]
+    public async Task<IActionResult> GetAllReports(
+        [FromQuery] string? status,
+        [FromServices] GetAllFraudReportsUseCase allUseCase,
+        [FromServices] GetPendingFraudReportsUseCase pendingUseCase)
+    {
+        try
+        {
+            if (string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase))
+            {
+                return Ok(await pendingUseCase.ExecuteAsync());
+            }
+
+            var all = await allUseCase.ExecuteAsync();
+            if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
+            {
+                all = all.Where(r => string.Equals(r.StatusCode, status, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+
+            return Ok(all);
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
     [HttpGet("pending")]
     public async Task<IActionResult> GetPendingReports([FromServices] GetPendingFraudReportsUseCase useCase)
     {
