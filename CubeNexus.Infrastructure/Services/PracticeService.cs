@@ -21,11 +21,16 @@ public class PracticeService : IPracticeService
 
     private readonly IUnitOfWork _uow;
     private readonly IScrambleGeneratorService _scrambleGenerator;
+    private readonly IPracticeRealtimeNotifier _notifier;
 
-    public PracticeService(IUnitOfWork uow, IScrambleGeneratorService scrambleGenerator)
+    public PracticeService(
+        IUnitOfWork uow,
+        IScrambleGeneratorService scrambleGenerator,
+        IPracticeRealtimeNotifier notifier)
     {
         _uow = uow;
         _scrambleGenerator = scrambleGenerator;
+        _notifier = notifier;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -88,6 +93,8 @@ public class PracticeService : IPracticeService
             await _uow.SaveChangesAsync();
         }
 
+        await _notifier.NotifyPracticeSessionEndedAsync(userId, sessionId);
+
         return await BuildSummaryAsync(session);
     }
 
@@ -146,7 +153,9 @@ public class PracticeService : IPracticeService
         await _uow.Practice.AddAttemptAsync(attempt);
         await _uow.SaveChangesAsync();
 
-        return MapAttempt(attempt);
+        var result = MapAttempt(attempt);
+        await _notifier.NotifyPracticeAttemptUpdatedAsync(userId, result);
+        return result;
     }
 
     public async Task<PracticeAttemptResponseDto?> GetCurrentAttemptAsync(
@@ -171,11 +180,14 @@ public class PracticeService : IPracticeService
         switch (attempt.State)
         {
             case PracticeAttemptState.Scrambled:
+            case PracticeAttemptState.HoldingHands:
+            case PracticeAttemptState.Ready:
                 attempt.State = PracticeAttemptState.HoldingHands;
                 attempt.HandsOnAt = DateTime.UtcNow;
                 break;
 
             case PracticeAttemptState.Solving:
+            case PracticeAttemptState.Stopped:
                 attempt.State = PracticeAttemptState.Stopped;
                 attempt.StoppedAt = DateTime.UtcNow;
                 break;
@@ -185,7 +197,9 @@ public class PracticeService : IPracticeService
         }
 
         await _uow.SaveChangesAsync();
-        return MapAttempt(attempt);
+        var result = MapAttempt(attempt);
+        await _notifier.NotifyPracticeAttemptUpdatedAsync(userId, result);
+        return result;
     }
 
     public async Task<PracticeAttemptResponseDto> ReadyAsync(Guid userId, Guid attemptId)
@@ -193,14 +207,16 @@ public class PracticeService : IPracticeService
         var attempt = await GetOwnedAttemptAsync(userId, attemptId);
         await GetOwnedOpenSessionAsync(userId, attempt.SessionId);
 
-        if (attempt.State != PracticeAttemptState.HoldingHands)
+        if (attempt.State != PracticeAttemptState.HoldingHands && attempt.State != PracticeAttemptState.Ready)
             throw InvalidTransition(attempt.State, "ready");
 
         attempt.State = PracticeAttemptState.Ready;
         attempt.ReadyAt = DateTime.UtcNow;
         await _uow.SaveChangesAsync();
 
-        return MapAttempt(attempt);
+        var result = MapAttempt(attempt);
+        await _notifier.NotifyPracticeAttemptUpdatedAsync(userId, result);
+        return result;
     }
 
     public async Task<PracticeAttemptResponseDto> HandsOffAsync(Guid userId, Guid attemptId)
@@ -223,7 +239,9 @@ public class PracticeService : IPracticeService
         attempt.StartedAt = DateTime.UtcNow;
         await _uow.SaveChangesAsync();
 
-        return MapAttempt(attempt);
+        var result = MapAttempt(attempt);
+        await _notifier.NotifyPracticeAttemptUpdatedAsync(userId, result);
+        return result;
     }
 
     public async Task<PracticeAttemptResponseDto> FinalizeAttemptAsync(
@@ -232,8 +250,13 @@ public class PracticeService : IPracticeService
         var attempt = await GetOwnedAttemptAsync(userId, attemptId);
         var session = await GetOwnedOpenSessionAsync(userId, attempt.SessionId);
 
-        if (attempt.State != PracticeAttemptState.Stopped)
+        if (attempt.State != PracticeAttemptState.Stopped && attempt.State != PracticeAttemptState.Solving)
             throw InvalidTransition(attempt.State, "finalize");
+
+        if (attempt.State == PracticeAttemptState.Solving)
+        {
+            attempt.StoppedAt = DateTime.UtcNow;
+        }
 
         var penaltyCode = NormalizePenalty(dto.Penalty);
         var penaltyType = await ResolvePenaltyTypeAsync(penaltyCode);
@@ -279,7 +302,9 @@ public class PracticeService : IPracticeService
         if (recentSolves.Count == 5)
             ao5 = PracticeAo5Calculator.CalculateAo5(recentSolves.OrderBy(s => s.SolvedAt).ToList());
 
-        return MapAttempt(attempt, solve.Id, displayTimeMs, ao5);
+        var result = MapAttempt(attempt, solve.Id, displayTimeMs, ao5);
+        await _notifier.NotifyPracticeAttemptUpdatedAsync(userId, result);
+        return result;
     }
 
     public async Task<PracticeAttemptResponseDto> AbortAttemptAsync(
@@ -296,7 +321,21 @@ public class PracticeService : IPracticeService
         attempt.CompletedAt = DateTime.UtcNow;
         await _uow.SaveChangesAsync();
 
-        return MapAttempt(attempt);
+        var result = MapAttempt(attempt);
+        await _notifier.NotifyPracticeAttemptUpdatedAsync(userId, result);
+        return result;
+    }
+
+    public async Task ConnectSessionAsync(Guid userId, Guid sessionId)
+    {
+        await GetOwnedOpenSessionAsync(userId, sessionId);
+        await _notifier.NotifyPracticeMobileConnectedAsync(userId, sessionId);
+    }
+
+    public async Task DisconnectSessionAsync(Guid userId, Guid sessionId)
+    {
+        await GetOwnedSessionAsync(userId, sessionId);
+        await _notifier.NotifyPracticeMobileDisconnectedAsync(userId, sessionId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

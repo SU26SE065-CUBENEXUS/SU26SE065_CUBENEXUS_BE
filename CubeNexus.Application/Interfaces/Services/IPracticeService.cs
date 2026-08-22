@@ -35,4 +35,7 @@ public interface IPracticeService
 
     Task<PracticeAttemptResponseDto> AbortAttemptAsync(
         Guid userId, Guid attemptId, AbortAttemptDto? dto);
+
+    Task ConnectSessionAsync(Guid userId, Guid sessionId);
+    Task DisconnectSessionAsync(Guid userId, Guid sessionId);
 }

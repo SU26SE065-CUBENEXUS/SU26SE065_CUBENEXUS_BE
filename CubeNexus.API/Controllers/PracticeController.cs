@@ -83,6 +83,52 @@ public class PracticeController : ControllerBase
         }
     }
 
+    [HttpPost("sessions/{sessionId:guid}/connect")]
+    public async Task<IActionResult> ConnectSession(Guid sessionId)
+    {
+        try
+        {
+            var userId = GetCurrentUserId();
+            await _practiceService.ConnectSessionAsync(userId, sessionId);
+            return Ok(new { message = "Practice mobile timer connected." });
+        }
+        catch (CustomException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.ErrorCode, message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("sessions/{sessionId:guid}/disconnect")]
+    public async Task<IActionResult> DisconnectSession(Guid sessionId)
+    {
+        try
+        {
+            var userId = GetCurrentUserId();
+            await _practiceService.DisconnectSessionAsync(userId, sessionId);
+            return Ok(new { message = "Practice mobile timer disconnected." });
+        }
+        catch (CustomException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.ErrorCode, message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("sessions/{sessionId:guid}/attempts")]
     public async Task<IActionResult> CreateAttempt(Guid sessionId)
     {

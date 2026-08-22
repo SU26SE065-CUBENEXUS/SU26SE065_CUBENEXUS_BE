@@ -133,6 +133,7 @@ builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentO
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.IVerifyJudgeStationByStationUseCase, CubeNexus.Application.UseCases.TournamentOperation.VerifyJudgeStationUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.UseCases.TournamentOperation.ICorrectResultUseCase, CubeNexus.Application.UseCases.TournamentOperation.CorrectResultUseCase>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IRealtimeNotifier, CubeNexus.API.Services.RealtimeNotifier>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IPracticeRealtimeNotifier, CubeNexus.API.Services.PracticeRealtimeNotifier>();
 
 // --- Online Arena services & usecases ---
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.OnlineArena.IOnlineArenaRealtimeNotifier, CubeNexus.API.Services.OnlineArenaRealtimeNotifier>();
