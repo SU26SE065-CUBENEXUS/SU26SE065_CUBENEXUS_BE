@@ -294,6 +294,12 @@ public class TournamentService : ITournamentService
             CreatedByUserName = t.CreatedByUser?.DisplayName ?? string.Empty,
             CreatedAt = t.CreatedAt,
             UpdatedAt = t.UpdatedAt,
+            TournamentType = t.TournamentType ?? "OFFLINE",
+            IsOnlineAsync = t.TournamentType == "ONLINE_ASYNC",
+            PuzzleTypeId = t.PuzzleTypeId,
+            PuzzleTypeName = t.PuzzleType?.Name ?? (t.PuzzleTypeId.HasValue ? _context.PuzzleTypes.Where(p => p.Id == t.PuzzleTypeId.Value).Select(p => p.Name).FirstOrDefault() : null),
+            PuzzleTypeCode = t.PuzzleType?.Code ?? (t.PuzzleTypeId.HasValue ? _context.PuzzleTypes.Where(p => p.Id == t.PuzzleTypeId.Value).Select(p => p.Code).FirstOrDefault() : null),
+            AttemptTimeLimitMs = t.AttemptTimeLimitMs > 0 ? t.AttemptTimeLimitMs : 300000,
             Events = t.Events.Select(e => new EventDetailDto
             {
                 Id = e.Id,

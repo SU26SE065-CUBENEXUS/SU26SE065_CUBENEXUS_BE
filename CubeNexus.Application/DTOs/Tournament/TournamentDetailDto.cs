@@ -19,6 +19,13 @@ public class TournamentDetailDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     
+    public string TournamentType { get; set; } = "OFFLINE";
+    public bool IsOnlineAsync { get; set; }
+    public Guid? PuzzleTypeId { get; set; }
+    public string? PuzzleTypeName { get; set; }
+    public string? PuzzleTypeCode { get; set; }
+    public int AttemptTimeLimitMs { get; set; } = 300000;
+    
     public List<EventDetailDto> Events { get; set; } = new();
 }
 
