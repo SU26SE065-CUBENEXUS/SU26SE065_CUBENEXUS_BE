@@ -37,4 +37,5 @@ public interface IPracticeService
         Guid userId, Guid attemptId, AbortAttemptDto? dto);
 
     Task ConnectSessionAsync(Guid userId, Guid sessionId);
+    Task DisconnectSessionAsync(Guid userId, Guid sessionId);
 }

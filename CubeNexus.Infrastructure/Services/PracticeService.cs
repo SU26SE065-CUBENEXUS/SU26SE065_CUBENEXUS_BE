@@ -93,6 +93,8 @@ public class PracticeService : IPracticeService
             await _uow.SaveChangesAsync();
         }
 
+        await _notifier.NotifyPracticeSessionEndedAsync(userId, sessionId);
+
         return await BuildSummaryAsync(session);
     }
 
@@ -248,8 +250,13 @@ public class PracticeService : IPracticeService
         var attempt = await GetOwnedAttemptAsync(userId, attemptId);
         var session = await GetOwnedOpenSessionAsync(userId, attempt.SessionId);
 
-        if (attempt.State != PracticeAttemptState.Stopped)
+        if (attempt.State != PracticeAttemptState.Stopped && attempt.State != PracticeAttemptState.Solving)
             throw InvalidTransition(attempt.State, "finalize");
+
+        if (attempt.State == PracticeAttemptState.Solving)
+        {
+            attempt.StoppedAt = DateTime.UtcNow;
+        }
 
         var penaltyCode = NormalizePenalty(dto.Penalty);
         var penaltyType = await ResolvePenaltyTypeAsync(penaltyCode);
@@ -321,8 +328,14 @@ public class PracticeService : IPracticeService
 
     public async Task ConnectSessionAsync(Guid userId, Guid sessionId)
     {
-        await GetOwnedSessionAsync(userId, sessionId);
+        await GetOwnedOpenSessionAsync(userId, sessionId);
         await _notifier.NotifyPracticeMobileConnectedAsync(userId, sessionId);
+    }
+
+    public async Task DisconnectSessionAsync(Guid userId, Guid sessionId)
+    {
+        await GetOwnedSessionAsync(userId, sessionId);
+        await _notifier.NotifyPracticeMobileDisconnectedAsync(userId, sessionId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
