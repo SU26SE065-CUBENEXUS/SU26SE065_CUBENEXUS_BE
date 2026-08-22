@@ -122,10 +122,22 @@ public class ConfirmOnlineMatchUseCase
                         serverNow = DateTime.UtcNow
                     });
 
+                var opponentUser = isPlayer1 ? confirmation.Player2 : confirmation.Player1;
+                var oppProfile = await _profileRepo.GetProfileAsync(opponentUser.Id, confirmation.PuzzleTypeId);
+                var oppDisplayName = !string.IsNullOrWhiteSpace(opponentUser.DisplayName)
+                    ? opponentUser.DisplayName
+                    : (!string.IsNullOrWhiteSpace(opponentUser.UserCode) ? opponentUser.UserCode : "Opponent");
+
                 return new MatchmakingStatusDto
                 {
                     Status = "MATCH_CONFIRMING",
                     ConfirmationId = confirmation.Id,
+                    Opponent = new OpponentDto
+                    {
+                        UserId = opponentUser.Id,
+                        DisplayName = oppDisplayName,
+                        Rating = oppProfile?.EloStandard ?? 0
+                    },
                     Player1Confirmed = confirmation.Player1Confirmed,
                     Player2Confirmed = confirmation.Player2Confirmed,
                     ConfirmDeadlineAt = confirmation.ConfirmDeadlineAt,

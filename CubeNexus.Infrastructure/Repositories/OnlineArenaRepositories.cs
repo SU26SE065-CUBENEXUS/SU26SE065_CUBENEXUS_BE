@@ -52,6 +52,8 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
         var queue = await _context.Set<MatchmakingQueue>()
             .FromSqlRaw(sql, puzzleTypeId, currentUserId)
             .Include(item => item.OnlineProfile)
+            .ThenInclude(p => p.User)
+            .Include(item => item.User)
             .FirstOrDefaultAsync();
 
         if (queue != null && Math.Abs(queue.OnlineProfile.EloStandard - currentElo) <= eloRange)

@@ -82,28 +82,41 @@ public class FindOnlineMatchUseCase
         var existingConfirmation = await _confirmationRepo.GetPendingConfirmationAsync(userId, puzzleTypeId);
         if (existingConfirmation != null)
         {
-            var isPlayer1 = existingConfirmation.Player1UserId == userId;
-            var opponent = isPlayer1 ? existingConfirmation.Player2 : existingConfirmation.Player1;
-            var opponentProfile = await _profileRepo.GetProfileAsync(opponent.Id, puzzleTypeId);
-            var remaining = Math.Max(0, (int)(existingConfirmation.ConfirmDeadlineAt - now).TotalSeconds);
-
-            return new MatchmakingStatusDto
+            if (existingConfirmation.ConfirmDeadlineAt <= now)
             {
-                Status = "MATCH_FOUND",
-                ConfirmationId = existingConfirmation.Id,
-                Opponent = new OpponentDto
+                existingConfirmation.Status = "EXPIRED";
+                _confirmationRepo.Update(existingConfirmation);
+                await _uow.SaveChangesAsync();
+            }
+            else
+            {
+                var isPlayer1 = existingConfirmation.Player1UserId == userId;
+                var opponent = isPlayer1 ? existingConfirmation.Player2 : existingConfirmation.Player1;
+                var opponentProfile = await _profileRepo.GetProfileAsync(opponent.Id, puzzleTypeId);
+                var remaining = Math.Max(0, (int)(existingConfirmation.ConfirmDeadlineAt - now).TotalSeconds);
+
+                var oppDisplayName = !string.IsNullOrWhiteSpace(opponent.DisplayName)
+                    ? opponent.DisplayName
+                    : (!string.IsNullOrWhiteSpace(opponent.UserCode) ? opponent.UserCode : "Opponent");
+
+                return new MatchmakingStatusDto
                 {
-                    UserId = opponent.Id,
-                    DisplayName = opponent.DisplayName,
-                    Rating = opponentProfile?.EloStandard ?? 0
-                },
-                ConfirmDeadlineAt = existingConfirmation.ConfirmDeadlineAt,
-                RemainingSeconds = remaining,
-                Player1Confirmed = existingConfirmation.Player1Confirmed,
-                Player2Confirmed = existingConfirmation.Player2Confirmed,
-                MeUserId = userId,
-                ServerNow = now
-            };
+                    Status = "MATCH_FOUND",
+                    ConfirmationId = existingConfirmation.Id,
+                    Opponent = new OpponentDto
+                    {
+                        UserId = opponent.Id,
+                        DisplayName = oppDisplayName,
+                        Rating = opponentProfile?.EloStandard ?? 0
+                    },
+                    ConfirmDeadlineAt = existingConfirmation.ConfirmDeadlineAt,
+                    RemainingSeconds = remaining,
+                    Player1Confirmed = existingConfirmation.Player1Confirmed,
+                    Player2Confirmed = existingConfirmation.Player2Confirmed,
+                    MeUserId = userId,
+                    ServerNow = now
+                };
+            }
         }
 
         // 4. Already queued?
@@ -126,6 +139,30 @@ public class FindOnlineMatchUseCase
             if (opponentQueue == null)
             {
                 // No opponent yet — join the queue
+                var existingQueued = await _queueRepo.GetQueuedQueueAsync(userId, puzzleTypeId);
+                if (existingQueued != null)
+                {
+                    existingQueued.QueuedAt = DateTime.UtcNow;
+                    _queueRepo.Update(existingQueued);
+                    await _uow.CommitTransactionAsync();
+
+                    await _notifier.NotifyMatchmakingQueuedAsync(userId, new
+                    {
+                        status = "QUEUED",
+                        queueId = existingQueued.Id,
+                        puzzleTypeId,
+                        userId,
+                        serverNow = DateTime.UtcNow
+                    });
+
+                    return new MatchmakingStatusDto
+                    {
+                        Status = "QUEUED",
+                        QueueId = existingQueued.Id,
+                        ServerNow = DateTime.UtcNow
+                    };
+                }
+
                 var newQueue = new MatchmakingQueue
                 {
                     Id = Guid.NewGuid(),
@@ -161,16 +198,25 @@ public class FindOnlineMatchUseCase
             _queueRepo.Update(opponentQueue);
 
             // Current player also needs a queue entry marked CONFIRMING
-            var myQueue = new MatchmakingQueue
+            var existingMyQueue = await _queueRepo.GetQueuedQueueAsync(userId, puzzleTypeId);
+            if (existingMyQueue != null)
             {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                OnlineProfileId = profile.Id,
-                PuzzleTypeId = puzzleTypeId,
-                QueuedAt = DateTime.UtcNow,
-                StatusCode = MatchmakingQueueStatus.CONFIRMING.ToString()
-            };
-            await _queueRepo.AddAsync(myQueue);
+                existingMyQueue.StatusCode = MatchmakingQueueStatus.CONFIRMING.ToString();
+                _queueRepo.Update(existingMyQueue);
+            }
+            else
+            {
+                var myQueue = new MatchmakingQueue
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    OnlineProfileId = profile.Id,
+                    PuzzleTypeId = puzzleTypeId,
+                    QueuedAt = DateTime.UtcNow,
+                    StatusCode = MatchmakingQueueStatus.CONFIRMING.ToString()
+                };
+                await _queueRepo.AddAsync(myQueue);
+            }
 
             // Create the confirmation record
             var deadline = DateTime.UtcNow.Add(MatchmakingCooldownPolicy.ConfirmationWindow);
@@ -193,15 +239,17 @@ public class FindOnlineMatchUseCase
             var opponentProfile = opponentQueue.OnlineProfile;
             var remainingSeconds = (int)(deadline - DateTime.UtcNow).TotalSeconds;
 
-            var basePayload = new
-            {
-                confirmationId = confirmation.Id,
-                confirmDeadlineAt = deadline,
-                remainingSeconds,
-                player1Confirmed = false,
-                player2Confirmed = false,
-                serverNow = DateTime.UtcNow
-            };
+            var myName = !string.IsNullOrWhiteSpace(profile.User?.DisplayName)
+                ? profile.User.DisplayName
+                : (!string.IsNullOrWhiteSpace(profile.User?.UserCode) ? profile.User.UserCode : "Player");
+
+            var oppName = !string.IsNullOrWhiteSpace(opponentProfile?.User?.DisplayName)
+                ? opponentProfile.User.DisplayName
+                : (!string.IsNullOrWhiteSpace(opponentQueue.User?.DisplayName)
+                    ? opponentQueue.User.DisplayName
+                    : (!string.IsNullOrWhiteSpace(opponentQueue.User?.UserCode)
+                        ? opponentQueue.User.UserCode
+                        : "Opponent"));
 
             var p1Payload = new
             {
@@ -209,7 +257,7 @@ public class FindOnlineMatchUseCase
                 opponent = new
                 {
                     userId = userId,  // player2 = current user = opponent for p1
-                    displayName = profile.User?.DisplayName ?? string.Empty,
+                    displayName = myName,
                     rating = profile.EloStandard
                 },
                 confirmDeadlineAt = deadline,
@@ -226,7 +274,7 @@ public class FindOnlineMatchUseCase
                 opponent = new
                 {
                     userId = opponentQueue.UserId,  // player1 = opponent for p2
-                    displayName = opponentProfile?.User?.DisplayName ?? string.Empty,
+                    displayName = oppName,
                     rating = opponentProfile?.EloStandard ?? 0
                 },
                 confirmDeadlineAt = deadline,
@@ -241,8 +289,6 @@ public class FindOnlineMatchUseCase
                 opponentQueue.UserId, userId,
                 p1Payload, p2Payload);
 
-            // Load opponent profile for the return value
-            var opponentUser = opponentQueue.User;
             return new MatchmakingStatusDto
             {
                 Status = "MATCH_FOUND",
@@ -250,7 +296,7 @@ public class FindOnlineMatchUseCase
                 Opponent = new OpponentDto
                 {
                     UserId = opponentQueue.UserId,
-                    DisplayName = opponentUser?.DisplayName ?? string.Empty,
+                    DisplayName = oppName,
                     Rating = opponentProfile?.EloStandard ?? 0
                 },
                 ConfirmDeadlineAt = deadline,

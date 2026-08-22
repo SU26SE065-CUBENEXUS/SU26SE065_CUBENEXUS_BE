@@ -52,6 +52,7 @@ public class OnlineArenaController : ControllerBase
         KeyNotFoundException notFound => NotFound(new { code = "NOT_FOUND", message = notFound.Message }),
         InvalidOperationException invalidOperation => BadRequest(new { code = "BAD_REQUEST", message = invalidOperation.Message }),
         ArgumentException argument => BadRequest(new { code = "BAD_REQUEST", message = argument.Message }),
+        DbUpdateException dbEx => StatusCode(StatusCodes.Status500InternalServerError, new { code = "DATABASE_ERROR", message = dbEx.InnerException?.Message ?? dbEx.Message }),
         _ => StatusCode(StatusCodes.Status500InternalServerError, new { code = "SERVER_ERROR", message = ex.Message })
     };
 
