@@ -32,13 +32,19 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     display_name VARCHAR(100) NOT NULL,
+    phone VARCHAR(20) NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
     avatar_url TEXT,
-    user_role VARCHAR(20) NOT NULL,  -- 'admin', 'player', 'judge', 'organizer'
+    user_role VARCHAR(20) NOT NULL DEFAULT 'COMPETITOR',  -- 'ADMIN', 'MANAGER', 'JUDGE', 'COMPETITOR'
     is_active BOOLEAN DEFAULT true,
     is_banned BOOLEAN DEFAULT false,
     ban_reason TEXT,
-    created_at TIMESTAMPTZ NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL
+    banned_at TIMESTAMPTZ,
+    banned_until TIMESTAMPTZ,
+    email_confirmed BOOLEAN NOT NULL DEFAULT true,
+    email_confirmed_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE puzzle_types (
@@ -532,4 +538,3 @@ SELECT
 WHERE NOT EXISTS (SELECT 1 FROM elo_config);
 
 COMMIT;
->>>>>>> 42cd0430219596e4936ffedcfed65e3dc4437053
