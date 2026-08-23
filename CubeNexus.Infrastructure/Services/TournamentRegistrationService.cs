@@ -26,8 +26,8 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         int count = 20,
         CancellationToken ct = default)
     {
-        if (count is < 1 or > 20)
-            throw new InvalidOperationException("Demo participant count must be between 1 and 20.");
+        if (count < 1)
+            throw new InvalidOperationException("Demo participant count must be greater than zero.");
 
         var hasAccess = await _context.Set<Tournament>()
             .AnyAsync(t => t.Id == tournamentId &&
