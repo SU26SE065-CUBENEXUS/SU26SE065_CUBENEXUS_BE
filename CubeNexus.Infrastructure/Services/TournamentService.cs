@@ -244,6 +244,37 @@ public class TournamentService : ITournamentService
         return tournaments.Select(t => MapToDetailDto(t, regCounts.TryGetValue(t.Id, out var c) ? c : 0)).ToList();
     }
 
+    public async Task<List<TournamentDetailDto>> GetManagerTournamentsAsync(Guid managerId, CancellationToken ct = default)
+    {
+        var assignedTournamentIds = _context.Set<TournamentManager>()
+            .Where(tm => tm.UserId == managerId)
+            .Select(tm => tm.TournamentId);
+
+        // Managers see only tournaments they created or were explicitly assigned.
+        // This intentionally includes DRAFT and other private statuses.
+        var tournaments = await _context.Set<Tournament>()
+            .Where(t => t.CreatedBy == managerId || assignedTournamentIds.Contains(t.Id))
+            .Include(t => t.CreatedByUser)
+            .Include(t => t.Events)
+                .ThenInclude(e => e.PuzzleType)
+            .Include(t => t.Events)
+                .ThenInclude(e => e.MedleyPuzzles)
+            .OrderByDescending(t => t.StartDate)
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var ids = tournaments.Select(t => t.Id).ToList();
+        var regCounts = await _context.Set<Registration>()
+            .Where(r => ids.Contains(r.TournamentId) && r.StatusCode != "CANCELLED")
+            .GroupBy(r => r.TournamentId)
+            .Select(g => new { Id = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Id, x => x.Count, ct);
+
+        return tournaments
+            .Select(t => MapToDetailDto(t, regCounts.TryGetValue(t.Id, out var c) ? c : 0))
+            .ToList();
+    }
+
     public async Task<TournamentDetailDto> GetTournamentByIdAsync(Guid id, CancellationToken ct = default)
     {
         var tournament = await _unitOfWork.Tournaments.GetTournamentWithEventsAndPuzzlesAsync(id, ct);

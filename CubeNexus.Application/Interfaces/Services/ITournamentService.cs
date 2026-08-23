@@ -6,6 +6,7 @@ public interface ITournamentService
 {
     Task<TournamentDetailDto> CreateTournamentAsync(CreateTournamentDto dto, Guid managerId, CancellationToken ct = default);
     Task<List<TournamentDetailDto>> GetPublicTournamentsAsync(CancellationToken ct = default);
+    Task<List<TournamentDetailDto>> GetManagerTournamentsAsync(Guid managerId, CancellationToken ct = default);
     Task<TournamentDetailDto> GetTournamentByIdAsync(Guid id, CancellationToken ct = default);
     Task<TournamentDetailDto> CloseRegistrationAsync(Guid tournamentId, Guid managerId, CancellationToken ct = default);
 

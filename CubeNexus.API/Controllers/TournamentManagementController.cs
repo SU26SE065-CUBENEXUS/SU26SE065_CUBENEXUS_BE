@@ -59,6 +59,22 @@ public class TournamentManagementController : ControllerBase
     }
 
     /// <summary>
+    /// Lấy các tournament do Manager hiện tại tạo hoặc được phân công.
+    /// Không dùng endpoint public vì endpoint public trả về tất cả tournament đã publish.
+    /// </summary>
+    [HttpGet("api/tournament-management/tournaments/my")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> GetMyTournaments(CancellationToken ct)
+    {
+        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdString, out var managerId))
+            return Unauthorized(new { message = "Invalid user token." });
+
+        var result = await _tournamentService.GetManagerTournamentsAsync(managerId, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Đóng cổng đăng ký giải đấu thủ công tức thì (MANAGER, ADMIN).
     /// </summary>
     [HttpPost("api/tournament-management/tournaments/{tournamentId:guid}/close-registration")]
