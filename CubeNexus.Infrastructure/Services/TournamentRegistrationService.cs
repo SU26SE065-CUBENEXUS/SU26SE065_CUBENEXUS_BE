@@ -4,16 +4,130 @@ using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Domain.Entities;
 using CubeNexus.Domain.Services;
+using CubeNexus.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace CubeNexus.Infrastructure.Services;
 
 public class TournamentRegistrationService : ITournamentRegistrationService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ApplicationDbContext _context;
 
-    public TournamentRegistrationService(IUnitOfWork unitOfWork)
+    public TournamentRegistrationService(IUnitOfWork unitOfWork, ApplicationDbContext context)
     {
         _unitOfWork = unitOfWork;
+        _context = context;
+    }
+
+    public async Task<DemoParticipantGenerationResultDto> GenerateDemoParticipantsAsync(
+        Guid tournamentId,
+        Guid managerId,
+        int count = 20,
+        CancellationToken ct = default)
+    {
+        if (count is < 1 or > 20)
+            throw new InvalidOperationException("Demo participant count must be between 1 and 20.");
+
+        var hasAccess = await _context.Set<Tournament>()
+            .AnyAsync(t => t.Id == tournamentId &&
+                (t.CreatedBy == managerId || _context.Set<TournamentManager>()
+                    .Any(tm => tm.TournamentId == tournamentId && tm.UserId == managerId)), ct);
+        if (!hasAccess)
+            throw new UnauthorizedAccessException("You do not have access to this tournament.");
+
+        var tournament = await _unitOfWork.Tournaments.GetTournamentWithEventsAndPuzzlesAsync(tournamentId, ct);
+        if (tournament == null)
+            throw new KeyNotFoundException($"Tournament with ID {tournamentId} not found.");
+        if (tournament.Events.Count == 0)
+            throw new InvalidOperationException("The tournament must have at least one event before generating demo participants.");
+
+        await using var transaction = await _context.Database.BeginTransactionAsync(ct);
+        var result = new DemoParticipantGenerationResultDto
+        {
+            TournamentId = tournamentId,
+            RequestedCount = count
+        };
+
+        try
+        {
+            var eventId = tournament.Events.OrderBy(e => e.SortOrder ?? int.MaxValue).First().Id;
+            var demoPasswordHash = "100000./VeF4GIRn7XX7GEAgaAdVg==.14fU+ipyygYGH5PIIGlZlO2q4dqjn0u+ZtPAZ379b0s=";
+
+            for (var index = 1; index <= count; index++)
+            {
+                var code = $"DEMO-COMP-{index:000}";
+                var email = $"{code.ToLowerInvariant()}@demo.cubenexus.com";
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.UserCode == code, ct);
+
+                if (user == null)
+                {
+                    user = new User
+                    {
+                        Id = Guid.NewGuid(),
+                        UserCode = code,
+                        Email = email,
+                        PasswordHash = demoPasswordHash,
+                        DisplayName = $"Demo Competitor {index:00}",
+                        UserRole = "COMPETITOR",
+                        IsActive = true,
+                        IsBanned = false,
+                        EmailConfirmed = true,
+                        EmailConfirmedAt = DateTime.UtcNow,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+                    _context.Users.Add(user);
+                    await _context.SaveChangesAsync(ct);
+                }
+
+                var enrollment = await _context.FaceEnrollments
+                    .FirstOrDefaultAsync(f => f.UserId == user.Id, ct);
+                if (enrollment == null)
+                {
+                    _context.FaceEnrollments.Add(new FaceEnrollment
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = user.Id,
+                        Status = "ENROLLED",
+                        ModelVersion = "demo",
+                        QualityScore = 1.0,
+                        TemplatesCount = 3,
+                        LastExternalSessionId = $"demo-face-{code}",
+                        EnrolledAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                    await _context.SaveChangesAsync(ct);
+                }
+
+                var existing = await _context.Registrations
+                    .FirstOrDefaultAsync(r => r.TournamentId == tournamentId && r.UserId == user.Id && r.StatusCode != "CANCELLED", ct);
+                if (existing != null)
+                {
+                    result.ExistingRegistrations++;
+                    result.ParticipantCodes.Add(code);
+                    continue;
+                }
+
+                // Reuse the real registration workflow so capacity, status, date,
+                // duplicate, Face Enrollment, event and schedule validations remain active.
+                await RegisterCompetitorAsync(tournamentId, user.Id, new RegisterTournamentDto
+                {
+                    Events = [new RegisterEventDto { EventId = eventId }]
+                }, ct);
+
+                result.NewRegistrations++;
+                result.ParticipantCodes.Add(code);
+            }
+
+            await transaction.CommitAsync(ct);
+            return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct);
+            throw;
+        }
     }
 
     public async Task<RegistrationResultDto> RegisterCompetitorAsync(Guid tournamentId, Guid userId, RegisterTournamentDto dto, CancellationToken ct = default)

@@ -16,6 +16,7 @@ public interface ITournamentRegistrationService
 
     // Manager endpoints
     Task<List<TournamentRegistrationDetailDto>> GetTournamentRegistrationsAsync(Guid tournamentId, CancellationToken ct = default);
+    Task<DemoParticipantGenerationResultDto> GenerateDemoParticipantsAsync(Guid tournamentId, Guid managerId, int count = 20, CancellationToken ct = default);
     Task<RegistrationResultDto> UpdateRegistrationStatusAsync(Guid registrationId, string status, CancellationToken ct = default);
     Task<RegistrationResultDto> ManuallyCheckInAsync(Guid registrationId, CancellationToken ct = default);
 }

@@ -17,6 +17,41 @@ public class TournamentRegistrationController : ControllerBase
     }
 
     /// <summary>
+    /// Tạo dữ liệu participant demo cho Manager. Face enrollment chỉ là dữ liệu
+    /// mirror để vượt validation đăng ký; không dùng cho Face AI check-in thật.
+    /// </summary>
+    [HttpPost("api/tournament-management/tournaments/{tournamentId:guid}/demo-participants")]
+    [Authorize(Roles = "MANAGER")]
+    public async Task<IActionResult> GenerateDemoParticipants(Guid tournamentId, [FromQuery] int count = 20)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!Guid.TryParse(userIdString, out var managerId))
+                return Unauthorized(new { message = "Invalid user token." });
+
+            var result = await _registrationService.GenerateDemoParticipantsAsync(tournamentId, managerId, count);
+            return Ok(result);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while generating demo participants.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Competitor đăng ký tham gia một giải đấu (chỉ vai trò COMPETITOR).
     /// </summary>
     [HttpPost("api/tournament-registration/tournaments/{tournamentId:guid}/register")]
