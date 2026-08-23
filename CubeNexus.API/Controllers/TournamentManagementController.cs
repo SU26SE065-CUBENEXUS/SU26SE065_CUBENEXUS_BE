@@ -229,6 +229,10 @@ public class TournamentManagementController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             return StatusCode(500, new { message = "An error occurred while performing check-in.", detail = ex.Message });

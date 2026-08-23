@@ -322,6 +322,40 @@ public class TournamentOperationController : ControllerBase
     }
 
     /// <summary>
+    /// Tạo điểm demo còn thiếu, chỉ trong đúng Event + Round được truyền vào.
+    /// Không ghi đè điểm Judge đã nhập.
+    /// </summary>
+    [HttpPost("api/tournament-operation/events/{eventId:guid}/rounds/{roundNumber:int}/demo-scores")]
+    [Authorize(Roles = "MANAGER,ADMIN")]
+    public async Task<IActionResult> GenerateDemoScores(Guid eventId, int roundNumber, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!Guid.TryParse(userIdString, out var managerId))
+                return Unauthorized(new { message = "Invalid user token." });
+
+            return Ok(await _operationService.GenerateDemoScoresAsync(eventId, roundNumber, managerId, ct));
+        }
+        catch (CubeNexus.Application.Exceptions.CustomException ex)
+        {
+            return StatusCode(ex.StatusCode, new { errorCode = ex.ErrorCode, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while generating demo scores.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Trọng tài nhập kết quả Medley (JUDGE, MANAGER, ADMIN).
     /// </summary>
     [HttpPost("api/tournament-operation/results/medley")]

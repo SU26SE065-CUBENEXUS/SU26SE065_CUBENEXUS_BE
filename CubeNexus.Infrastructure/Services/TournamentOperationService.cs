@@ -704,6 +704,99 @@ public class TournamentOperationService : ITournamentOperationService
         };
     }
 
+    public async Task<DemoScoreGenerationResultDto> GenerateDemoScoresAsync(
+        Guid eventId,
+        int roundNumber,
+        Guid managerId,
+        CancellationToken ct = default)
+    {
+        if (roundNumber < 1)
+            throw new InvalidOperationException("Round number must be greater than zero.");
+
+        var ev = await _unitOfWork.Events.GetByIdAsync(eventId, ct);
+        if (ev == null)
+            throw new KeyNotFoundException($"Event with ID {eventId} not found.");
+        if (!string.Equals(ev.EventFormatCode, "TRADITIONAL", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Demo score generation is available only for Traditional events.");
+
+        var groups = (await _unitOfWork.Groups.FindAsync(
+            g => g.EventId == eventId && g.RoundNumber == roundNumber, ct)).ToList();
+        if (groups.Count == 0)
+            throw new InvalidOperationException($"No groups exist for Event {eventId}, Round {roundNumber}.");
+        if (groups.Any(g => g.StatusCode != "ONGOING"))
+            throw new InvalidOperationException("All groups in this round must be ONGOING before generating demo scores.");
+
+        var groupIds = groups.Select(g => g.Id).ToList();
+        var competitors = (await _unitOfWork.GroupCompetitors.FindAsync(
+            gc => groupIds.Contains(gc.GroupId), ct)).ToList();
+        if (competitors.Count == 0)
+            throw new InvalidOperationException("No competitors exist in this round.");
+
+        var competitorIds = competitors.Select(c => c.Id).ToList();
+        var allResults = (await _unitOfWork.Results.FindAsync(
+            r => competitorIds.Contains(r.GroupCompetitorId), ct)).ToList();
+        var result = new DemoScoreGenerationResultDto { EventId = eventId, RoundNumber = roundNumber };
+        var timeLimit = ev.TimeLimitMs.GetValueOrDefault(20_000);
+        var cutoff = ev.CutoffTimeMs.GetValueOrDefault();
+        var upperBound = cutoff > 1 ? Math.Min(cutoff - 100, timeLimit - 100) : timeLimit - 100;
+        if (upperBound <= 100)
+            throw new InvalidOperationException("The event time limit/cutoff is too small for demo scores.");
+        var lowerBound = Math.Min(5_000, Math.Max(100, upperBound - 4_000));
+
+        foreach (var competitor in competitors)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (competitor.StatusCode == CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW)
+                continue;
+
+            var existing = allResults
+                .Where(r => r.GroupCompetitorId == competitor.Id)
+                .OrderBy(r => r.SolveNumber)
+                .ToList();
+            var existingNumbers = existing.Select(r => r.SolveNumber).ToHashSet();
+            var groupScrambleSet = await _unitOfWork.ScrambleSets.FirstOrDefaultAsync(
+                ss => ss.GroupId == competitor.GroupId, ct);
+            if (groupScrambleSet == null)
+                throw new InvalidOperationException("Scramble set not found for one of the groups. Generate scrambles first.");
+
+            var scrambles = (await _unitOfWork.Scrambles.FindAsync(
+                s => s.ScrambleSetId == groupScrambleSet.Id && s.PuzzleTypeId == ev.PuzzleTypeId, ct))
+                .ToDictionary(s => s.SolveNumber);
+
+            var generatedForCompetitor = false;
+            for (var solveNumber = 1; solveNumber <= ev.SolveCount; solveNumber++)
+            {
+                if (existingNumbers.Contains(solveNumber))
+                {
+                    result.SolvesSkipped++;
+                    continue;
+                }
+
+                var scramble = scrambles.GetValueOrDefault(solveNumber);
+                if (scramble == null)
+                    throw new InvalidOperationException($"Scramble for Solve #{solveNumber} is missing.");
+
+                // Reuse the real submission pipeline: check-in, group state,
+                // sequential solve number, cutoff, time limit and leaderboard updates remain active.
+                await SubmitTraditionalResultAsync(new SubmitTraditionalResultDto
+                {
+                    GroupCompetitorId = competitor.Id,
+                    SolveNumber = solveNumber,
+                    RawTimeMs = Random.Shared.Next(lowerBound, upperBound + 1),
+                    ScrambleId = scramble.Id
+                }, managerId, ct);
+
+                result.SolvesGenerated++;
+                generatedForCompetitor = true;
+            }
+
+            if (generatedForCompetitor || existing.Count > 0)
+                result.CompetitorsProcessed++;
+        }
+
+        return result;
+    }
+
     public async Task<SubmitResultResponseDto> SubmitMedleyResultAsync(SubmitMedleyResultDto dto, Guid userId, CancellationToken ct = default)
     {
         Console.WriteLine($"[Validation Stage] SubmitMedleyResultAsync started. GroupCompetitorId={dto.GroupCompetitorId}, SolveNumber={dto.SolveNumber}");

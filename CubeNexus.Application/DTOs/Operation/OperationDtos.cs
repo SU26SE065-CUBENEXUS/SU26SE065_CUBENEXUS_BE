@@ -27,6 +27,15 @@ public class SubmitTraditionalResultDto
     public string? EvidencePhotoUrl { get; set; }
 }
 
+public class DemoScoreGenerationResultDto
+{
+    public Guid EventId { get; set; }
+    public int RoundNumber { get; set; }
+    public int CompetitorsProcessed { get; set; }
+    public int SolvesGenerated { get; set; }
+    public int SolvesSkipped { get; set; }
+}
+
 public class SubmitMedleyResultDto
 {
     public Guid GroupCompetitorId { get; set; }

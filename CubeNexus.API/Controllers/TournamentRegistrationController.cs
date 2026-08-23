@@ -82,6 +82,36 @@ public class TournamentRegistrationController : ControllerBase
     }
 
     /// <summary>
+    /// Competitor tự hủy đăng ký. Trạng thái CANCELLED là vĩnh viễn.
+    /// </summary>
+    [HttpPost("api/tournament-registration/registrations/{registrationId:guid}/cancel")]
+    [Authorize(Roles = "COMPETITOR")]
+    public async Task<IActionResult> CancelRegistration(Guid registrationId, CancellationToken ct)
+    {
+        try
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!Guid.TryParse(userIdString, out var userId))
+                return Unauthorized(new { message = "Invalid user token." });
+
+            var result = await _registrationService.CancelUserRegistrationAsync(registrationId, userId, ct);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while cancelling the registration.", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Lấy danh sách các giải đấu mà người dùng hiện tại đã đăng ký.
     /// </summary>
     [HttpGet("api/me/registrations")]

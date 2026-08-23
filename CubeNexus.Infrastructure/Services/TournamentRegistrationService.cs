@@ -153,6 +153,12 @@ public class TournamentRegistrationService : ITournamentRegistrationService
             }
         }
 
+        if (await _unitOfWork.Registrations.AnyAsync(
+                r => r.TournamentId == tournamentId && r.UserId == userId && r.StatusCode == "CANCELLED", ct))
+        {
+            throw new InvalidOperationException("You cancelled your registration for this tournament and cannot register again.");
+        }
+
         if (await _unitOfWork.Registrations.HasUserRegisteredAsync(tournamentId, userId, ct))
             throw new InvalidOperationException("User is already registered for this tournament.");
 
@@ -266,6 +272,34 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         await _unitOfWork.SaveChangesAsync(ct);
 
         return await GetUserRegistrationByIdAsync(registrationId, userId, ct);
+    }
+
+    public async Task<RegistrationResultDto> CancelUserRegistrationAsync(
+        Guid registrationId,
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        var registration = await _unitOfWork.Registrations
+            .GetRegistrationWithEventsAsync(registrationId, userId, ct);
+        if (registration == null)
+            throw new KeyNotFoundException($"Registration with ID {registrationId} not found.");
+
+        if (registration.StatusCode == "CANCELLED")
+            throw new InvalidOperationException("This registration has already been cancelled.");
+
+        if (registration.StatusCode == "CHECKED_IN")
+            throw new InvalidOperationException("A checked-in registration cannot be cancelled by the competitor.");
+
+        registration.StatusCode = "CANCELLED";
+        foreach (var ore in registration.OfflineRegistrationEvents)
+        {
+            ore.StatusCode = "WITHDRAWN";
+        }
+
+        _unitOfWork.Registrations.Update(registration);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        return MapToDto(registration);
     }
 
     public async Task<List<RegistrationResultDto>> GetUserRegistrationsAsync(Guid userId, CancellationToken ct = default)
@@ -584,6 +618,9 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         if (!validStatuses.Contains(normalizedStatus))
             throw new InvalidOperationException($"Invalid registration status: {status}");
 
+        if (registration.StatusCode == "CANCELLED")
+            throw new InvalidOperationException("A cancelled registration is final and cannot be reactivated or changed.");
+
         registration.StatusCode = normalizedStatus;
         if (normalizedStatus == "CANCELLED")
         {
@@ -618,6 +655,21 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         var registration = await _unitOfWork.Registrations.GetRegistrationWithEventsAsync(registrationId, temp.UserId, ct);
         if (registration == null)
             throw new KeyNotFoundException($"Registration with ID {registrationId} not found.");
+
+        if (string.Equals(registration.StatusCode, "CANCELLED", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("A cancelled registration cannot be checked in.");
+
+        if (!string.Equals(registration.StatusCode, "CONFIRMED", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(registration.StatusCode, "CHECKED_IN", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Only a confirmed registration can be checked in.");
+
+        var tournamentStatus = registration.Tournament?.StatusCode;
+        if (!string.Equals(tournamentStatus, "CHECKING_IN", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(tournamentStatus, "ONGOING", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Check-in is available only while the tournament is CHECKING_IN or ONGOING.");
+
+        if (string.Equals(registration.StatusCode, "CHECKED_IN", StringComparison.OrdinalIgnoreCase))
+            return MapToDto(registration);
 
         registration.StatusCode = "CHECKED_IN";
         registration.CheckedInAt = DateTime.UtcNow;
