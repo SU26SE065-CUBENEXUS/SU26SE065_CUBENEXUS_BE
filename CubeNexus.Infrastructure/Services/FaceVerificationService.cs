@@ -207,7 +207,11 @@ public class FaceVerificationService : IFaceVerificationService
         var registration = await _db.Registrations
             .Include(r => r.User)
             .Include(r => r.Tournament)
-            .FirstOrDefaultAsync(r => r.UserId == userId && r.TournamentId == tournamentId, ct);
+            .Where(r => r.UserId == userId
+                && r.TournamentId == tournamentId
+                && r.StatusCode != "CANCELLED")
+            .OrderByDescending(r => r.RegisteredAt)
+            .FirstOrDefaultAsync(ct);
 
         if (registration is null)
         {
