@@ -97,7 +97,7 @@ public class AdminUserService : IAdminUserService
         var u = await _context.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == userId, ct);
         if (u == null)
         {
-            throw new KeyNotFoundException("Không tìm thấy người dùng.");
+            throw new KeyNotFoundException("User not found.");
         }
 
         return new AdminUserDto
@@ -128,18 +128,18 @@ public class AdminUserService : IAdminUserService
 
         if (!validRoles.Contains(normalizedRole))
         {
-            throw new ArgumentException($"Role '{newRole}' không hợp lệ. Các role cho phép: ADMIN, MANAGER, JUDGE, COMPETITOR.");
+            throw new ArgumentException($"Role '{newRole}' is invalid. Allowed roles: ADMIN, MANAGER, JUDGE, COMPETITOR.");
         }
 
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == targetUserId, ct);
         if (user == null)
         {
-            throw new KeyNotFoundException("Không tìm thấy người dùng cần đổi role.");
+            throw new KeyNotFoundException("The user whose role should be changed was not found.");
         }
 
         if (currentAdminId == targetUserId && normalizedRole != "ADMIN")
         {
-            throw new InvalidOperationException("Bạn không thể tự hạ cấp vai trò ADMIN của chính mình.");
+            throw new InvalidOperationException("You cannot demote your own ADMIN role.");
         }
 
         user.UserRole = normalizedRole;
@@ -172,18 +172,18 @@ public class AdminUserService : IAdminUserService
     {
         if (currentAdminId == targetUserId)
         {
-            throw new InvalidOperationException("Bạn không thể tự cấm tài khoản của chính mình.");
+            throw new InvalidOperationException("You cannot ban your own account.");
         }
 
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == targetUserId, ct);
         if (user == null)
         {
-            throw new KeyNotFoundException("Không tìm thấy người dùng cần cấm.");
+            throw new KeyNotFoundException("The user to ban was not found.");
         }
 
         if (string.IsNullOrWhiteSpace(req.BanReason))
         {
-            throw new ArgumentException("Vui lòng nhập lý do cấm tài khoản.");
+            throw new ArgumentException("A ban reason is required.");
         }
 
         user.IsBanned = true;
@@ -240,7 +240,7 @@ public class AdminUserService : IAdminUserService
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == targetUserId, ct);
         if (user == null)
         {
-            throw new KeyNotFoundException("Không tìm thấy người dùng cần gỡ cấm.");
+            throw new KeyNotFoundException("The user to unban was not found.");
         }
 
         user.IsBanned = false;

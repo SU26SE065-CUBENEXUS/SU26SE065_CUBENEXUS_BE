@@ -8,6 +8,9 @@ public sealed record ScramblePoolItemDto(Guid Id, string CompetitionMode, Guid P
 public sealed record ScramblePoolSummaryDto(string CompetitionMode, Guid PuzzleTypeId,
     string PuzzleCode, string Status, int Count);
 
+public sealed record ScrambleGenerationModeDto(string CompetitionMode, string Mode,
+    Guid? UpdatedBy, DateTime? UpdatedAt);
+
 public sealed record ScramblePoolPageDto(IReadOnlyList<ScramblePoolItemDto> Items,
     int Total, int Page, int PageSize);
 

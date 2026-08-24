@@ -36,11 +36,13 @@ public class AdminTournamentController : ControllerBase
         [FromQuery] int pageSize = 10,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
+        [FromQuery] string? tournamentType = null,
         CancellationToken ct = default)
     {
         try
         {
-            return Ok(await _adminTournamentService.GetTournamentsAsync(page, pageSize, search, status, ct));
+            return Ok(await _adminTournamentService.GetTournamentsAsync(
+                page, pageSize, search, status, tournamentType, ct));
         }
         catch (Exception ex)
         {

@@ -15,8 +15,6 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
 {
     private static readonly HashSet<string> Modes = ["ONLINE_MATCH", "OFFLINE", "ONLINE_ASYNC"];
     private static readonly Regex MovePattern = new("^[2-9]?[RLUDFB](?:w)?(?:2|')?$", RegexOptions.Compiled);
-    private static string _scrambleGenerationMode = "MANUAL";
-
     private readonly ApplicationDbContext _db;
     private readonly IScrambleGeneratorService _generator;
     private readonly IRealtimeNotifier? _realtimeNotifier;
@@ -47,7 +45,12 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
                 var puzzleCode = puzzle?.Code ?? "UNKNOWN";
                 var puzzleName = puzzle?.Name ?? "Rubik";
 
-                if (string.Equals(_scrambleGenerationMode, "AUTO", StringComparison.OrdinalIgnoreCase))
+                var generationMode = await _db.ScrambleGenerationSettings.AsNoTracking()
+                    .Where(x => x.CompetitionMode == mode)
+                    .Select(x => x.GenerationMode)
+                    .SingleOrDefaultAsync(ct) ?? "MANUAL";
+
+                if (generationMode == "AUTO")
                 {
                     if (puzzle != null)
                     {
@@ -144,15 +147,15 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
             await _db.SaveChangesAsync(ct);
             return new ScrambleReservationDto(item.Id, item.Sequence, item.ExpectedStateJson);
         }
-        throw new InvalidOperationException("SCRAMBLE_POOL_BUSY: Kho đề đang được cấp phát đồng thời, vui lòng thử lại.");
+        throw new InvalidOperationException("SCRAMBLE_POOL_BUSY: The scramble pool is being allocated concurrently. Please try again.");
     }
 
     public async Task MarkUsedAsync(Guid scramblePoolItemId, Guid? actorUserId = null, CancellationToken ct = default)
     {
         var item = await _db.ScramblePoolItems.SingleOrDefaultAsync(x => x.Id == scramblePoolItemId, ct)
-            ?? throw new KeyNotFoundException("Không tìm thấy đề.");
+            ?? throw new KeyNotFoundException("Scramble not found.");
         if (item.Status == "USED") return;
-        if (item.Status != "RESERVED") throw new InvalidOperationException("Chỉ đề đã cấp phát mới có thể đánh dấu đã dùng.");
+        if (item.Status != "RESERVED") throw new InvalidOperationException("Only reserved scrambles can be marked as used.");
         item.Status = "USED";
         item.UsedAt = DateTime.UtcNow;
         AddAudit(item.Id, "USED", actorUserId, item.AssignedTargetType, item.AssignedTargetId);
@@ -295,10 +298,10 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
     public async Task<IReadOnlyList<ScramblePoolItemDto>> GenerateAsync(GenerateScramblesRequestDto request,
         Guid actorUserId, CancellationToken ct = default)
     {
-        if (request.Count is < 1 or > 500) throw new ArgumentException("Số lượng đề phải từ 1 đến 500.");
+        if (request.Count is < 1 or > 500) throw new ArgumentException("Scramble count must be between 1 and 500.");
         var mode = NormalizeMode(request.CompetitionMode);
         var puzzle = await _db.PuzzleTypes.SingleOrDefaultAsync(x => x.Id == request.PuzzleTypeId && x.IsActive, ct)
-            ?? throw new KeyNotFoundException("Không tìm thấy loại cube đang hoạt động.");
+            ?? throw new KeyNotFoundException("Active puzzle type not found.");
         var created = new List<ScramblePoolItem>();
         var knownHashes = (await _db.ScramblePoolItems.AsNoTracking()
             .Where(x => x.CompetitionMode == mode && x.PuzzleTypeId == puzzle.Id)
@@ -309,8 +312,8 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
         {
             if (++generationAttempts > maxGenerationAttempts)
                 throw new InvalidOperationException(
-                    $"Không thể sinh đủ {request.Count} đề 2 bước không trùng. " +
-                    "Kho của chế độ và loại Rubik này có thể đã gần hết tổ hợp; hãy giảm số lượng cần sinh.");
+                    $"Unable to generate {request.Count} unique two-move scrambles. " +
+                    "This competition mode and puzzle type may be near its combination limit; reduce the requested count.");
             var sequence = NormalizeSequence(_generator.GenerateScramble(puzzle.Code, puzzle.ScrambleLength));
             var hash = Hash(sequence);
             if (!knownHashes.Add(hash)) continue;
@@ -328,13 +331,13 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
     {
         var mode = NormalizeMode(request.CompetitionMode);
         var puzzle = await _db.PuzzleTypes.SingleOrDefaultAsync(x => x.Id == request.PuzzleTypeId && x.IsActive, ct)
-            ?? throw new KeyNotFoundException("Không tìm thấy loại cube đang hoạt động.");
-        if (request.Sequences.Count is < 1 or > 1000) throw new ArgumentException("Danh sách nhập phải có từ 1 đến 1000 đề.");
+            ?? throw new KeyNotFoundException("Active puzzle type not found.");
+        if (request.Sequences.Count is < 1 or > 1000) throw new ArgumentException("The import must contain between 1 and 1,000 scrambles.");
         var rows = request.Sequences.Select(NormalizeSequence).Distinct().ToList();
         var hashes = rows.Select(Hash).ToList();
         var existing = (await _db.ScramblePoolItems.AsNoTracking().Where(x => x.CompetitionMode == mode &&
             x.PuzzleTypeId == puzzle.Id && hashes.Contains(x.SequenceHash)).Select(x => x.SequenceHash).ToListAsync(ct)).ToHashSet();
-        if (existing.Count > 0) throw new InvalidOperationException("Danh sách có đề đã tồn tại trong phân khu này.");
+        if (existing.Count > 0) throw new InvalidOperationException("At least one imported scramble already exists in this pool.");
         var created = rows.Select(sequence => CreateItem(mode, puzzle, sequence, Hash(sequence), "ADMIN_IMPORT",
             request.Notes, actorUserId, false)).ToList();
         _db.ScramblePoolItems.AddRange(created);
@@ -346,7 +349,7 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
     public async Task<ScramblePoolItemDto> ApproveAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
         var item = await FindItemAsync(id, ct);
-        if (item.Status != "DRAFT") throw new InvalidOperationException("Chỉ đề nháp mới được duyệt.");
+        if (item.Status != "DRAFT") throw new InvalidOperationException("Only draft scrambles can be approved.");
         ValidateSequence(item.Sequence, item.PuzzleType.Code is not ("222" or "333"));
         item.IsValidated = true; item.Status = "AVAILABLE"; item.ApprovedBy = actorUserId; item.ApprovedAt = DateTime.UtcNow;
         AddAudit(item.Id, "APPROVED", actorUserId);
@@ -358,32 +361,55 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
     {
         var item = await FindItemAsync(id, ct);
         if (item.Status is not ("DRAFT" or "AVAILABLE"))
-            throw new InvalidOperationException("Không thể thu hồi đề đã cấp phát hoặc đã sử dụng.");
+            throw new InvalidOperationException("Reserved or used scrambles cannot be retired.");
         item.Status = "RETIRED"; AddAudit(item.Id, "RETIRED", actorUserId);
         await _db.SaveChangesAsync(ct);
         return ToDto(item);
     }
 
-    public Task<string> GetScrambleGenerationModeAsync(CancellationToken ct = default)
+    public async Task<ScrambleGenerationModeDto> GetScrambleGenerationModeAsync(string competitionMode,
+        CancellationToken ct = default)
     {
-        return Task.FromResult(_scrambleGenerationMode);
+        var normalizedMode = NormalizeMode(competitionMode);
+        var setting = await _db.ScrambleGenerationSettings.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.CompetitionMode == normalizedMode, ct);
+
+        return setting == null
+            ? new ScrambleGenerationModeDto(normalizedMode, "MANUAL", null, null)
+            : new ScrambleGenerationModeDto(setting.CompetitionMode, setting.GenerationMode,
+                setting.UpdatedBy, setting.UpdatedAt);
     }
 
-    public Task<string> SetScrambleGenerationModeAsync(string mode, Guid actorUserId, CancellationToken ct = default)
+    public async Task<ScrambleGenerationModeDto> SetScrambleGenerationModeAsync(string competitionMode,
+        string mode, Guid actorUserId, CancellationToken ct = default)
     {
+        var normalizedMode = NormalizeMode(competitionMode);
         var upper = (mode ?? string.Empty).Trim().ToUpperInvariant();
         if (upper != "MANUAL" && upper != "AUTO")
         {
-            throw new ArgumentException("Chế độ sinh đề chỉ có thể là 'MANUAL' hoặc 'AUTO'.");
+            throw new ArgumentException("Generation mode must be MANUAL or AUTO.");
         }
 
-        _scrambleGenerationMode = upper;
-        return Task.FromResult(_scrambleGenerationMode);
+        var setting = await _db.ScrambleGenerationSettings
+            .SingleOrDefaultAsync(x => x.CompetitionMode == normalizedMode, ct);
+        if (setting == null)
+        {
+            setting = new ScrambleGenerationSetting { CompetitionMode = normalizedMode };
+            _db.ScrambleGenerationSettings.Add(setting);
+        }
+
+        setting.GenerationMode = upper;
+        setting.UpdatedBy = actorUserId;
+        setting.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        return new ScrambleGenerationModeDto(setting.CompetitionMode, setting.GenerationMode,
+            setting.UpdatedBy, setting.UpdatedAt);
     }
 
     private async Task<ScramblePoolItem> FindItemAsync(Guid id, CancellationToken ct) =>
         await _db.ScramblePoolItems.Include(x => x.PuzzleType).SingleOrDefaultAsync(x => x.Id == id, ct)
-        ?? throw new KeyNotFoundException("Không tìm thấy đề.");
+        ?? throw new KeyNotFoundException("Scramble not found.");
 
     private ScramblePoolItem CreateItem(string mode, PuzzleType puzzle, string sequence, string hash,
         string generator, string? notes, Guid actor, bool approved)
@@ -411,7 +437,7 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
     private static string NormalizeMode(string mode)
     {
         var value = mode.Trim().ToUpperInvariant();
-        if (!Modes.Contains(value)) throw new ArgumentException("CompetitionMode phải là ONLINE_MATCH, OFFLINE hoặc ONLINE_ASYNC.");
+        if (!Modes.Contains(value)) throw new ArgumentException("CompetitionMode must be ONLINE_MATCH, OFFLINE, or ONLINE_ASYNC.");
         return value;
     }
 
@@ -426,14 +452,14 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
     {
         var moves = sequence.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (moves.Length == 0 || moves.Any(move => !MovePattern.IsMatch(move)))
-            throw new ArgumentException($"Đề không hợp lệ: '{sequence}'. Chỉ chấp nhận ký hiệu cube chuẩn như R, U2, Rw hoặc 3Rw'.");
+            throw new ArgumentException($"Invalid scramble: '{sequence}'. Use standard cube notation such as R, U2, Rw, or 3Rw'.");
         if (moves.Length > 2)
-            throw new ArgumentException("Đề không hợp lệ: mỗi scramble chỉ được có tối đa 2 bước xoay.");
+            throw new ArgumentException("Invalid scramble: each scramble may contain at most two moves.");
         if (!allowWideMoves && moves.Any(move => move.Contains('w') || char.IsDigit(move[0]) && move.Length > 1 && char.IsLetter(move[1])))
-            throw new ArgumentException("Đề 2x2/3x3 không chấp nhận wide move hoặc multi-layer move.");
+            throw new ArgumentException("2x2 and 3x3 scrambles do not support wide or multi-layer moves.");
         for (var i = 1; i < moves.Length; i++)
             if (moves[i].First(char.IsLetter) == moves[i - 1].First(char.IsLetter))
-                throw new ArgumentException("Đề không hợp lệ: hai bước liên tiếp không được cùng một mặt.");
+                throw new ArgumentException("Invalid scramble: consecutive moves cannot use the same face.");
     }
 
     private static string Hash(string sequence) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sequence))).ToLowerInvariant();

@@ -20,6 +20,7 @@ public class AdminTournamentService : IAdminTournamentService
         int pageSize = 10,
         string? search = null,
         string? status = null,
+        string? tournamentType = null,
         CancellationToken ct = default)
     {
         page = page < 1 ? 1 : page;
@@ -35,6 +36,19 @@ public class AdminTournamentService : IAdminTournamentService
                 .ThenInclude(e => e.MedleyPuzzles)
                     .ThenInclude(mp => mp.PuzzleType)
             .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(tournamentType))
+        {
+            var normalizedType = tournamentType.Trim().ToUpperInvariant();
+            if (normalizedType is not ("ONLINE_ASYNC" or "OFFLINE"))
+            {
+                throw new ArgumentException("Tournament type must be ONLINE_ASYNC or OFFLINE.");
+            }
+
+            query = normalizedType == "OFFLINE"
+                ? query.Where(t => t.TournamentType == "OFFLINE" || t.TournamentType == null || t.TournamentType == "")
+                : query.Where(t => t.TournamentType == "ONLINE_ASYNC");
+        }
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -137,7 +151,7 @@ public class AdminTournamentService : IAdminTournamentService
 
         if (t == null)
         {
-            throw new KeyNotFoundException("Không tìm thấy giải đấu.");
+            throw new KeyNotFoundException("Tournament not found.");
         }
 
         var regCount = await _context.Registrations
@@ -192,13 +206,13 @@ public class AdminTournamentService : IAdminTournamentService
 
         if (t == null)
         {
-            throw new KeyNotFoundException("Không tìm thấy giải đấu.");
+            throw new KeyNotFoundException("Tournament not found.");
         }
 
         var normalizedStatus = (statusCode ?? "").Trim().ToUpper();
         if (string.IsNullOrWhiteSpace(normalizedStatus))
         {
-            throw new ArgumentException("Trạng thái không được để trống.");
+            throw new ArgumentException("Status is required.");
         }
 
         var currentStatus = (t.StatusCode ?? "").Trim().ToUpper();
@@ -248,7 +262,7 @@ public class AdminTournamentService : IAdminTournamentService
 
             if (!isValidTransition)
             {
-                throw new InvalidOperationException($"Không thể chuyển trạng thái giải đấu từ {currentStatus} sang {normalizedStatus}.");
+                throw new InvalidOperationException($"Cannot change tournament status from {currentStatus} to {normalizedStatus}.");
             }
         }
 
@@ -311,7 +325,7 @@ public class AdminTournamentService : IAdminTournamentService
 
                     if (hasUncompletedGroups)
                     {
-                        throw new InvalidOperationException("Không thể hoàn thành giải đấu vì còn nhóm hoặc vòng thi chưa hoàn tất (chưa Complete Round).");
+                        throw new InvalidOperationException("The tournament cannot be completed while groups or rounds are still unfinished.");
                     }
                 }
             }

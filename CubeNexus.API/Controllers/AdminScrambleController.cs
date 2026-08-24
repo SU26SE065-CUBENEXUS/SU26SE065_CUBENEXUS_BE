@@ -40,18 +40,13 @@ public sealed class AdminScrambleController : ControllerBase
         ExecuteAsync(() => _service.RetireAsync(id, GetUserId(), ct));
 
     [HttpGet("mode")]
-    public async Task<IActionResult> GetMode(CancellationToken ct)
-    {
-        var mode = await _service.GetScrambleGenerationModeAsync(ct);
-        return Ok(new { mode });
-    }
+    public Task<IActionResult> GetMode([FromQuery] string competitionMode, CancellationToken ct) =>
+        ExecuteAsync(() => _service.GetScrambleGenerationModeAsync(competitionMode, ct));
 
     [HttpPost("mode")]
-    public async Task<IActionResult> SetMode([FromBody] SetScrambleModeRequest request, CancellationToken ct)
-    {
-        var mode = await _service.SetScrambleGenerationModeAsync(request.Mode, GetUserId(), ct);
-        return Ok(new { mode });
-    }
+    public Task<IActionResult> SetMode([FromBody] SetScrambleModeRequest request, CancellationToken ct) =>
+        ExecuteAsync(() => _service.SetScrambleGenerationModeAsync(
+            request.CompetitionMode, request.Mode, GetUserId(), ct));
 
     private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action)
     {
@@ -81,11 +76,12 @@ public sealed class AdminScrambleController : ControllerBase
     {
         var raw = User.FindFirstValue("id") ?? User.FindFirstValue("userId") ??
                   User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : throw new UnauthorizedAccessException("Token không chứa user id hợp lệ.");
+        return Guid.TryParse(raw, out var id) ? id : throw new UnauthorizedAccessException("The token does not contain a valid user ID.");
     }
 }
 
 public class SetScrambleModeRequest
 {
+    public string CompetitionMode { get; set; } = string.Empty;
     public string Mode { get; set; } = "MANUAL";
 }

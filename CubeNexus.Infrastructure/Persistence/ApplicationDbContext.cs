@@ -31,6 +31,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<Scramble> Scrambles => Set<Scramble>();
     public DbSet<ScramblePoolItem> ScramblePoolItems => Set<ScramblePoolItem>();
     public DbSet<ScramblePoolAuditLog> ScramblePoolAuditLogs => Set<ScramblePoolAuditLog>();
+    public DbSet<ScrambleGenerationSetting> ScrambleGenerationSettings => Set<ScrambleGenerationSetting>();
     public DbSet<Result> Results => Set<Result>();
     public DbSet<MedleyResultDetail> MedleyResultDetails => Set<MedleyResultDetail>();
     public DbSet<Dispute> Disputes => Set<Dispute>();
@@ -90,6 +91,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<Scramble>().ToTable("scrambles");
         modelBuilder.Entity<ScramblePoolItem>().ToTable("scramble_pool_items");
         modelBuilder.Entity<ScramblePoolAuditLog>().ToTable("scramble_pool_audit_logs");
+        modelBuilder.Entity<ScrambleGenerationSetting>().ToTable("scramble_generation_settings");
         modelBuilder.Entity<Result>().ToTable("results");
         modelBuilder.Entity<MedleyResultDetail>().ToTable("medley_result_details");
         modelBuilder.Entity<Dispute>().ToTable("disputes");
@@ -350,6 +352,14 @@ public class ApplicationDbContext : DbContext
             // a serialized JSON string, but explicitly tell Npgsql to bind it as
             // jsonb instead of sending it as SQL text.
             entity.Property(e => e.Payload).HasColumnType("jsonb");
+        });
+
+        modelBuilder.Entity<ScrambleGenerationSetting>(entity =>
+        {
+            entity.HasKey(e => e.CompetitionMode);
+            entity.Property(e => e.CompetitionMode).HasMaxLength(32);
+            entity.Property(e => e.GenerationMode).HasMaxLength(10);
+            entity.HasOne(e => e.UpdatedByUser).WithMany().HasForeignKey(e => e.UpdatedBy).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<RefreshToken>(entity =>
