@@ -4,8 +4,9 @@ namespace CubeNexus.Application.DTOs.Registration;
 
 public class RegisterTournamentDto
 {
-    [Required]
     public List<RegisterEventDto> Events { get; set; } = new();
+
+    public List<Guid>? SelectedEventIds { get; set; }
 }
 
 public class RegisterEventDto

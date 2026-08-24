@@ -682,6 +682,12 @@ public class TournamentService : ITournamentService
         int stationCount = Math.Max(0, dto.StationCount);
         int judgesPerStation = Math.Max(1, dto.JudgesPerStation);
 
+        int totalRequiredSlots = checkInCount + (stationCount * judgesPerStation);
+        if (totalRequiredSlots > judges.Count)
+        {
+            throw new InvalidOperationException($"Tổng số vị trí cần phân công ({totalRequiredSlots}) vượt quá số lượng Trọng tài hiện có trong giải đấu ({judges.Count}). Vui lòng tạo thêm trọng tài hoặc giảm số vị trí.");
+        }
+
         // Prepare assignment target pool
         var pool = new List<(string RoleCode, int? StationNumber, string BaseName)>();
 

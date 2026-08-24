@@ -204,7 +204,16 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         }
 
         if (dto.Events == null || !dto.Events.Any())
-            throw new InvalidOperationException("You must register for at least one event.");
+        {
+            if (dto.SelectedEventIds != null && dto.SelectedEventIds.Any())
+            {
+                dto.Events = dto.SelectedEventIds.Select(id => new RegisterEventDto { EventId = id }).ToList();
+            }
+            else
+            {
+                throw new InvalidOperationException("You must register for at least one event.");
+            }
+        }
 
         var validEventIds = tournament.Events.Select(e => e.Id).ToHashSet();
         foreach (var ev in dto.Events)
