@@ -178,6 +178,8 @@ public class ConfirmOnlineMatchUseCase
                 Player2ExpectedStateJson = expectedStateJson,
                 RoomToken = Guid.NewGuid().ToString("N"),
                 QrSessionCode = GenerateQrCode(),
+                Player1EloBefore = p1Profile.EloStandard,
+                Player2EloBefore = p2Profile.EloStandard,
                 StatusCode = OnlineMatchStatus.CREATED.ToString(),
                 Phase = "ROOM_SETUP",
                 SetupDeadlineAt = setupDeadline,

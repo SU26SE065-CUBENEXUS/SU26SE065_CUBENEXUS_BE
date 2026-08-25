@@ -114,6 +114,8 @@ public class OnlineMatchRepository : IOnlineMatchRepository
         => _context.Set<OnlineMatch>()
             .Include(match => match.Player1)
             .Include(match => match.Player2)
+            .Include(match => match.Player1Profile)
+            .Include(match => match.Player2Profile)
             .FirstOrDefaultAsync(match => match.Id == id);
 
     public Task<OnlineMatch?> GetByRoomTokenAsync(string roomToken)
