@@ -179,7 +179,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<GroupCompetitor>(entity =>
         {
             entity.HasOne(e => e.Group).WithMany().HasForeignKey(e => e.GroupId);
-            entity.HasOne(e => e.OfflineRegistrationEvent).WithMany().HasForeignKey(e => e.RegistrationEventId);
+            entity.HasOne(e => e.OfflineRegistrationEvent).WithMany(ore => ore.GroupCompetitors).HasForeignKey(e => e.RegistrationEventId);
             entity.Property(e => e.StatusCode).HasConversion<string>();
         });
 

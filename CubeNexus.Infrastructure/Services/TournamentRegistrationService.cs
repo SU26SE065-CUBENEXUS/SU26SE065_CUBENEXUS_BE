@@ -607,7 +607,17 @@ public class TournamentRegistrationService : ITournamentRegistrationService
                 StatusCode = ore.StatusCode,
                 SeedTimeMs = ore.SeedTimeMs,
                 SeedSourceCode = ore.SeedSourceCode,
-                SeedGeneratedAt = ore.SeedGeneratedAt
+                SeedGeneratedAt = ore.SeedGeneratedAt,
+                Assignments = ore.GroupCompetitors.Select(gc => new CompetitorAssignmentDto
+                {
+                    RoundNumber = gc.Group?.RoundNumber ?? 0,
+                    GroupId = gc.GroupId,
+                    GroupName = gc.Group?.GroupName ?? string.Empty,
+                    StationNumber = gc.StationNumber,
+                    GroupStatusCode = gc.Group?.StatusCode ?? string.Empty,
+                    CompetitorStatusCode = gc.StatusCode.ToString(),
+                    IsPublished = gc.Group?.StatusCode != "PENDING"
+                }).OrderBy(a => a.RoundNumber).ToList()
             }).ToList()
         }).ToList();
     }

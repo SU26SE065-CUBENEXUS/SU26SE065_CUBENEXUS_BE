@@ -111,6 +111,9 @@ public class RegistrationRepository : Repository<Registration>, IRegistrationRep
                 .ThenInclude(ore => ore.Event)
                     .ThenInclude(e => e.MedleyPuzzles)
                         .ThenInclude(mp => mp.PuzzleType)
+            .Include(r => r.OfflineRegistrationEvents)
+                .ThenInclude(ore => ore.GroupCompetitors)
+                    .ThenInclude(gc => gc.Group)
             .Where(r => r.TournamentId == tournamentId)
             .OrderByDescending(r => r.RegisteredAt)
             .ToListAsync(ct);

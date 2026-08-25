@@ -13,4 +13,5 @@ public class OfflineRegistrationEvent
 
     public Registration Registration { get; set; } = null!;
     public Event Event { get; set; } = null!;
+    public ICollection<GroupCompetitor> GroupCompetitors { get; set; } = new List<GroupCompetitor>();
 }
