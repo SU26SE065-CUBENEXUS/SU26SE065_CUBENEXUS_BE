@@ -9,7 +9,12 @@ public class OnlineMatchDetailDto
     public string? QrSessionCode { get; set; }
     public Guid Player1Id { get; set; }
     public Guid Player2Id { get; set; }
+    public string? Player1Name { get; set; }
+    public string? Player2Name { get; set; }
+    public string? Player1UserCode { get; set; }
+    public string? Player2UserCode { get; set; }
     public Guid? WinnerId { get; set; }
+    public string? WinnerName { get; set; }
     public bool Player1CameraReady { get; set; }
     public bool Player2CameraReady { get; set; }
     public bool Player1WebRtcConnected { get; set; }

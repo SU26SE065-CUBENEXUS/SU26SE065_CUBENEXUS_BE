@@ -388,16 +388,23 @@ public class FraudReportRepository : IFraudReportRepository
     }
 
     public Task<FraudReport?> GetByIdAsync(Guid id)
-        => _context.Set<FraudReport>().FirstOrDefaultAsync(report => report.Id == id);
+        => _context.Set<FraudReport>()
+            .Include(report => report.ReportedByUser)
+            .Include(report => report.AccusedUser)
+            .FirstOrDefaultAsync(report => report.Id == id);
 
     public Task<List<FraudReport>> GetPendingReportsAsync()
         => _context.Set<FraudReport>()
+            .Include(report => report.ReportedByUser)
+            .Include(report => report.AccusedUser)
             .Where(report => report.StatusCode == "OPEN" || report.StatusCode == "REVIEWING" || report.StatusCode == "PENDING")
             .OrderBy(report => report.CreatedAt)
             .ToListAsync();
 
     public Task<List<FraudReport>> GetByMatchAsync(Guid matchId)
         => _context.Set<FraudReport>()
+            .Include(report => report.ReportedByUser)
+            .Include(report => report.AccusedUser)
             .Where(report => report.MatchId == matchId)
             .OrderBy(report => report.CreatedAt)
             .ToListAsync();

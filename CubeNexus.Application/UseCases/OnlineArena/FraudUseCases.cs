@@ -392,7 +392,7 @@ public class GetFraudReportDetailUseCase
     {
         var report = await _fraudRepo.GetByIdAsync(reportId)
             ?? throw new KeyNotFoundException("Fraud report not found.");
-        var match = await _matchRepo.GetByIdAsync(report.MatchId)
+        var match = await _matchRepo.GetByIdWithPlayersAsync(report.MatchId)
             ?? throw new KeyNotFoundException("Match not found.");
 
         var aiChecks = await _aiCheckRepo.GetByMatchAsync(match.Id);
@@ -462,6 +462,10 @@ internal static class FraudReportMapper
             MatchId = report.MatchId,
             ReporterUserId = report.ReporterUserId,
             ReportedUserId = report.ReportedUserId,
+            ReporterUserCode = report.ReportedByUser?.UserCode,
+            ReporterDisplayName = report.ReportedByUser?.DisplayName,
+            ReportedUserCode = report.AccusedUser?.UserCode,
+            ReportedDisplayName = report.AccusedUser?.DisplayName,
             ReasonCode = report.ReasonCode,
             FraudType = report.FraudType ?? "OTHER",
             TimestampText = report.TimestampText ?? "00:00",

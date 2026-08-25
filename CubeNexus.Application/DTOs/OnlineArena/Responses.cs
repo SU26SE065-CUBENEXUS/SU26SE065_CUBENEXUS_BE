@@ -89,6 +89,10 @@ public class FraudReportDto
     public Guid MatchId { get; set; }
     public Guid ReporterUserId { get; set; }
     public Guid ReportedUserId { get; set; }
+    public string? ReporterUserCode { get; set; }
+    public string? ReporterDisplayName { get; set; }
+    public string? ReportedUserCode { get; set; }
+    public string? ReportedDisplayName { get; set; }
     public string? ReasonCode { get; set; }
     public string FraudType { get; set; } = "OTHER";
     public string TimestampText { get; set; } = "00:00";

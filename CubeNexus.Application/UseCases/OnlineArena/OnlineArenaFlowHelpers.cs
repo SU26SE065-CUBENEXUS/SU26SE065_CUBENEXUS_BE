@@ -374,7 +374,16 @@ public static class OnlineArenaFlowHelpers
             QrSessionCode = match.QrSessionCode,
             Player1Id = match.Player1Id,
             Player2Id = match.Player2Id,
+            Player1Name = match.Player1?.DisplayName,
+            Player2Name = match.Player2?.DisplayName,
+            Player1UserCode = match.Player1?.UserCode,
+            Player2UserCode = match.Player2?.UserCode,
             WinnerId = match.WinnerId,
+            WinnerName = match.WinnerId == match.Player1Id
+                ? match.Player1?.DisplayName
+                : match.WinnerId == match.Player2Id
+                    ? match.Player2?.DisplayName
+                    : null,
             Player1CameraReady = match.Player1CameraReady,
             Player2CameraReady = match.Player2CameraReady,
             Player1WebRtcConnected = match.Player1WebRtcConnected,
