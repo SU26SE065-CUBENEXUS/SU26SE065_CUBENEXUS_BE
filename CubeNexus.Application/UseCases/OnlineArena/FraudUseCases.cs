@@ -1,6 +1,8 @@
+using System.Text.Json;
 using CubeNexus.Application.DTOs.OnlineArena;
 using CubeNexus.Application.Interfaces;
 using CubeNexus.Application.Interfaces.OnlineArena;
+using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Domain.Entities;
 using CubeNexus.Domain.Enums;
 using CubeNexus.Domain.Services;
@@ -13,6 +15,8 @@ public class CreateFraudReportUseCase
     private readonly IFraudReportRepository _fraudRepo;
     private readonly IOnlineMatchAuditLogRepository _auditRepo;
     private readonly IOnlineArenaRealtimeNotifier _notifier;
+    private readonly IAdminNotificationService _adminNotifications;
+    private readonly IRealtimeNotifier _realtimeNotifier;
     private readonly IUnitOfWork _uow;
 
     public CreateFraudReportUseCase(
@@ -20,12 +24,16 @@ public class CreateFraudReportUseCase
         IFraudReportRepository fraudRepo,
         IOnlineMatchAuditLogRepository auditRepo,
         IOnlineArenaRealtimeNotifier notifier,
+        IAdminNotificationService adminNotifications,
+        IRealtimeNotifier realtimeNotifier,
         IUnitOfWork uow)
     {
         _matchRepo = matchRepo;
         _fraudRepo = fraudRepo;
         _auditRepo = auditRepo;
         _notifier = notifier;
+        _adminNotifications = adminNotifications;
+        _realtimeNotifier = realtimeNotifier;
         _uow = uow;
     }
 
@@ -86,7 +94,7 @@ public class CreateFraudReportUseCase
 
         await _uow.SaveChangesAsync();
 
-        // Giai đoạn 5: Thông báo SignalR cho Admin Dashboard
+        // Match-room SignalR (players still in lobby)
         await _notifier.NotifyFraudReportCreatedAsync(matchId, new
         {
             reportId = report.Id,
@@ -99,6 +107,40 @@ public class CreateFraudReportUseCase
             statusCode = report.StatusCode,
             createdAt = report.CreatedAt
         });
+
+        // Persist + broadcast admin inbox notifications (TournamentHub)
+        var payloadJson = JsonSerializer.Serialize(new
+        {
+            reportId = report.Id,
+            matchId = report.MatchId,
+            reporterUserId = report.ReporterUserId,
+            reportedUserId = report.ReportedUserId,
+            fraudType = report.FraudType,
+            timestampText = report.TimestampText,
+            timestampSeconds = report.TimestampSeconds,
+            statusCode = report.StatusCode
+        });
+        var title = "New online fraud report";
+        var body =
+            $"A player filed a PvP 1v1 fraud report ({report.FraudType}) at {report.TimestampText}. Match {report.MatchId.ToString()[..8]}…";
+        var adminDto = await _adminNotifications.NotifyAdminsAsync(
+            "FRAUD_REPORT_CREATED",
+            title,
+            body,
+            payloadJson);
+        if (adminDto != null)
+        {
+            await _realtimeNotifier.BroadcastAdminNotificationAsync(new
+            {
+                id = adminDto.Id,
+                typeCode = adminDto.TypeCode,
+                title = adminDto.Title,
+                body = adminDto.Body,
+                payload = adminDto.Payload,
+                isRead = adminDto.IsRead,
+                createdAt = adminDto.CreatedAt
+            });
+        }
 
         return FraudReportMapper.ToDto(report);
     }

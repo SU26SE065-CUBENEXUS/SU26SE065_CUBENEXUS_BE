@@ -149,6 +149,7 @@ builder.Services.AddOptions<R2Options>()
 builder.Services.AddHttpClient<CubeNexus.Application.Interfaces.Services.IAiRubikClient, AiRubikClient>();
 builder.Services.AddHttpClient<CubeNexus.Application.Interfaces.Services.IFaceVerificationClient, CubeNexus.Infrastructure.Services.FaceVerificationClient>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IFaceVerificationService, CubeNexus.Infrastructure.Services.FaceVerificationService>();
+builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IAdminNotificationService, CubeNexus.Infrastructure.Services.AdminNotificationService>();
 builder.Services.AddScoped<CubeNexus.Application.Interfaces.Services.IRecordingStorageService, R2RecordingStorageService>();
 
 // Repositories (Since they are created via UnitOfWork or registered individually, let's register the specific repositories for DI if any use case injects them directly)

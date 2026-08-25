@@ -21,7 +21,8 @@ public sealed class AdminNotificationController : ControllerBase
         limit = Math.Clamp(limit, 1, 100);
         var userId = GetUserId();
         var items = await _db.Notifications.AsNoTracking()
-            .Where(n => n.UserId == userId && n.TypeCode == "SCRAMBLE_POOL_EMPTY")
+            .Where(n => n.UserId == userId &&
+                (n.TypeCode == "SCRAMBLE_POOL_EMPTY" || n.TypeCode == "FRAUD_REPORT_CREATED"))
             .OrderByDescending(n => n.CreatedAt)
             .Take(limit)
             .Select(n => new
