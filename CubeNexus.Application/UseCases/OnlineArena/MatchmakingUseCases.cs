@@ -19,6 +19,7 @@ public class FindOnlineMatchUseCase
     private readonly IOnlineArenaRealtimeNotifier _notifier;
     private readonly IUnitOfWork _uow;
     private readonly CubeNexus.Application.Interfaces.Repositories.IPuzzleTypeRepository _puzzleTypeRepo;
+    private readonly CubeNexus.Application.Interfaces.Services.IScramblePoolService _scramblePool;
 
     public FindOnlineMatchUseCase(
         IMatchmakingQueueRepository queueRepo,
@@ -27,7 +28,8 @@ public class FindOnlineMatchUseCase
         IOnlineMatchRepository matchRepo,
         IOnlineArenaRealtimeNotifier notifier,
         IUnitOfWork uow,
-        CubeNexus.Application.Interfaces.Repositories.IPuzzleTypeRepository puzzleTypeRepo)
+        CubeNexus.Application.Interfaces.Repositories.IPuzzleTypeRepository puzzleTypeRepo,
+        CubeNexus.Application.Interfaces.Services.IScramblePoolService scramblePool)
     {
         _queueRepo = queueRepo;
         _confirmationRepo = confirmationRepo;
@@ -36,6 +38,7 @@ public class FindOnlineMatchUseCase
         _notifier = notifier;
         _uow = uow;
         _puzzleTypeRepo = puzzleTypeRepo;
+        _scramblePool = scramblePool;
     }
 
     public async Task<MatchmakingStatusDto> ExecuteAsync(Guid userId, Guid puzzleTypeId)
@@ -59,6 +62,10 @@ public class FindOnlineMatchUseCase
                 ServerNow = now
             };
         }
+
+        var availability = await _scramblePool.GetOnlineMatchAvailabilityAsync(puzzleTypeId);
+        if (!availability.IsAvailable)
+            throw new InvalidOperationException(availability.Message ?? "Online matches are temporarily unavailable.");
 
         // 2. Cooldown check
         var profile = await _profileRepo.GetProfileAsync(userId, puzzleTypeId);
@@ -101,6 +108,7 @@ public class FindOnlineMatchUseCase
                 RemainingSeconds = remaining,
                 Player1Confirmed = existingConfirmation.Player1Confirmed,
                 Player2Confirmed = existingConfirmation.Player2Confirmed,
+                IsPlayer1 = isPlayer1,
                 MeUserId = userId,
                 ServerNow = now
             };
@@ -149,6 +157,7 @@ public class FindOnlineMatchUseCase
                         RemainingSeconds = Math.Max(0, (int)(latestConf.ConfirmDeadlineAt - DateTime.UtcNow).TotalSeconds),
                         Player1Confirmed = latestConf.Player1Confirmed,
                         Player2Confirmed = latestConf.Player2Confirmed,
+                        IsPlayer1 = isP1,
                         MeUserId = userId,
                         ServerNow = DateTime.UtcNow
                     };
@@ -310,6 +319,7 @@ public class FindOnlineMatchUseCase
                 RemainingSeconds = remainingSeconds,
                 Player1Confirmed = false,
                 Player2Confirmed = false,
+                IsPlayer1 = false,
                 MeUserId = userId,
                 ServerNow = DateTime.UtcNow
             };
@@ -522,6 +532,7 @@ public class GetMatchmakingStatusUseCase
                 RemainingSeconds = remaining,
                 Player1Confirmed = confirmation.Player1Confirmed,
                 Player2Confirmed = confirmation.Player2Confirmed,
+                IsPlayer1 = isPlayer1,
                 MeUserId = userId,
                 ServerNow = now
             };

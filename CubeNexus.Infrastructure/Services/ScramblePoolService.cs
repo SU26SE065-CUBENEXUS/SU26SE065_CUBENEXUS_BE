@@ -13,7 +13,16 @@ namespace CubeNexus.Infrastructure.Services;
 
 public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleService
 {
+    private static readonly SemaphoreSlim NotificationGate = new(1, 1);
+    private sealed record ScramblePoolStatusRow(
+        string CompetitionMode,
+        Guid PuzzleTypeId,
+        string PuzzleCode,
+        string Status);
+
     private static readonly HashSet<string> Modes = ["ONLINE_MATCH", "OFFLINE", "ONLINE_ASYNC"];
+    private static readonly HashSet<string> TournamentStatusesRequiringScrambles =
+        ["REGISTRATION_CLOSED", "CHECKING_IN", "ONGOING"];
     private static readonly Regex MovePattern = new("^[2-9]?[RLUDFB](?:w)?(?:2|')?$", RegexOptions.Compiled);
     private readonly ApplicationDbContext _db;
     private readonly IScrambleGeneratorService _generator;
@@ -80,50 +89,9 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
                     puzzleCode,
                     puzzleName
                 });
-                var adminIds = await _db.Users
-                    .Where(u => u.UserRole == "ADMIN" && u.IsActive && !u.IsBanned)
-                    .Select(u => u.Id)
-                    .ToListAsync(ct);
-                var existingPayloads = await _db.Notifications.AsNoTracking()
-                    .Where(n => n.TypeCode == "SCRAMBLE_POOL_EMPTY" && adminIds.Contains(n.UserId))
-                    .Select(n => new { n.UserId, n.Payload })
-                    .ToListAsync(ct);
-                var notifications = adminIds
-                    .Where(adminId => !existingPayloads.Any(existing =>
-                        existing.UserId == adminId &&
-                        existing.Payload != null &&
-                        existing.Payload.Contains($"\"competitionMode\":\"{mode}\"") &&
-                        existing.Payload.Contains($"\"puzzleTypeId\":\"{puzzleTypeId}\"")))
-                    .Select(adminId => new Notification
-                    {
-                        Id = Guid.NewGuid(),
-                        UserId = adminId,
-                        TypeCode = "SCRAMBLE_POOL_EMPTY",
-                        Title = "Scramble pool empty",
-                        Body = emptyMessage,
-                        Payload = payload,
-                        IsRead = false,
-                        CreatedAt = DateTime.UtcNow
-                    })
-                    .ToList();
-                if (notifications.Count > 0)
-                {
-                    _db.Notifications.AddRange(notifications);
-                    await _db.SaveChangesAsync(ct);
-                }
-
-                if (_realtimeNotifier != null)
-                {
-                    await _realtimeNotifier.BroadcastScramblePoolDepletedAsync(new
-                    {
-                        CompetitionMode = mode,
-                        PuzzleTypeId = puzzleTypeId,
-                        PuzzleCode = puzzleCode,
-                        PuzzleName = puzzleName,
-                        Message = emptyMessage,
-                        Timestamp = DateTime.UtcNow
-                    }, ct);
-                }
+                if (mode != "ONLINE_ASYNC")
+                    await EnsureDepletedNotificationAsync(mode, puzzleTypeId, puzzleCode, puzzleName,
+                        emptyMessage, payload, ct);
 
                 throw new InvalidOperationException($"SCRAMBLE_POOL_EMPTY: Scramble pool for {mode} ({puzzleCode}) has run out! Please generate scrambles or switch to AUTO mode.");
             }
@@ -162,35 +130,58 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
         await _db.SaveChangesAsync(ct);
     }
 
+    public async Task<OnlineMatchAvailabilityDto> GetOnlineMatchAvailabilityAsync(
+        Guid puzzleTypeId, CancellationToken ct = default)
+    {
+        var puzzle = await _db.PuzzleTypes.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == puzzleTypeId && x.IsActive, ct)
+            ?? throw new KeyNotFoundException("Active puzzle type not found.");
+        if (puzzle.Code is not ("333" or "3x3x3"))
+            throw new InvalidOperationException("ONLINE_MATCH currently supports 3x3x3 only.");
+
+        var mode = await _db.ScrambleGenerationSettings.AsNoTracking()
+            .Where(x => x.CompetitionMode == "ONLINE_MATCH")
+            .Select(x => x.GenerationMode)
+            .SingleOrDefaultAsync(ct) ?? "MANUAL";
+        var availableCount = await _db.ScramblePoolItems.AsNoTracking()
+            .CountAsync(x => x.CompetitionMode == "ONLINE_MATCH" && x.PuzzleTypeId == puzzleTypeId &&
+                             x.Status == "AVAILABLE" && x.IsValidated, ct);
+        var isAvailable = mode.Equals("AUTO", StringComparison.OrdinalIgnoreCase) || availableCount > 0;
+        var message = isAvailable ? null : "Online matches are temporarily unavailable because the 3x3x3 scramble pool is empty.";
+
+        if (!isAvailable)
+        {
+            var payload = JsonSerializer.Serialize(new
+            {
+                competitionMode = "ONLINE_MATCH",
+                puzzleTypeId,
+                puzzleCode = puzzle.Code,
+                puzzleName = puzzle.Name
+            });
+            await EnsureDepletedNotificationAsync("ONLINE_MATCH", puzzleTypeId, puzzle.Code, puzzle.Name,
+                message!, payload, ct);
+        }
+
+        return new OnlineMatchAvailabilityDto(isAvailable, mode.ToUpperInvariant(), availableCount, message);
+    }
+
     public async Task<IReadOnlyList<ScramblePoolSummaryDto>> GetSummaryAsync(CancellationToken ct = default)
     {
         // 1. Active OFFLINE Tournament puzzle types
         var activeOfflinePuzzleTypeIds = await _db.Events.AsNoTracking()
             .Where(e => e.Tournament != null && 
-                        (e.Tournament.TournamentType == "OFFLINE" || string.IsNullOrEmpty(e.Tournament.TournamentType)) &&
-                        e.Tournament.StatusCode != "cancelled" && 
-                        e.Tournament.StatusCode != "draft" && 
-                        e.Tournament.StatusCode != "disabled" && 
-                        e.Tournament.StatusCode != "completed")
+                (e.Tournament.TournamentType == "OFFLINE" || string.IsNullOrEmpty(e.Tournament.TournamentType)) &&
+                TournamentStatusesRequiringScrambles.Contains(e.Tournament.StatusCode.ToUpper()))
             .Select(e => e.PuzzleTypeId)
             .Distinct()
             .ToListAsync(ct);
 
         // 2. Active ONLINE_ASYNC Tournament puzzle types
-        var activeOnlineAsyncPuzzleTypeIds = await _db.Events.AsNoTracking()
-            .Where(e => e.Tournament != null && 
-                        e.Tournament.TournamentType == "ONLINE_ASYNC" &&
-                        e.Tournament.StatusCode != "cancelled" && 
-                        e.Tournament.StatusCode != "draft" && 
-                        e.Tournament.StatusCode != "disabled" && 
-                        e.Tournament.StatusCode != "completed")
-            .Select(e => e.PuzzleTypeId)
-            .Distinct()
-            .ToListAsync(ct);
+        var activeOnlineAsyncPuzzleTypeIds = Array.Empty<Guid>();
 
         // 3. Standard active puzzle types used for Online Arena Matches (PvP)
         var onlineMatchPuzzleTypeIds = await _db.PuzzleTypes.AsNoTracking()
-            .Where(pt => pt.IsActive && (pt.Code == "3x3x3" || pt.Code == "2x2x2" || pt.Code == "4x4x4" || pt.Code == "Pyraminx" || pt.Code == "Skewb"))
+            .Where(pt => pt.IsActive && (pt.Code == "333" || pt.Code == "3x3x3"))
             .Select(pt => pt.Id)
             .ToListAsync(ct);
 
@@ -206,13 +197,11 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
             .ToListAsync(ct);
 
         var rows = await _db.ScramblePoolItems.AsNoTracking()
-            .Select(x => new
-            {
+            .Select(x => new ScramblePoolStatusRow(
                 x.CompetitionMode,
                 x.PuzzleTypeId,
-                PuzzleCode = x.PuzzleType.Code,
-                x.Status
-            })
+                x.PuzzleType.Code,
+                x.Status))
             .ToListAsync(ct);
 
         var summaryList = rows
@@ -236,16 +225,6 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
                 }
             }
 
-            // For ONLINE_ASYNC: only if used in an active ONLINE_ASYNC tournament
-            if (activeOnlineAsyncPuzzleTypeIds.Contains(pt.Id))
-            {
-                var hasAvailable = resultList.Any(s => s.CompetitionMode == "ONLINE_ASYNC" && s.PuzzleTypeId == pt.Id && s.Status == "AVAILABLE");
-                if (!hasAvailable)
-                {
-                    resultList.Add(new ScramblePoolSummaryDto("ONLINE_ASYNC", pt.Id, pt.Code, "AVAILABLE", 0));
-                }
-            }
-
             // For ONLINE_MATCH: only if used in online arena matches
             if (onlineMatchPuzzleTypeIds.Contains(pt.Id))
             {
@@ -257,11 +236,137 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
             }
         }
 
+        await ResolveInactiveScrambleNotificationsAsync(
+            activeOfflinePuzzleTypeIds,
+            activeOnlineAsyncPuzzleTypeIds,
+            onlineMatchPuzzleTypeIds,
+            rows,
+            ct);
+
         return resultList
             .OrderBy(x => x.CompetitionMode)
             .ThenBy(x => x.PuzzleCode)
             .ThenBy(x => x.Status)
             .ToList();
+    }
+
+    private async Task EnsureDepletedNotificationAsync(string mode, Guid puzzleTypeId, string puzzleCode,
+        string puzzleName, string message, string payload, CancellationToken ct)
+    {
+        await NotificationGate.WaitAsync(ct);
+        try
+        {
+            var adminIds = await _db.Users.AsNoTracking()
+                .Where(u => u.UserRole == "ADMIN" && u.IsActive && !u.IsBanned)
+                .Select(u => u.Id)
+                .ToListAsync(ct);
+            var existingPayloads = await _db.Notifications.AsNoTracking()
+                .Where(n => n.TypeCode == "SCRAMBLE_POOL_EMPTY" && !n.IsRead && adminIds.Contains(n.UserId))
+                .Select(n => new { n.UserId, n.Payload })
+                .ToListAsync(ct);
+            var notifications = adminIds
+                .Where(adminId => !existingPayloads.Any(existing => existing.UserId == adminId &&
+                    existing.Payload != null &&
+                    existing.Payload.Contains($"\"competitionMode\":\"{mode}\"") &&
+                    existing.Payload.Contains($"\"puzzleTypeId\":\"{puzzleTypeId}\"")))
+                .Select(adminId => new Notification
+                {
+                    Id = Guid.NewGuid(), UserId = adminId, TypeCode = "SCRAMBLE_POOL_EMPTY",
+                    Title = "Scramble pool empty", Body = message, Payload = payload,
+                    IsRead = false, CreatedAt = DateTime.UtcNow
+                })
+                .ToList();
+            if (notifications.Count > 0)
+            {
+                _db.Notifications.AddRange(notifications);
+                await _db.SaveChangesAsync(ct);
+                if (_realtimeNotifier != null)
+                    await _realtimeNotifier.BroadcastScramblePoolDepletedAsync(new
+                    {
+                        CompetitionMode = mode, PuzzleTypeId = puzzleTypeId, PuzzleCode = puzzleCode,
+                        PuzzleName = puzzleName, Message = message, Timestamp = DateTime.UtcNow
+                    }, ct);
+            }
+        }
+        finally
+        {
+            NotificationGate.Release();
+        }
+    }
+
+    private async Task ResolveInactiveScrambleNotificationsAsync(
+        IReadOnlyCollection<Guid> activeOfflinePuzzleTypeIds,
+        IReadOnlyCollection<Guid> activeOnlineAsyncPuzzleTypeIds,
+        IReadOnlyCollection<Guid> onlineMatchPuzzleTypeIds,
+        IReadOnlyCollection<ScramblePoolStatusRow> rows,
+        CancellationToken ct)
+    {
+        var modeSettings = await _db.ScrambleGenerationSettings.AsNoTracking()
+            .Select(x => new { x.CompetitionMode, x.GenerationMode })
+            .ToListAsync(ct);
+        var manualModes = modeSettings
+            .Where(x => x.GenerationMode.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
+            .Select(x => x.CompetitionMode)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Missing settings use MANUAL by default.
+        foreach (var mode in Modes)
+        {
+            if (!modeSettings.Any(x => x.CompetitionMode.Equals(mode, StringComparison.OrdinalIgnoreCase)))
+                manualModes.Add(mode);
+        }
+
+        var availableKeys = rows
+            .Where(x => x.Status == "AVAILABLE")
+            .Select(x => $"{x.CompetitionMode}:{x.PuzzleTypeId}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var activeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void AddDepletedKeys(string mode, IEnumerable<Guid> puzzleTypeIds)
+        {
+            if (!manualModes.Contains(mode)) return;
+            foreach (var puzzleTypeId in puzzleTypeIds)
+            {
+                var key = $"{mode}:{puzzleTypeId}";
+                if (!availableKeys.Contains(key)) activeKeys.Add(key);
+            }
+        }
+
+        AddDepletedKeys("OFFLINE", activeOfflinePuzzleTypeIds);
+        AddDepletedKeys("ONLINE_ASYNC", activeOnlineAsyncPuzzleTypeIds);
+        AddDepletedKeys("ONLINE_MATCH", onlineMatchPuzzleTypeIds);
+
+        var unread = await _db.Notifications
+            .Where(n => n.TypeCode == "SCRAMBLE_POOL_EMPTY" && !n.IsRead)
+            .OrderByDescending(n => n.CreatedAt)
+            .ToListAsync(ct);
+        var now = DateTime.UtcNow;
+        var changed = false;
+        var retainedActiveNotifications = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var notification in unread)
+        {
+            try
+            {
+                using var payload = JsonDocument.Parse(notification.Payload ?? "{}");
+                var root = payload.RootElement;
+                var mode = root.TryGetProperty("competitionMode", out var modeValue) ? modeValue.GetString() : null;
+                var puzzleTypeIdText = root.TryGetProperty("puzzleTypeId", out var puzzleValue) ? puzzleValue.GetString() : null;
+                if (string.IsNullOrWhiteSpace(mode) || !Guid.TryParse(puzzleTypeIdText, out var puzzleTypeId)) continue;
+                var alertKey = $"{mode}:{puzzleTypeId}";
+                var perAdminKey = $"{notification.UserId}:{alertKey}";
+                if (activeKeys.Contains(alertKey) && retainedActiveNotifications.Add(perAdminKey)) continue;
+
+                notification.IsRead = true;
+                notification.ReadAt = now;
+                changed = true;
+            }
+            catch (JsonException)
+            {
+                // Preserve malformed legacy notifications for manual review.
+            }
+        }
+
+        if (changed) await _db.SaveChangesAsync(ct);
     }
 
     public async Task<ScramblePoolPageDto> GetItemsAsync(string? mode, string? status, Guid? puzzleTypeId,

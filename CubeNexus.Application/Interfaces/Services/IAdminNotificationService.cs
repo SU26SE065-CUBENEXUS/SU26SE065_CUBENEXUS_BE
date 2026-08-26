@@ -11,6 +11,11 @@ public interface IAdminNotificationService
         string body,
         string? payloadJson,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Marks every admin notification for a resolved fraud report as read.
+    /// </summary>
+    Task MarkFraudReportResolvedAsync(Guid reportId, CancellationToken ct = default);
 }
 
 public sealed class AdminNotificationCreatedDto

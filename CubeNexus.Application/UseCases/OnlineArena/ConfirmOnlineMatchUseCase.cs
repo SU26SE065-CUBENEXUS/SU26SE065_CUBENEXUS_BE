@@ -128,6 +128,7 @@ public class ConfirmOnlineMatchUseCase
                     ConfirmationId = confirmation.Id,
                     Player1Confirmed = confirmation.Player1Confirmed,
                     Player2Confirmed = confirmation.Player2Confirmed,
+                    IsPlayer1 = isPlayer1,
                     ConfirmDeadlineAt = confirmation.ConfirmDeadlineAt,
                     RemainingSeconds = remaining,
                     MeUserId = userId,

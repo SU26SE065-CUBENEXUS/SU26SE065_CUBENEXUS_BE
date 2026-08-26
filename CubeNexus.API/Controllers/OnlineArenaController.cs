@@ -114,6 +114,22 @@ public class OnlineArenaController : ControllerBase
         }
     }
 
+    [HttpGet("matchmaking/availability")]
+    public async Task<IActionResult> GetMatchmakingAvailability(
+        [FromQuery] Guid puzzleTypeId,
+        [FromServices] IScramblePoolService scramblePool,
+        CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await scramblePool.GetOnlineMatchAvailabilityAsync(puzzleTypeId, ct));
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
     /// <summary>
     /// Cancel matchmaking — either from QUEUED state or MATCH_FOUND confirmation window.
     /// If cancelling during confirmation window, a 30s cooldown is applied to the cancelling player.

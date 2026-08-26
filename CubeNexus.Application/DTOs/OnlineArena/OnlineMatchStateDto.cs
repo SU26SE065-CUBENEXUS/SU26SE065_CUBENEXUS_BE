@@ -148,8 +148,9 @@ public class MatchmakingStatusDto
     public bool? Player1Confirmed { get; set; }
     /// <summary>Whether player2 has confirmed.</summary>
     public bool? Player2Confirmed { get; set; }
+    /// <summary>Whether the requesting user occupies player slot 1.</summary>
+    public bool? IsPlayer1 { get; set; }
 
     // Setup deadline (khi status = MATCHED)
     public DateTime? SetupDeadlineAt { get; set; }
 }
-

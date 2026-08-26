@@ -170,6 +170,7 @@ public class ReviewFraudReportUseCase
     private readonly IOnlineProfileRepository _profileRepo;
     private readonly IEloHistoryRepository _eloHistoryRepo;
     private readonly IEloCalculator _eloCalc;
+    private readonly IAdminNotificationService _adminNotifications;
     private readonly IUnitOfWork _uow;
 
     public ReviewFraudReportUseCase(
@@ -182,6 +183,7 @@ public class ReviewFraudReportUseCase
         IOnlineProfileRepository profileRepo,
         IEloHistoryRepository eloHistoryRepo,
         IEloCalculator eloCalc,
+        IAdminNotificationService adminNotifications,
         IUnitOfWork uow)
     {
         _fraudRepo = fraudRepo;
@@ -193,6 +195,7 @@ public class ReviewFraudReportUseCase
         _profileRepo = profileRepo;
         _eloHistoryRepo = eloHistoryRepo;
         _eloCalc = eloCalc;
+        _adminNotifications = adminNotifications;
         _uow = uow;
     }
 
@@ -337,6 +340,7 @@ public class ReviewFraudReportUseCase
         }));
 
         await _uow.SaveChangesAsync();
+        await _adminNotifications.MarkFraudReportResolvedAsync(report.Id);
 
         // Giai đoạn 10: Thông báo cho cả 2 người chơi qua SignalR
         await _notifier.NotifyFraudReportResolvedAsync(match.Id, new

@@ -2,6 +2,7 @@ using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Domain.Entities;
 using CubeNexus.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace CubeNexus.Infrastructure.Services;
 
@@ -54,5 +55,36 @@ public sealed class AdminNotificationService : IAdminNotificationService
             IsRead = false,
             CreatedAt = first.CreatedAt
         };
+    }
+
+    public async Task MarkFraudReportResolvedAsync(Guid reportId, CancellationToken ct = default)
+    {
+        var unreadNotifications = await _db.Notifications
+            .Where(n => n.TypeCode == "FRAUD_REPORT_CREATED" && !n.IsRead)
+            .ToListAsync(ct);
+        var now = DateTime.UtcNow;
+        var changed = false;
+
+        foreach (var notification in unreadNotifications)
+        {
+            try
+            {
+                using var payload = JsonDocument.Parse(notification.Payload ?? "{}");
+                if (!payload.RootElement.TryGetProperty("reportId", out var reportIdValue) ||
+                    !Guid.TryParse(reportIdValue.GetString(), out var notificationReportId) ||
+                    notificationReportId != reportId)
+                    continue;
+
+                notification.IsRead = true;
+                notification.ReadAt = now;
+                changed = true;
+            }
+            catch (JsonException)
+            {
+                // Leave malformed legacy notifications untouched.
+            }
+        }
+
+        if (changed) await _db.SaveChangesAsync(ct);
     }
 }

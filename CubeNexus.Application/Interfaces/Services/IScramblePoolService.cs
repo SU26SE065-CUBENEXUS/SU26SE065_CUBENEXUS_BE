@@ -7,7 +7,15 @@ public interface IScramblePoolService
     Task<ScrambleReservationDto> ReserveAsync(string competitionMode, Guid puzzleTypeId,
         string targetType, Guid targetId, Guid? actorUserId = null, CancellationToken ct = default);
     Task MarkUsedAsync(Guid scramblePoolItemId, Guid? actorUserId = null, CancellationToken ct = default);
+    Task<OnlineMatchAvailabilityDto> GetOnlineMatchAvailabilityAsync(Guid puzzleTypeId,
+        CancellationToken ct = default);
 }
+
+public sealed record OnlineMatchAvailabilityDto(
+    bool IsAvailable,
+    string Mode,
+    int AvailableCount,
+    string? Message);
 
 public interface IAdminScrambleService
 {
