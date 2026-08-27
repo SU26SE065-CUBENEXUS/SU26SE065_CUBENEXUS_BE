@@ -43,9 +43,9 @@ public class InitOnlineProfileUseCase
 
 public class GetMyOnlineProfilesUseCase
 {
-    private readonly IOnlineProfileRepository _repo;
+    private readonly CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository _repo;
 
-    public GetMyOnlineProfilesUseCase(IOnlineProfileRepository repo) => _repo = repo;
+    public GetMyOnlineProfilesUseCase(CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository repo) => _repo = repo;
 
     public async Task<List<OnlineProfileDto>> ExecuteAsync(Guid userId)
     {
@@ -58,9 +58,9 @@ public class GetMyOnlineProfilesUseCase
 
 public class GetOnlineLeaderboardUseCase
 {
-    private readonly IOnlineProfileRepository _repo;
+    private readonly CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository _repo;
 
-    public GetOnlineLeaderboardUseCase(IOnlineProfileRepository repo) => _repo = repo;
+    public GetOnlineLeaderboardUseCase(CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository repo) => _repo = repo;
 
     public async Task<List<LeaderboardEntryDto>> ExecuteAsync(Guid puzzleTypeId)
     {

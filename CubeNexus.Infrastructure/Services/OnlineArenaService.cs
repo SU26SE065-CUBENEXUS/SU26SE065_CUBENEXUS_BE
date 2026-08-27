@@ -99,15 +99,17 @@ public class OnlineArenaService : IOnlineArenaService
             ? Math.Round((double)profile.TotalWinsStandard / total * 100, 1)
             : 0;
 
+        bool isPlacementComplete = profile.IsPlacementCompleteStandard || profile.PlacementMatchesDoneStandard >= config.PlacementMatchCount;
+
         return new OnlineProfileDto
         {
             UserId = profile.UserId,
-            EloStandardVisible = profile.IsPlacementCompleteStandard ? profile.EloStandard : null,
+            EloStandardVisible = isPlacementComplete ? profile.EloStandard : null,
             PeakEloStandard = profile.PeakEloStandard,
             EloMedley = profile.EloMedley,
             PlacementMatchesDoneStandard = profile.PlacementMatchesDoneStandard,
             PlacementMatchCount = config.PlacementMatchCount,
-            IsPlacementCompleteStandard = profile.IsPlacementCompleteStandard,
+            IsPlacementCompleteStandard = isPlacementComplete,
             PlacementCompletedAtStandard = profile.PlacementCompletedAtStandard,
             TotalWinsStandard = profile.TotalWinsStandard,
             TotalLossesStandard = profile.TotalLossesStandard,

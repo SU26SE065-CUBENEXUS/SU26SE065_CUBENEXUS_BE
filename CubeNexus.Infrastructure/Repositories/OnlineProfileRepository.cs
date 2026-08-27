@@ -20,15 +20,27 @@ public class OnlineProfileRepository : Repository<OnlineProfile>,
 
     public async Task<List<OnlineProfile>> GetUserProfilesAsync(Guid userId)
     {
+        var config = await _db.EloConfigs.OrderByDescending(c => c.UpdatedAt).FirstOrDefaultAsync();
+        int reqCount = config?.PlacementMatchCount ?? 5;
         var profile = await GetByUserIdAsync(userId);
+        if (profile != null && !profile.IsPlacementCompleteStandard && profile.PlacementMatchesDoneStandard >= reqCount)
+        {
+            profile.IsPlacementCompleteStandard = true;
+            profile.PlacementCompletedAtStandard = DateTime.UtcNow;
+            _db.OnlineProfiles.Update(profile);
+            await _db.SaveChangesAsync();
+        }
         return profile is null ? [] : [profile];
     }
 
     public async Task<List<OnlineProfile>> GetLeaderboardAsync(Guid puzzleTypeId, int top = 100)
     {
+        var config = await _db.EloConfigs.OrderByDescending(c => c.UpdatedAt).FirstOrDefaultAsync();
+        int reqCount = config?.PlacementMatchCount ?? 5;
+
         return await _db.OnlineProfiles
             .Include(p => p.User)
-            .Where(p => p.IsPlacementCompleteStandard)
+            .Where(p => p.IsPlacementCompleteStandard || p.PlacementMatchesDoneStandard >= reqCount)
             .OrderByDescending(p => p.EloStandard)
             .Take(top)
             .ToListAsync();
@@ -58,9 +70,12 @@ public class OnlineProfileRepository : Repository<OnlineProfile>,
         int pageSize,
         CancellationToken ct = default)
     {
+        var config = await _db.EloConfigs.OrderByDescending(c => c.UpdatedAt).FirstOrDefaultAsync(ct);
+        int reqCount = config?.PlacementMatchCount ?? 5;
+
         var query = _db.OnlineProfiles
             .Include(p => p.User)
-            .Where(p => p.IsPlacementCompleteStandard)
+            .Where(p => p.IsPlacementCompleteStandard || p.PlacementMatchesDoneStandard >= reqCount)
             .OrderByDescending(p => p.EloStandard);
 
         int totalCount = await query.CountAsync(ct);
