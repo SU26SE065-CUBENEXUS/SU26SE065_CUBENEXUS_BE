@@ -256,8 +256,8 @@ public class TournamentOperationService : ITournamentOperationService
         int detectedStationCount = assignedJudges.Max(tj => tj.AssignedStationNumber!.Value);
         int finalStationCount = dto.StationCount > 0 ? dto.StationCount : detectedStationCount;
 
-        if (dto.CompetitorsPerGroup < finalStationCount)
-            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", $"Số thí sinh/nhóm ({dto.CompetitorsPerGroup}) không thể nhỏ hơn số bàn thi hiện có ({finalStationCount} bàn).", 400);
+        if (dto.CompetitorsPerGroup <= 0)
+            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", "Số thí sinh trong 1 nhóm phải lớn hơn 0.", 400);
 
         // Fetch display names for competitors
         var regIds = registeredEvents.Select(re => re.RegistrationId).Distinct().ToList();
