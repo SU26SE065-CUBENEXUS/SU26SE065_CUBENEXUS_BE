@@ -1,5 +1,6 @@
 using CubeNexus.Application.DTOs.OnlineArena;
 using CubeNexus.Application.Interfaces.OnlineArena;
+using CubeNexus.Application.Interfaces.Repositories;
 using CubeNexus.Application.Interfaces.Services;
 using CubeNexus.Domain.Entities;
 
@@ -8,11 +9,11 @@ namespace CubeNexus.Application.UseCases.OnlineArena;
 public class InitOnlineProfileUseCase
 {
     private readonly IOnlineProfileInitService _profileInitService;
-    private readonly CubeNexus.Application.Interfaces.IUnitOfWork _uow;
+    private readonly IUnitOfWork _uow;
 
     public InitOnlineProfileUseCase(
         IOnlineProfileInitService profileInitService,
-        CubeNexus.Application.Interfaces.IUnitOfWork uow)
+        IUnitOfWork uow)
     {
         _profileInitService = profileInitService;
         _uow = uow;
@@ -20,12 +21,14 @@ public class InitOnlineProfileUseCase
 
     public async Task<OnlineProfileDto> ExecuteAsync(Guid userId, Guid puzzleTypeId)
     {
+        var config = await _uow.EloConfigs.GetActiveConfigAsync();
+        int reqCount = config?.PlacementMatchCount ?? 5;
         var profile = await _profileInitService.EnsureStandardProfileAsync(userId);
         await _uow.SaveChangesAsync();
-        return MapToDto(profile, puzzleTypeId);
+        return MapToDto(profile, puzzleTypeId, reqCount);
     }
 
-    internal static OnlineProfileDto MapToDto(OnlineProfile profile, Guid puzzleTypeId) => new()
+    internal static OnlineProfileDto MapToDto(OnlineProfile profile, Guid puzzleTypeId, int placementMatchCount = 5) => new()
     {
         Id = profile.Id,
         UserId = profile.UserId,
@@ -34,7 +37,8 @@ public class InitOnlineProfileUseCase
         Elo = profile.EloStandard,
         PeakElo = profile.PeakEloStandard,
         PlacementMatchesDone = profile.PlacementMatchesDoneStandard,
-        IsPlacementComplete = profile.IsPlacementCompleteStandard,
+        PlacementMatchCount = placementMatchCount,
+        IsPlacementComplete = profile.IsPlacementCompleteStandard || profile.PlacementMatchesDoneStandard >= placementMatchCount,
         TotalWins = profile.TotalWinsStandard,
         TotalLosses = profile.TotalLossesStandard,
         TotalDraws = profile.TotalDrawsStandard
@@ -44,14 +48,23 @@ public class InitOnlineProfileUseCase
 public class GetMyOnlineProfilesUseCase
 {
     private readonly CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository _repo;
+    private readonly IEloConfigRepository _eloConfigRepo;
 
-    public GetMyOnlineProfilesUseCase(CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository repo) => _repo = repo;
+    public GetMyOnlineProfilesUseCase(
+        CubeNexus.Application.Interfaces.OnlineArena.IOnlineProfileRepository repo,
+        IEloConfigRepository eloConfigRepo)
+    {
+        _repo = repo;
+        _eloConfigRepo = eloConfigRepo;
+    }
 
     public async Task<List<OnlineProfileDto>> ExecuteAsync(Guid userId)
     {
+        var config = await _eloConfigRepo.GetActiveConfigAsync();
+        int reqCount = config?.PlacementMatchCount ?? 5;
         var profiles = await _repo.GetUserProfilesAsync(userId);
         return profiles
-            .Select(p => InitOnlineProfileUseCase.MapToDto(p, Guid.Empty))
+            .Select(p => InitOnlineProfileUseCase.MapToDto(p, Guid.Empty, reqCount))
             .ToList();
     }
 }
