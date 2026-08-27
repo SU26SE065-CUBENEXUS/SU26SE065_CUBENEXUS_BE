@@ -185,10 +185,7 @@ public class TournamentOperationService : ITournamentOperationService
                 var scrambleSets = await _unitOfWork.ScrambleSets.FindAsync(ss => groupIds.Contains(ss.GroupId), ct);
                 if (scrambleSets.Any())
                 {
-                    var scrambleSetIds = scrambleSets.Select(ss => ss.Id).ToList();
-                    var scrambles = await _unitOfWork.Scrambles.FindAsync(s => scrambleSetIds.Contains(s.ScrambleSetId), ct);
-                    _unitOfWork.Scrambles.RemoveRange(scrambles);
-                    _unitOfWork.ScrambleSets.RemoveRange(scrambleSets);
+                    throw new InvalidOperationException($"Không thể tạo lại nhóm thi vì chuỗi scramble cho Vòng {dto.RoundNumber} đã được khởi tạo trước đó.");
                 }
                 _unitOfWork.GroupCompetitors.RemoveRange(competitors);
                 _unitOfWork.Groups.RemoveRange(existingGroups);
