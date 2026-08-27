@@ -54,31 +54,23 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
                 var puzzleCode = puzzle?.Code ?? "UNKNOWN";
                 var puzzleName = puzzle?.Name ?? "Rubik";
 
-                var generationMode = await _db.ScrambleGenerationSettings.AsNoTracking()
-                    .Where(x => x.CompetitionMode == mode)
-                    .Select(x => x.GenerationMode)
-                    .SingleOrDefaultAsync(ct) ?? "MANUAL";
-
-                if (generationMode == "AUTO")
+                if (puzzle != null)
                 {
-                    if (puzzle != null)
-                    {
-                        var autoSequence = NormalizeSequence(_generator.GenerateScramble(puzzle.Code, puzzle.ScrambleLength));
-                        var autoHash = Hash(autoSequence);
-                        var newItem = CreateItem(mode, puzzle, autoSequence, autoHash, "CUBENEXUS_AUTO_ON_DEMAND",
-                            "Auto-generated on demand", actorUserId ?? Guid.Empty, approved: true);
+                    var autoSequence = NormalizeSequence(_generator.GenerateScramble(puzzle.Code, puzzle.ScrambleLength));
+                    var autoHash = Hash(autoSequence);
+                    var newItem = CreateItem(mode, puzzle, autoSequence, autoHash, "CUBENEXUS_AUTO_ON_DEMAND",
+                        "Auto-generated on demand", actorUserId ?? Guid.Empty, approved: true);
 
-                        newItem.Status = "RESERVED";
-                        newItem.AssignedTargetType = targetType;
-                        newItem.AssignedTargetId = targetId;
-                        newItem.AssignedAt = DateTime.UtcNow;
+                    newItem.Status = "RESERVED";
+                    newItem.AssignedTargetType = targetType;
+                    newItem.AssignedTargetId = targetId;
+                    newItem.AssignedAt = DateTime.UtcNow;
 
-                        _db.ScramblePoolItems.Add(newItem);
-                        AddAudit(newItem.Id, "AUTO_GENERATED_AND_RESERVED", actorUserId, targetType, targetId);
-                        await _db.SaveChangesAsync(ct);
+                    _db.ScramblePoolItems.Add(newItem);
+                    AddAudit(newItem.Id, "AUTO_GENERATED_AND_RESERVED", actorUserId, targetType, targetId);
+                    await _db.SaveChangesAsync(ct);
 
-                        return new ScrambleReservationDto(newItem.Id, newItem.Sequence, newItem.ExpectedStateJson);
-                    }
+                    return new ScrambleReservationDto(newItem.Id, newItem.Sequence, newItem.ExpectedStateJson);
                 }
 
                 var emptyMessage = $"Scramble pool for {mode} ({puzzleCode}) is empty! Please generate scrambles or enable AUTO mode.";
