@@ -444,7 +444,7 @@ public class TournamentService : ITournamentService
 
         var rawPassword = !string.IsNullOrWhiteSpace(dto.Password) 
             ? dto.Password.Trim() 
-            : "Judge@123456";
+            : "1";
 
         var now = DateTime.UtcNow;
         bool isTournamentLive = tournament.StatusCode == "CHECKING_IN" || tournament.StatusCode == "ONGOING";
@@ -558,7 +558,7 @@ public class TournamentService : ITournamentService
         var now = DateTime.UtcNow;
         var resultList = new List<TournamentJudgeDto>();
         bool isTournamentLive = tournament.StatusCode == "CHECKING_IN" || tournament.StatusCode == "ONGOING";
-        const string defaultPassword = "Judge@123456";
+        const string defaultPassword = "1";
 
         for (int i = 0; i < assignments.Count; i++)
         {
@@ -758,7 +758,7 @@ public class TournamentService : ITournamentService
 
         var rawPassword = !string.IsNullOrWhiteSpace(dto.NewPassword)
             ? dto.NewPassword.Trim()
-            : "Judge@123456";
+            : "1";
 
         tj.User.PasswordHash = CubeNexus.Infrastructure.Identity.AuthService.HashPassword(rawPassword);
         tj.User.UpdatedAt = DateTime.UtcNow;
