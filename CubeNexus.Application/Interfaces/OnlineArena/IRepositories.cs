@@ -99,6 +99,7 @@ public interface IFraudReportRepository
 {
     Task<FraudReport?> GetByIdAsync(Guid id);
     Task<List<FraudReport>> GetPendingReportsAsync();
+    Task<List<FraudReport>> GetAllReportsAsync(string? status = null);
     Task<List<FraudReport>> GetByMatchAsync(Guid matchId);
     Task AddAsync(FraudReport report);
     void Update(FraudReport report);

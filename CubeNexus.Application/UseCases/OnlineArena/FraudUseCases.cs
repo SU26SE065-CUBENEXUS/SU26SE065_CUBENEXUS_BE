@@ -155,8 +155,8 @@ public class GetPendingFraudReportsUseCase
         _fraudRepo = fraudRepo;
     }
 
-    public async Task<List<FraudReportDto>> ExecuteAsync()
-        => (await _fraudRepo.GetPendingReportsAsync()).Select(FraudReportMapper.ToDto).ToList();
+    public async Task<List<FraudReportDto>> ExecuteAsync(string? status = null)
+        => (await _fraudRepo.GetAllReportsAsync(status)).Select(FraudReportMapper.ToDto).ToList();
 }
 
 public class ReviewFraudReportUseCase

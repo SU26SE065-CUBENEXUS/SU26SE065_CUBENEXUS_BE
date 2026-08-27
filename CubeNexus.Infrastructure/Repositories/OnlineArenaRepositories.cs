@@ -393,13 +393,35 @@ public class FraudReportRepository : IFraudReportRepository
             .Include(report => report.AccusedUser)
             .FirstOrDefaultAsync(report => report.Id == id);
 
-    public Task<List<FraudReport>> GetPendingReportsAsync()
-        => _context.Set<FraudReport>()
+    public async Task<List<FraudReport>> GetAllReportsAsync(string? status = null)
+    {
+        var query = _context.Set<FraudReport>()
             .Include(report => report.ReportedByUser)
             .Include(report => report.AccusedUser)
-            .Where(report => report.StatusCode == "OPEN" || report.StatusCode == "REVIEWING" || report.StatusCode == "PENDING")
-            .OrderBy(report => report.CreatedAt)
-            .ToListAsync();
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var st = status.Trim().ToUpperInvariant();
+            if (st == "PENDING")
+            {
+                query = query.Where(r => r.StatusCode == "OPEN" || r.StatusCode == "REVIEWING" || r.StatusCode == "PENDING");
+            }
+            else if (st == "RESOLVED")
+            {
+                query = query.Where(r => r.StatusCode == "RESOLVED");
+            }
+            else
+            {
+                query = query.Where(r => r.StatusCode == st);
+            }
+        }
+
+        return await query.OrderByDescending(report => report.CreatedAt).ToListAsync();
+    }
+
+    public Task<List<FraudReport>> GetPendingReportsAsync()
+        => GetAllReportsAsync("PENDING");
 
     public Task<List<FraudReport>> GetByMatchAsync(Guid matchId)
         => _context.Set<FraudReport>()

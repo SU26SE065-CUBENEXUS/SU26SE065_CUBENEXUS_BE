@@ -37,12 +37,24 @@ public class OnlineArenaAdminController : ControllerBase
     };
 
     [HttpGet]
+    public async Task<IActionResult> GetReports([FromQuery] string? status, [FromServices] GetPendingFraudReportsUseCase useCase)
+    {
+        try
+        {
+            return Ok(await useCase.ExecuteAsync(status));
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
     [HttpGet("pending")]
     public async Task<IActionResult> GetPendingReports([FromServices] GetPendingFraudReportsUseCase useCase)
     {
         try
         {
-            return Ok(await useCase.ExecuteAsync());
+            return Ok(await useCase.ExecuteAsync("PENDING"));
         }
         catch (Exception ex)
         {
