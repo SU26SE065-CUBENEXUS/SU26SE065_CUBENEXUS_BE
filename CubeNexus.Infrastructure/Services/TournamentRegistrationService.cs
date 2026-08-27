@@ -170,7 +170,7 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         if (!hasFaceEnrolled)
         {
             throw new InvalidOperationException(
-                "Bạn cần phải hoàn tất đăng ký Face ID trong Hồ sơ cá nhân (Profile -> Face ID) trước khi đăng ký tham gia giải đấu."
+                "You need to complete facial biometric verification in your Profile (Profile → Biometrics) before registering for the tournament."
             );
         }
 
