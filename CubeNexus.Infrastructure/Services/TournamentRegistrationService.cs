@@ -52,12 +52,12 @@ public class TournamentRegistrationService : ITournamentRegistrationService
         try
         {
             var eventId = tournament.Events.OrderBy(e => e.SortOrder ?? int.MaxValue).First().Id;
-            var demoPasswordHash = "100000./VeF4GIRn7XX7GEAgaAdVg==.14fU+ipyygYGH5PIIGlZlO2q4dqjn0u+ZtPAZ379b0s=";
+            var demoPasswordHash = CubeNexus.Infrastructure.Identity.AuthService.HashPassword("1");
 
             for (var index = 1; index <= count; index++)
             {
-                var code = $"DEMO-COMP-{index:000}";
-                var email = $"{code.ToLowerInvariant()}@demo.cubenexus.com";
+                var code = $"comp{index}";
+                var email = $"comp{index}@gmail.com";
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.UserCode == code, ct);
 
                 if (user == null)
