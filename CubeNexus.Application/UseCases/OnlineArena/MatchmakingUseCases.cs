@@ -269,6 +269,7 @@ public class FindOnlineMatchUseCase
             var p1Payload = new
             {
                 confirmationId = confirmation.Id,
+                isPlayer1 = true,
                 opponent = new
                 {
                     userId = userId,
@@ -286,6 +287,7 @@ public class FindOnlineMatchUseCase
             var p2Payload = new
             {
                 confirmationId = confirmation.Id,
+                isPlayer1 = false,
                 opponent = new
                 {
                     userId = opponentQueue.UserId,
