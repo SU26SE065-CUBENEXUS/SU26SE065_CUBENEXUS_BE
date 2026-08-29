@@ -331,6 +331,10 @@ public static class OnlineArenaFlowHelpers
             && match.Player1ResultStatus == PlayerResultStatus.DNF.ToString())
             return OnlineMatchOutcome.PLAYER2_WIN.ToString();
 
+        if (match.Player1ResultStatus == PlayerResultStatus.DNF.ToString()
+            && match.Player2ResultStatus == PlayerResultStatus.DNF.ToString())
+            return OnlineMatchOutcome.DRAW.ToString();
+
         return OnlineMatchOutcome.INCONCLUSIVE.ToString();
     }
 

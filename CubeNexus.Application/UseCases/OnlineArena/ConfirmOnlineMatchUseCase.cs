@@ -183,6 +183,7 @@ public class ConfirmOnlineMatchUseCase
                 Player2EloBefore = p2Profile.EloStandard,
                 StatusCode = OnlineMatchStatus.CREATED.ToString(),
                 Phase = "ROOM_SETUP",
+                TimeLimitMs = OnlineMatch.DefaultSolveTimeLimitMs,
                 SetupDeadlineAt = setupDeadline,
                 CreatedAt = DateTime.UtcNow
             };

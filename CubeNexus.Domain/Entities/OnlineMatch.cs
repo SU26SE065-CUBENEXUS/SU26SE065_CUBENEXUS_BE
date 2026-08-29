@@ -49,7 +49,7 @@ public class OnlineMatch
     /// <summary>Inspection deadline: countdown ends + 15 seconds.</summary>
     public DateTime? InspectionDeadlineAt { get; set; }
 
-    /// <summary>Solve deadline: inspection ends + 10 minutes.</summary>
+    /// <summary>Solve deadline: solving starts + 5 minutes.</summary>
     public DateTime? SolveDeadlineAt { get; set; }
 
     /// <summary>Finish check deadline: last timer stopped + 2 minutes.</summary>
@@ -100,7 +100,8 @@ public class OnlineMatch
     public DateTime? VideoEvidenceUploadDeadlineAt { get; set; }
     public DateTime? Player1RecordingStartedAt { get; set; }
     public DateTime? Player2RecordingStartedAt { get; set; }
-    public int TimeLimitMs { get; set; } = 480000;
+    public const int DefaultSolveTimeLimitMs = 300000;
+    public int TimeLimitMs { get; set; } = DefaultSolveTimeLimitMs;
 
     // === Result Fields ===
     public bool Player1IsDnf { get; set; } = false;

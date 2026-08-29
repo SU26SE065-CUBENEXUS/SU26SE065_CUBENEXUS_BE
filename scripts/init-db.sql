@@ -785,7 +785,7 @@ CREATE TABLE IF NOT EXISTS online_matches (
     video_evidence_upload_deadline_at TIMESTAMPTZ,
     player1_recording_started_at TIMESTAMPTZ,
     player2_recording_started_at TIMESTAMPTZ,
-    time_limit_ms INTEGER NOT NULL DEFAULT 480000,
+    time_limit_ms INTEGER NOT NULL DEFAULT 300000,
 
     -- Deadlines (UTC) — backend là nguồn sự thật, không để frontend tự tính
     setup_deadline_at TIMESTAMPTZ,

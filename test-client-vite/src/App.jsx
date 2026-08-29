@@ -59,7 +59,7 @@ function App() {
   const localStreamRef = useRef(null);
   const latestOfferRef = useRef(null);
   const logViewportRef = useRef(null);
-  const matchTimeLimitMsRef = useRef(8 * 60 * 1000);
+  const matchTimeLimitMsRef = useRef(5 * 60 * 1000);
   const recordingMarkedRef = useRef(false);
 
   const recording = useMatchRecording({

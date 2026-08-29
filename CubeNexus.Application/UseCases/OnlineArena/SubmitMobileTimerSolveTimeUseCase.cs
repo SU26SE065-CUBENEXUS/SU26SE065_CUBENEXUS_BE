@@ -1,6 +1,7 @@
 using CubeNexus.Application.DTOs.OnlineArena;
 using CubeNexus.Application.Interfaces;
 using CubeNexus.Application.Interfaces.OnlineArena;
+using CubeNexus.Domain.Entities;
 using CubeNexus.Domain.Enums;
 using System.Security.Authentication;
 
@@ -53,7 +54,8 @@ public class SubmitMobileTimerSolveTimeUseCase
         if (match.Phase == "INSPECTION")
         {
             match.Phase = "SOLVING";
-            match.SolveDeadlineAt = DateTime.UtcNow.AddMinutes(60);
+            match.TimeLimitMs = OnlineMatch.DefaultSolveTimeLimitMs;
+            match.SolveDeadlineAt = DateTime.UtcNow.AddMilliseconds(OnlineMatch.DefaultSolveTimeLimitMs);
         }
 
         // Verify mobile timer session

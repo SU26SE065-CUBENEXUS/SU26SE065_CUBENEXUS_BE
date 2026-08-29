@@ -261,35 +261,21 @@ public class ApplySolveTimeoutUseCase
 
         if (!changed) return;
 
-        // Check match phase transitions
-        var p1Done = match.Player1ResultStatus == PlayerResultStatus.DNF.ToString() || match.Player1FinishCheckStatus == "PASSED";
-        var p2Done = match.Player2ResultStatus == PlayerResultStatus.DNF.ToString() || match.Player2FinishCheckStatus == "PASSED";
+        // The five-minute solve timeout ends the match immediately, so neither
+        // player needs to complete a finish scan after this point.
+        match.Player1FinishCheckStatus = "NOT_REQUIRED";
+        match.Player2FinishCheckStatus = "NOT_REQUIRED";
 
-        if (p1Done && p2Done)
-        {
-            // Both done, complete match directly
-            match.Phase = "PENDING_EVIDENCE"; // Set temporary status before completion
-            _matchRepo.Update(match);
-            await _uow.SaveChangesAsync(ct);
+        // A solve timeout is final: pending players are DNF and the match is
+        // completed immediately. VALID vs DNF is a win; DNF vs DNF is a draw.
+        // There is no PENDING_EVIDENCE phase after the five-minute deadline.
+        _matchRepo.Update(match);
+        await _uow.SaveChangesAsync(ct);
 
-            await _completeMatchUseCase.ExecuteAsync(match.Id);
-            var payloadComplete = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Solve timeout. Match completed.");
-            await _notifier.NotifySolveTimeoutAsync(match.Id, payloadComplete);
-            await _notifier.NotifyMatchCompletedAsync(match.Id, payloadComplete);
-        }
-        else
-        {
-            // Only one player timed out (meaning the other is VALID and still needs to scan)
-            match.Phase = "PENDING_EVIDENCE";
-            match.VideoEvidenceUploadDeadlineAt = now.AddMinutes(2);
-
-            _matchRepo.Update(match);
-            await _uow.SaveChangesAsync(ct);
-
-            var payload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(match, "Solve timeout. DNF applied.");
-            await _notifier.NotifySolveTimeoutAsync(match.Id, payload);
-            await _notifier.NotifyResultSubmittedAsync(match.Id, payload);
-        }
+        await _completeMatchUseCase.ExecuteAsync(match.Id);
+        var completed = await _matchRepo.GetByIdAsync(match.Id) ?? match;
+        var payload = OnlineArenaFlowHelpers.BuildSignalRStatePayload(completed, "Solve timeout. Match completed.");
+        await _notifier.NotifySolveTimeoutAsync(match.Id, payload);
     }
 }
 
@@ -321,7 +307,8 @@ public class TransitionToSolvingUseCase
 
         var now = DateTime.UtcNow;
         match.Phase = "SOLVING";
-        match.SolveDeadlineAt = now.AddMinutes(60);
+        match.TimeLimitMs = OnlineMatch.DefaultSolveTimeLimitMs;
+        match.SolveDeadlineAt = now.AddMilliseconds(OnlineMatch.DefaultSolveTimeLimitMs);
 
         _matchRepo.Update(match);
         await _uow.SaveChangesAsync(ct);
