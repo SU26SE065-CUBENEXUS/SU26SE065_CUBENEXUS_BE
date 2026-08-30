@@ -13,6 +13,7 @@ public class CreateFraudReportUseCase
 {
     private readonly IOnlineMatchRepository _matchRepo;
     private readonly IFraudReportRepository _fraudRepo;
+    private readonly IOnlineMatchVideoEvidenceRepository _videoEvidenceRepo;
     private readonly IOnlineMatchAuditLogRepository _auditRepo;
     private readonly IOnlineArenaRealtimeNotifier _notifier;
     private readonly IAdminNotificationService _adminNotifications;
@@ -22,6 +23,7 @@ public class CreateFraudReportUseCase
     public CreateFraudReportUseCase(
         IOnlineMatchRepository matchRepo,
         IFraudReportRepository fraudRepo,
+        IOnlineMatchVideoEvidenceRepository videoEvidenceRepo,
         IOnlineMatchAuditLogRepository auditRepo,
         IOnlineArenaRealtimeNotifier notifier,
         IAdminNotificationService adminNotifications,
@@ -30,6 +32,7 @@ public class CreateFraudReportUseCase
     {
         _matchRepo = matchRepo;
         _fraudRepo = fraudRepo;
+        _videoEvidenceRepo = videoEvidenceRepo;
         _auditRepo = auditRepo;
         _notifier = notifier;
         _adminNotifications = adminNotifications;
@@ -61,6 +64,32 @@ public class CreateFraudReportUseCase
         if (existingReports.Any(r => r.ReporterUserId == userId))
             throw new ConflictException("You have already submitted a fraud report for this match.");
 
+        // 3.5 Timestamp must be within match recording duration
+        var evidences = await _videoEvidenceRepo.GetByMatchAsync(matchId);
+        var maxDuration = evidences
+            .Where(e =>
+                e.RecordingStatus == nameof(MatchRecordingStatus.Ready)
+                && e.DurationSeconds.HasValue
+                && e.DurationSeconds.Value > 0)
+            .Select(e => e.DurationSeconds!.Value)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        if (maxDuration <= 0)
+            throw new ArgumentException("Match recording duration is not available. Cannot submit a fraud report at this time.");
+
+        var timestampSeconds = req.TimestampSeconds;
+        if (timestampSeconds < 0 || timestampSeconds > maxDuration + 0.001)
+        {
+            var whole = (int)Math.Floor(maxDuration);
+            var frac = maxDuration - whole;
+            var maxLabel = frac > 0.001
+                ? $"{whole / 60:D2}:{whole % 60:D2}.{((int)Math.Round(frac * 100)):D2}"
+                : $"{whole / 60:D2}:{whole % 60:D2}";
+            throw new ArgumentException(
+                $"Please enter a valid timestamp within the match duration (00:00 – {maxLabel}).");
+        }
+
         var accusedUserId = match.Player1Id == userId ? match.Player2Id : match.Player1Id;
         var report = new FraudReport
         {
@@ -71,7 +100,7 @@ public class CreateFraudReportUseCase
             ReasonCode = req.FraudType,
             FraudType = string.IsNullOrWhiteSpace(req.FraudType) ? "OTHER" : req.FraudType,
             TimestampText = string.IsNullOrWhiteSpace(req.TimestampText) ? "00:00" : req.TimestampText,
-            TimestampSeconds = req.TimestampSeconds < 0 ? 0 : req.TimestampSeconds,
+            TimestampSeconds = timestampSeconds,
             Description = req.Description,
             EvidenceUrl = req.EvidenceUrl,
             EvidenceScreenshotUrl = req.EvidenceScreenshotUrl,
