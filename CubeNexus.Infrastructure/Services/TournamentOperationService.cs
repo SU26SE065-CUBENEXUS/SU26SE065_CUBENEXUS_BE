@@ -1209,19 +1209,29 @@ public class TournamentOperationService : ITournamentOperationService
         }
 
         var scrambles = await _unitOfWork.Scrambles.FindAsync(s => s.ScrambleSetId == scrambleSet.Id, ct);
-        var result = new List<GroupScrambleDetailDto>();
-        foreach (var s in scrambles)
-        {
-            result.Add(new GroupScrambleDetailDto
+        var puzzleTypes = (await _unitOfWork.PuzzleTypes.GetAllAsync(ct)).ToDictionary(p => p.Id);
+
+        var result = scrambles
+            .OrderBy(s => s.SolveNumber)
+            .ThenBy(s => s.SortOrder)
+            .Select(s =>
             {
-                Id = s.Id,
-                ScrambleSetId = s.ScrambleSetId,
-                PuzzleTypeId = s.PuzzleTypeId,
-                SolveNumber = s.SolveNumber,
-                Sequence = s.Sequence,
-                IsExtra = false
-            });
-        }
+                puzzleTypes.TryGetValue(s.PuzzleTypeId, out var pt);
+                return new GroupScrambleDetailDto
+                {
+                    Id = s.Id,
+                    ScrambleSetId = s.ScrambleSetId,
+                    PuzzleTypeId = s.PuzzleTypeId,
+                    PuzzleCode = pt?.Code,
+                    PuzzleName = pt?.Name,
+                    SolveNumber = s.SolveNumber,
+                    SortOrder = s.SortOrder,
+                    Sequence = s.Sequence,
+                    IsExtra = false
+                };
+            })
+            .ToList();
+
         return result;
     }
 

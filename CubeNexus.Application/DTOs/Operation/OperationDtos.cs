@@ -221,7 +221,10 @@ public class GroupScrambleDetailDto
     public Guid Id { get; set; }
     public Guid ScrambleSetId { get; set; }
     public Guid? PuzzleTypeId { get; set; }
+    public string? PuzzleCode { get; set; }
+    public string? PuzzleName { get; set; }
     public int SolveNumber { get; set; }
+    public int SortOrder { get; set; }
     public string Sequence { get; set; } = string.Empty;
     public bool IsExtra { get; set; }
 }
