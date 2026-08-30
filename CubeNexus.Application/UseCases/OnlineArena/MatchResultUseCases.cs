@@ -250,13 +250,22 @@ public class CompleteOnlineMatchUseCase
             var player1Score = existing.Outcome == nameof(OnlineMatchOutcome.PLAYER1_WIN) ? 1.0m : existing.Outcome == nameof(OnlineMatchOutcome.DRAW) ? 0.5m : 0.0m;
             var player2Score = existing.Outcome == nameof(OnlineMatchOutcome.PLAYER2_WIN) ? 1.0m : existing.Outcome == nameof(OnlineMatchOutcome.DRAW) ? 0.5m : 0.0m;
 
-            var (player1EloAfter, player2EloAfter, expected1, expected2) = _eloCalc.Calculate(
+            var (calculatedPlayer1Elo, calculatedPlayer2Elo, expected1, expected2) = _eloCalc.Calculate(
                 p1Profile.EloStandard,
                 p1Profile.KFactorCurrentStandard,
                 player1Score,
                 p2Profile.EloStandard,
                 p2Profile.KFactorCurrentStandard,
                 player2Score);
+
+            // A double-DNF draw is caused by penalties/timeouts, not by two
+            // equal valid solve times. Record the draw, but do not reward or
+            // penalize either player's rating regardless of their Elo gap.
+            var isDoubleDnfDraw = existing.Outcome == nameof(OnlineMatchOutcome.DRAW)
+                && existing.Player1ResultStatus == nameof(PlayerResultStatus.DNF)
+                && existing.Player2ResultStatus == nameof(PlayerResultStatus.DNF);
+            var player1EloAfter = isDoubleDnfDraw ? p1Profile.EloStandard : calculatedPlayer1Elo;
+            var player2EloAfter = isDoubleDnfDraw ? p2Profile.EloStandard : calculatedPlayer2Elo;
 
             existing.Player1EloBefore = p1Profile.EloStandard;
             existing.Player2EloBefore = p2Profile.EloStandard;
