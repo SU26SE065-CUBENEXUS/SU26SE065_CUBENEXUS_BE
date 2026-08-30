@@ -139,7 +139,7 @@ public class TournamentService : ITournamentService
                     }
                     if (!medleyPuzzleTypes.Add(mp.PuzzleTypeId))
                     {
-                        throw new InvalidOperationException($"Medley event cannot contain duplicate puzzle types (Id: {mp.PuzzleTypeId}).");
+                        throw new InvalidOperationException($"Medley event cannot contain duplicate puzzle types");
                     }
                 }
             }

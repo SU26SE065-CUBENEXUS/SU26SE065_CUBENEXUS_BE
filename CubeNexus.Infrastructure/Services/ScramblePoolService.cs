@@ -54,12 +54,58 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
                 var puzzleCode = puzzle?.Code ?? "UNKNOWN";
                 var puzzleName = puzzle?.Name ?? "Rubik";
 
-                if (puzzle != null)
+                var generationMode = await _db.ScrambleGenerationSettings.AsNoTracking()
+                    .Where(x => x.CompetitionMode == mode)
+                    .Select(x => x.GenerationMode)
+                    .SingleOrDefaultAsync(ct) ?? "MANUAL";
+
+                if (generationMode.Equals("AUTO", StringComparison.OrdinalIgnoreCase) && puzzle != null)
                 {
-                    var autoSequence = NormalizeSequence(_generator.GenerateScramble(puzzle.Code, puzzle.ScrambleLength));
-                    var autoHash = Hash(autoSequence);
+                    var creatorId = actorUserId.GetValueOrDefault();
+                    if (creatorId == Guid.Empty)
+                    {
+                        creatorId = await _db.Users.AsNoTracking()
+                            .Where(u => u.UserRole == "ADMIN" && u.IsActive && !u.IsBanned)
+                            .Select(u => u.Id)
+                            .FirstOrDefaultAsync(ct);
+                        if (creatorId == Guid.Empty)
+                        {
+                            creatorId = await _db.Users.AsNoTracking()
+                                .Where(u => u.IsActive && !u.IsBanned)
+                                .Select(u => u.Id)
+                                .FirstOrDefaultAsync(ct);
+                        }
+                    }
+
+                    var knownHashes = (await _db.ScramblePoolItems.AsNoTracking()
+                        .Where(x => x.CompetitionMode == mode && x.PuzzleTypeId == puzzle.Id)
+                        .Select(x => x.SequenceHash)
+                        .ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    string? autoSequence = null;
+                    string? autoHash = null;
+
+                    for (var attempt = 0; attempt < 50; attempt++)
+                    {
+                        var candidate = NormalizeSequence(_generator.GenerateScramble(puzzle.Code, puzzle.ScrambleLength));
+                        var hash = Hash(candidate);
+                        if (!knownHashes.Contains(hash))
+                        {
+                            autoSequence = candidate;
+                            autoHash = hash;
+                            break;
+                        }
+                    }
+
+                    // Fallback to fresh sequence if pool combinations are dense
+                    if (autoSequence == null || autoHash == null)
+                    {
+                        autoSequence = NormalizeSequence(_generator.GenerateScramble(puzzle.Code, puzzle.ScrambleLength));
+                        autoHash = Hash(autoSequence);
+                    }
+
                     var newItem = CreateItem(mode, puzzle, autoSequence, autoHash, "CUBENEXUS_AUTO_ON_DEMAND",
-                        "Auto-generated on demand", actorUserId ?? Guid.Empty, approved: true);
+                        "Auto-generated on demand", creatorId, approved: true);
 
                     newItem.Status = "RESERVED";
                     newItem.AssignedTargetType = targetType;
@@ -67,13 +113,13 @@ public sealed class ScramblePoolService : IScramblePoolService, IAdminScrambleSe
                     newItem.AssignedAt = DateTime.UtcNow;
 
                     _db.ScramblePoolItems.Add(newItem);
-                    AddAudit(newItem.Id, "AUTO_GENERATED_AND_RESERVED", actorUserId, targetType, targetId);
+                    AddAudit(newItem.Id, "AUTO_GENERATED_AND_RESERVED", creatorId, targetType, targetId);
                     await _db.SaveChangesAsync(ct);
 
                     return new ScrambleReservationDto(newItem.Id, newItem.Sequence, newItem.ExpectedStateJson);
                 }
 
-                var emptyMessage = $"Scramble pool for {mode} ({puzzleCode}) is empty! Please generate scrambles or enable AUTO mode.";
+                var emptyMessage = $"Scramble pool for {mode} ({puzzleCode}) is empty! Please generate scrambles or enable AUTO mode in Scramble Control Center.";
                 var payload = JsonSerializer.Serialize(new
                 {
                     competitionMode = mode,
