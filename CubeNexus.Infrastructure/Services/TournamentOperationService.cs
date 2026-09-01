@@ -713,8 +713,10 @@ public class TournamentOperationService : ITournamentOperationService
         var ev = await _unitOfWork.Events.GetByIdAsync(eventId, ct);
         if (ev == null)
             throw new KeyNotFoundException($"Event with ID {eventId} not found.");
-        if (!string.Equals(ev.EventFormatCode, "TRADITIONAL", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Demo score generation is available only for Traditional events.");
+        bool isTraditional = string.Equals(ev.EventFormatCode, "TRADITIONAL", StringComparison.OrdinalIgnoreCase);
+        bool isMedley = string.Equals(ev.EventFormatCode, "MEDLEY", StringComparison.OrdinalIgnoreCase);
+        if (!isTraditional && !isMedley)
+            throw new InvalidOperationException("Demo score generation is available only for Traditional and Medley events.");
 
         var groups = (await _unitOfWork.Groups.FindAsync(
             g => g.EventId == eventId && g.RoundNumber == roundNumber, ct)).ToList();
@@ -733,18 +735,44 @@ public class TournamentOperationService : ITournamentOperationService
         var allResults = (await _unitOfWork.Results.FindAsync(
             r => competitorIds.Contains(r.GroupCompetitorId), ct)).ToList();
         var result = new DemoScoreGenerationResultDto { EventId = eventId, RoundNumber = roundNumber };
-        var timeLimit = ev.TimeLimitMs.GetValueOrDefault(20_000);
+        var timeLimit = ev.TimeLimitMs.GetValueOrDefault(isMedley ? 180_000 : 20_000);
         var cutoff = ev.CutoffTimeMs.GetValueOrDefault();
         var upperBound = cutoff > 1 ? Math.Min(cutoff - 100, timeLimit - 100) : timeLimit - 100;
         if (upperBound <= 100)
             throw new InvalidOperationException("The event time limit/cutoff is too small for demo scores.");
-        var lowerBound = Math.Min(5_000, Math.Max(100, upperBound - 4_000));
+        var lowerBound = isMedley
+            ? Math.Max(10_000, Math.Min(30_000, upperBound - 10_000))
+            : Math.Min(5_000, Math.Max(100, upperBound - 4_000));
+        if (lowerBound >= upperBound)
+            lowerBound = Math.Max(1_000, upperBound / 2);
+
+        List<MedleyEventPuzzle> medleyPuzzles = new();
+        if (isMedley)
+        {
+            var medleyPuzzlesList = await _unitOfWork.MedleyEventPuzzles.FindAsync(mp => mp.EventId == ev.Id, ct);
+            medleyPuzzles = medleyPuzzlesList.OrderBy(mp => mp.SortOrder).ToList();
+            if (medleyPuzzles.Count == 0)
+                throw new InvalidOperationException("Medley puzzles are not configured for this event.");
+        }
 
         foreach (var competitor in competitors)
         {
             ct.ThrowIfCancellationRequested();
             if (competitor.StatusCode == CubeNexus.Domain.Enums.GroupCompetitorStatus.NO_SHOW)
                 continue;
+
+            // Auto check-in competitor if not checked in yet to prevent rejection
+            var offlineRegEvent = await _unitOfWork.OfflineRegistrationEvents.GetByIdAsync(competitor.RegistrationEventId, ct);
+            if (offlineRegEvent != null)
+            {
+                var registration = await _unitOfWork.Registrations.GetByIdAsync(offlineRegEvent.RegistrationId, ct);
+                if (registration != null && registration.CheckedInAt == null)
+                {
+                    registration.CheckedInAt = DateTime.UtcNow;
+                    _unitOfWork.Registrations.Update(registration);
+                    await _unitOfWork.SaveChangesAsync(ct);
+                }
+            }
 
             var existing = allResults
                 .Where(r => r.GroupCompetitorId == competitor.Id)
@@ -756,9 +784,20 @@ public class TournamentOperationService : ITournamentOperationService
             if (groupScrambleSet == null)
                 throw new InvalidOperationException("Scramble set not found for one of the groups. Generate scrambles first.");
 
-            var scrambles = (await _unitOfWork.Scrambles.FindAsync(
-                s => s.ScrambleSetId == groupScrambleSet.Id && s.PuzzleTypeId == ev.PuzzleTypeId, ct))
-                .ToDictionary(s => s.SolveNumber);
+            Dictionary<int, Scramble>? tradScrambles = null;
+            List<Scramble>? medleyScrambles = null;
+
+            if (isTraditional)
+            {
+                tradScrambles = (await _unitOfWork.Scrambles.FindAsync(
+                    s => s.ScrambleSetId == groupScrambleSet.Id && s.PuzzleTypeId == ev.PuzzleTypeId, ct))
+                    .ToDictionary(s => s.SolveNumber);
+            }
+            else
+            {
+                medleyScrambles = (await _unitOfWork.Scrambles.FindAsync(
+                    s => s.ScrambleSetId == groupScrambleSet.Id, ct)).ToList();
+            }
 
             var generatedForCompetitor = false;
             for (var solveNumber = 1; solveNumber <= ev.SolveCount; solveNumber++)
@@ -769,22 +808,60 @@ public class TournamentOperationService : ITournamentOperationService
                     continue;
                 }
 
-                var scramble = scrambles.GetValueOrDefault(solveNumber);
-                if (scramble == null)
-                    throw new InvalidOperationException($"Scramble for Solve #{solveNumber} is missing.");
-
-                // Reuse the real submission pipeline: check-in, group state,
-                // sequential solve number, cutoff, time limit and leaderboard updates remain active.
-                await SubmitTraditionalResultAsync(new SubmitTraditionalResultDto
+                try
                 {
-                    GroupCompetitorId = competitor.Id,
-                    SolveNumber = solveNumber,
-                    RawTimeMs = Random.Shared.Next(lowerBound, upperBound + 1),
-                    ScrambleId = scramble.Id
-                }, managerId, ct);
+                    if (isTraditional)
+                    {
+                        var scramble = tradScrambles?.GetValueOrDefault(solveNumber);
+                        if (scramble == null)
+                            throw new InvalidOperationException($"Scramble for Solve #{solveNumber} is missing.");
 
-                result.SolvesGenerated++;
-                generatedForCompetitor = true;
+                        // Reuse the real submission pipeline: check-in, group state,
+                        // sequential solve number, cutoff, time limit and leaderboard updates remain active.
+                        await SubmitTraditionalResultAsync(new SubmitTraditionalResultDto
+                        {
+                            GroupCompetitorId = competitor.Id,
+                            SolveNumber = solveNumber,
+                            RawTimeMs = Random.Shared.Next(lowerBound, upperBound + 1),
+                            ScrambleId = scramble.Id
+                        }, managerId, ct);
+                    }
+                    else
+                    {
+                        // Check scrambles exist for all medley puzzles in this solve
+                        foreach (var mp in medleyPuzzles)
+                        {
+                            var hasScramble = medleyScrambles!.Any(s => s.SolveNumber == solveNumber && s.PuzzleTypeId == mp.PuzzleTypeId);
+                            if (!hasScramble)
+                                throw new InvalidOperationException($"Scramble for Solve #{solveNumber} (Puzzle {mp.PuzzleTypeId}) is missing. Generate scrambles first.");
+                        }
+
+                        // Reuse the real Medley submission pipeline
+                        await SubmitMedleyResultAsync(new SubmitMedleyResultDto
+                        {
+                            GroupCompetitorId = competitor.Id,
+                            SolveNumber = solveNumber,
+                            Details = new List<MedleyDetailSubmissionDto>
+                            {
+                                new MedleyDetailSubmissionDto
+                                {
+                                    MedleyPuzzleId = medleyPuzzles[0].Id,
+                                    RawTimeMs = Random.Shared.Next(lowerBound, upperBound + 1),
+                                    PenaltyTypeId = null,
+                                    ScrambleId = Guid.Empty
+                                }
+                            }
+                        }, managerId, ct);
+                    }
+
+                    result.SolvesGenerated++;
+                    generatedForCompetitor = true;
+                }
+                catch (Application.Exceptions.CustomException ex) when (ex.ErrorCode == "COMPETITOR_STOPPED" || ex.ErrorCode == "SOLVE_COUNT_EXCEEDED")
+                {
+                    // If competitor reached cutoff limit or completed solves, skip further solves
+                    break;
+                }
             }
 
             if (generatedForCompetitor || existing.Count > 0)
