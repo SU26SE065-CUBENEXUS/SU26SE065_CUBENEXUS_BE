@@ -165,7 +165,7 @@ public class FaceVerificationService : IFaceVerificationService
         {
             throw new CustomException(
                 "FACE_NOT_ENROLLED",
-                "Thí sinh chưa đăng ký Face ID trên tài khoản Competitor (Profile → Face ID). Judge không đăng ký giúp được.",
+                "The competitor has not registered Facial Biometrics on their Competitor account (Profile → Facial Biometrics). Judges cannot register on their behalf.",
                 409);
         }
 
@@ -298,7 +298,7 @@ public class FaceVerificationService : IFaceVerificationService
         {
             throw new CustomException(
                 "FACE_NOT_ENROLLED",
-                "Bạn chưa đăng ký Face ID. Hãy đăng ký trước khi thử xác minh.",
+                "You have not registered Facial Biometrics. Please register before trying to verify.",
                 409);
         }
 
