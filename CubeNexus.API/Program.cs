@@ -222,6 +222,7 @@ builder.Services.AddSingleton<CubeNexus.Application.UseCases.OnlineArena.IMatchT
 
 // Background Services
 builder.Services.AddHostedService<CubeNexus.API.BackgroundServices.OnlineArenaBackgroundService>();
+builder.Services.AddHostedService<CubeNexus.API.BackgroundServices.TournamentRegistrationBackgroundService>();
 
 builder.Services.AddCors(options =>
 {

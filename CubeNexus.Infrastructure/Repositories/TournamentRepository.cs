@@ -37,4 +37,15 @@ public class TournamentRepository : Repository<Tournament>, ITournamentRepositor
                     .ThenInclude(mp => mp.PuzzleType)
             .FirstOrDefaultAsync(t => t.Id == tournamentId, ct);
     }
+
+    public Task<int> OpenDueRegistrationsAsync(DateTime nowUtc, CancellationToken ct = default)
+    {
+        return _set
+            .Where(t => t.StatusCode == "PUBLISHED"
+                && t.RegistrationOpenAt <= nowUtc
+                && t.RegistrationCloseAt > nowUtc)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(t => t.StatusCode, "REGISTRATION_OPEN")
+                .SetProperty(t => t.UpdatedAt, nowUtc), ct);
+    }
 }

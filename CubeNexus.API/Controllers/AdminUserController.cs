@@ -1,5 +1,6 @@
 using CubeNexus.Application.DTOs.Admin;
 using CubeNexus.Application.Interfaces.Services;
+using CubeNexus.Application.UseCases.OnlineArena;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -68,6 +69,27 @@ public class AdminUserController : ControllerBase
         try
         {
             return Ok(await _adminUserService.GetUserByIdAsync(userId, ct));
+        }
+        catch (Exception ex)
+        {
+            return MapException(ex);
+        }
+    }
+
+    [HttpGet("{userId:guid}/online-matches")]
+    public async Task<IActionResult> GetUserOnlineMatchHistory(
+        Guid userId,
+        [FromQuery] Guid? puzzleTypeId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10,
+        [FromServices] GetMyMatchHistoryUseCase useCase = null!,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            // Return 404 for an unknown user instead of an ambiguous empty history.
+            await _adminUserService.GetUserByIdAsync(userId, ct);
+            return Ok(await useCase.ExecuteAsync(userId, puzzleTypeId, page, pageSize));
         }
         catch (Exception ex)
         {
