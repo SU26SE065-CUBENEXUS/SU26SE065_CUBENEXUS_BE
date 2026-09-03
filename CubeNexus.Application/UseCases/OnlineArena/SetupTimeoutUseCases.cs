@@ -9,8 +9,12 @@ namespace CubeNexus.Application.UseCases.OnlineArena;
 /// Xử lý timeout setup phase (setupDeadlineAt hết mà chưa BothChecklistPassed).
 /// - match CANCELLED, không tính Elo
 /// - player gây kẹt bị cooldown matchmaking (lưu ở profile)
-/// - player không gây lỗi được queue lại ngay
+/// - player đã xong mobile-timer và đang chờ đối thủ KHÔNG bị cooldown
 /// - IDEMPOTENT: dùng SetupTimeoutPenaltyAppliedAt để tránh apply trùng
+///
+/// Attribution rule:
+/// 1) Nếu còn người chưa TimerReady → chỉ cooldown những người chưa xong mobile-timer.
+/// 2) Nếu cả hai đã TimerReady → cooldown theo checklist còn thiếu (WebRTC / scramble).
 /// </summary>
 public class ApplySetupTimeoutUseCase
 {
@@ -41,14 +45,12 @@ public class ApplySetupTimeoutUseCase
         if (match.StatusCode == nameof(OnlineMatchStatus.CANCELLED))
             return;
 
-        // Xác định ai chưa pass checklist
-        var p1Passed = OnlineArenaFlowHelpers.IsChecklistPassed(match, true);
-        var p2Passed = OnlineArenaFlowHelpers.IsChecklistPassed(match, false);
+        var (p1ShouldCooldown, p2ShouldCooldown) = ResolveSetupTimeoutCulprits(match);
 
         Guid? timeoutPlayerId = null;
-        if (!p1Passed && p2Passed) timeoutPlayerId = match.Player1Id;
-        else if (!p2Passed && p1Passed) timeoutPlayerId = match.Player2Id;
-        // Cả hai chưa pass → timeout cả 2
+        if (p1ShouldCooldown && !p2ShouldCooldown) timeoutPlayerId = match.Player1Id;
+        else if (p2ShouldCooldown && !p1ShouldCooldown) timeoutPlayerId = match.Player2Id;
+        // Cả hai đều lỗi → TimeoutPlayerId = null
 
         // Cancel match
         match.StatusCode = nameof(OnlineMatchStatus.CANCELLED);
@@ -62,11 +64,11 @@ public class ApplySetupTimeoutUseCase
 
         _matchRepo.Update(match);
 
-        // Apply cooldown cho player(s) gây timeout
-        if (!p1Passed)
+        // Apply cooldown chỉ cho player(s) gây kẹt theo rule timer-first
+        if (p1ShouldCooldown)
             await ApplyCooldownAsync(match.Player1Id, match.Player1ProfileId, match.Id, ct);
 
-        if (!p2Passed)
+        if (p2ShouldCooldown)
             await ApplyCooldownAsync(match.Player2Id, match.Player2ProfileId, match.Id, ct);
 
         await _uow.SaveChangesAsync(ct);
@@ -78,7 +80,7 @@ public class ApplySetupTimeoutUseCase
         await _notifier.NotifyMatchCancelledAsync(match.Id, payload);
 
         // Notify cooldown player(s)
-        if (!p1Passed)
+        if (p1ShouldCooldown)
         {
             var p1Profile = await _profileRepo.GetByUserIdAsync(match.Player1Id);
             await _notifier.NotifyMatchmakingCooldownAppliedAsync(match.Player1Id, new
@@ -89,7 +91,7 @@ public class ApplySetupTimeoutUseCase
                 serverNow = DateTime.UtcNow
             });
         }
-        if (!p2Passed)
+        if (p2ShouldCooldown)
         {
             var p2Profile = await _profileRepo.GetByUserIdAsync(match.Player2Id);
             await _notifier.NotifyMatchmakingCooldownAppliedAsync(match.Player2Id, new
@@ -100,6 +102,28 @@ public class ApplySetupTimeoutUseCase
                 serverNow = DateTime.UtcNow
             });
         }
+    }
+
+    /// <summary>
+    /// Quyết định ai bị cooldown khi setup timeout.
+    /// Ưu tiên mobile-timer: người đã TimerReady đang chờ đối thủ không bị phạt.
+    /// </summary>
+    internal static (bool P1ShouldCooldown, bool P2ShouldCooldown) ResolveSetupTimeoutCulprits(OnlineMatch match)
+    {
+        var p1TimerReady = match.Player1TimerReady;
+        var p2TimerReady = match.Player2TimerReady;
+
+        // Còn người chưa xong mobile-timer → chỉ phạt những người chưa xong timer.
+        // Người đã xong timer (đang chờ P2P/scramble vì đối thủ chậm) không cooldown.
+        if (!p1TimerReady || !p2TimerReady)
+        {
+            return (!p1TimerReady, !p2TimerReady);
+        }
+
+        // Cả hai đã xong timer → xét phần còn lại của checklist (WebRTC + scramble).
+        var p1Passed = OnlineArenaFlowHelpers.IsChecklistPassed(match, true);
+        var p2Passed = OnlineArenaFlowHelpers.IsChecklistPassed(match, false);
+        return (!p1Passed, !p2Passed);
     }
 
     private async Task ApplyCooldownAsync(Guid userId, Guid profileId, Guid matchId, CancellationToken ct)
