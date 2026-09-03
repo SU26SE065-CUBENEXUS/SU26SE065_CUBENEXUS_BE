@@ -185,7 +185,7 @@ public class TournamentOperationService : ITournamentOperationService
                 var scrambleSets = await _unitOfWork.ScrambleSets.FindAsync(ss => groupIds.Contains(ss.GroupId), ct);
                 if (scrambleSets.Any())
                 {
-                    throw new InvalidOperationException($"Không thể tạo lại nhóm thi vì chuỗi scramble cho Vòng {dto.RoundNumber} đã được khởi tạo trước đó.");
+                    throw new InvalidOperationException($"Cannot regenerate groups because scrambles for Round {dto.RoundNumber} have already been generated.");
                 }
                 _unitOfWork.GroupCompetitors.RemoveRange(competitors);
                 _unitOfWork.Groups.RemoveRange(existingGroups);
@@ -230,10 +230,10 @@ public class TournamentOperationService : ITournamentOperationService
 
         int totalEligible = registeredEvents.Count;
         if (dto.CompetitorsPerGroup <= 0)
-            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", "Số thí sinh trong 1 nhóm phải lớn hơn 0.", 400);
+            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", "Competitors per group must be greater than 0.", 400);
 
         if (dto.CompetitorsPerGroup > totalEligible)
-            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", $"Số thí sinh trong 1 nhóm ({dto.CompetitorsPerGroup}) không được lớn hơn tổng số thí sinh tham gia ({totalEligible}).", 400);
+            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", $"Competitors per group ({dto.CompetitorsPerGroup}) cannot be greater than the total number of eligible competitors ({totalEligible}).", 400);
 
         // Check if any judges/stations are assigned for this tournament
         var assignedJudges = await _unitOfWork.TournamentJudges.FindAsync(
@@ -245,7 +245,7 @@ public class TournamentOperationService : ITournamentOperationService
         {
             throw new Application.Exceptions.CustomException(
                 "NO_JUDGES_OR_STATIONS_ASSIGNED",
-                "Chưa phân công trọng tài và bàn thi đấu cho giải đấu! Vui lòng thực hiện bước 'Phân công Trọng tài & Bàn thi' trước khi khởi tạo nhóm.",
+                "No judges or stations assigned for this tournament! Please assign judges and stations before generating groups.",
                 400
             );
         }
@@ -254,7 +254,7 @@ public class TournamentOperationService : ITournamentOperationService
         int finalStationCount = dto.StationCount > 0 ? dto.StationCount : detectedStationCount;
 
         if (dto.CompetitorsPerGroup <= 0)
-            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", "Số thí sinh trong 1 nhóm phải lớn hơn 0.", 400);
+            throw new Application.Exceptions.CustomException("INVALID_GROUP_SIZE", "Competitors per group must be greater than 0.", 400);
 
         // Fetch display names for competitors
         var regIds = registeredEvents.Select(re => re.RegistrationId).Distinct().ToList();
@@ -1443,7 +1443,7 @@ public class TournamentOperationService : ITournamentOperationService
         {
             if (!user.IsActive)
             {
-                throw new Application.Exceptions.CustomException("JUDGE_ACCOUNT_DISABLED", "Tài khoản trọng tài này đã bị vô hiệu hóa hoặc giải đấu đã kết thúc.", 403);
+                throw new Application.Exceptions.CustomException("JUDGE_ACCOUNT_DISABLED", "This judge account has been deactivated or the tournament has ended.", 403);
             }
 
             if (tournamentId.HasValue)
@@ -1452,7 +1452,7 @@ public class TournamentOperationService : ITournamentOperationService
                     tj => tj.TournamentId == tournamentId.Value && tj.UserId == userId, ct);
                 if (!isAssigned)
                 {
-                    throw new Application.Exceptions.CustomException("JUDGE_NOT_ASSIGNED_TO_TOURNAMENT", "Trọng tài không có quyền thao tác trên giải đấu này.", 403);
+                    throw new Application.Exceptions.CustomException("JUDGE_NOT_ASSIGNED_TO_TOURNAMENT", "The judge is not authorized to perform operations in this tournament.", 403);
                 }
             }
         }

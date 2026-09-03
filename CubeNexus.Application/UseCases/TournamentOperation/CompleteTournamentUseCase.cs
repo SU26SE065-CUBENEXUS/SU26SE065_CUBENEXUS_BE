@@ -43,7 +43,7 @@ public class CompleteTournamentUseCase : ICompleteTournamentUseCase
             {
                 throw new CustomException(
                     "TOURNAMENT_NO_EVENTS",
-                    "Không thể hoàn thành giải đấu vì chưa có môn thi nào.",
+                    "Cannot complete tournament because there are no events.",
                     400
                 );
             }
@@ -57,14 +57,14 @@ public class CompleteTournamentUseCase : ICompleteTournamentUseCase
 
             foreach (var ev in eventList)
             {
-                var puzzleName = puzzleTypeMap.GetValueOrDefault(ev.PuzzleTypeId, "Môn thi");
+                var puzzleName = puzzleTypeMap.GetValueOrDefault(ev.PuzzleTypeId, "Event");
                 var evGroups = groupsList.Where(g => g.EventId == ev.Id).ToList();
 
                 if (!evGroups.Any())
                 {
                     throw new CustomException(
                         "EVENT_NOT_STARTED",
-                        $"Không thể hoàn thành giải đấu! Môn thi '{puzzleName}' chưa được khởi tạo nhóm hay tạo vòng thi nào.",
+                        $"Cannot complete tournament! Event '{puzzleName}' has no initialized groups or rounds.",
                         400
                     );
                 }
@@ -74,7 +74,7 @@ public class CompleteTournamentUseCase : ICompleteTournamentUseCase
                 {
                     throw new CustomException(
                         "TOURNAMENT_NOT_READY_TO_COMPLETE",
-                        $"Không thể hoàn thành giải đấu! Môn thi '{puzzleName}' còn nhóm/vòng thi chưa hoàn tất (chưa Complete Round). Vui lòng nhập điểm và hoàn thành các vòng thi trước.",
+                        $"Cannot complete tournament! Event '{puzzleName}' has incomplete groups/rounds. Please record scores and complete all rounds first.",
                         400
                     );
                 }
@@ -85,7 +85,7 @@ public class CompleteTournamentUseCase : ICompleteTournamentUseCase
                 {
                     throw new CustomException(
                         "UNCOMPLETED_ROUNDS_REMAINING",
-                        $"Không thể hoàn thành giải đấu! Môn thi '{puzzleName}' được cấu hình {configuredRounds} vòng đấu nhưng hiện tại mới thực hiện xong Vòng {maxRoundNumber}. Vui lòng thực hiện 'Advance Round' để tuyển chọn thí sinh thi tiếp Vòng {maxRoundNumber + 1}.",
+                        $"Cannot complete tournament! Event '{puzzleName}' is configured for {configuredRounds} round(s) but has only completed Round {maxRoundNumber}. Please advance competitors to Round {maxRoundNumber + 1}.",
                         400
                     );
                 }

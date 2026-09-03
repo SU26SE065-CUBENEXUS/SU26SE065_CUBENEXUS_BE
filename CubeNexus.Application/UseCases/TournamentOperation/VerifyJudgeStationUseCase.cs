@@ -79,7 +79,7 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationByStationUseCase
                     tj => tj.TournamentId == registration.TournamentId && tj.UserId == judgeUserId.Value, ct);
                 if (!isAssigned)
                 {
-                    throw new CustomException("JUDGE_NOT_ASSIGNED_TO_TOURNAMENT", "Trọng tài không có quyền quét xác nhận thí sinh cho giải đấu này.", 403);
+                    throw new CustomException("JUDGE_NOT_ASSIGNED_TO_TOURNAMENT", "The judge is not authorized to verify competitors for this tournament.", 403);
                 }
             }
         }
@@ -158,13 +158,13 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationByStationUseCase
         {
             if (group.StatusCode == "PENDING")
             {
-                throw new CustomException("GROUP_NOT_ONGOING", $"Nhóm thi đấu ở Vòng {group.RoundNumber} chưa được Ban Tổ Chức kích hoạt 'Bắt Đầu Vòng' (Start Active Round). Vui lòng mở trang Quản lý giải -> Tab Vòng {group.RoundNumber} -> chọn 'Bắt Đầu Vòng'!", 400);
+                throw new CustomException("GROUP_NOT_ONGOING", $"The group in Round {group.RoundNumber} has not been started by the Organizer. Please open Tournament Management -> Round {group.RoundNumber} -> select 'Start Active Round'.", 400);
             }
             if (group.StatusCode == "COMPLETED" || group.StatusCode == "LOCKED")
             {
-                throw new CustomException("GROUP_NOT_ONGOING", $"Nhóm thi đấu ở Vòng {group.RoundNumber} đã kết thúc hoặc đã bị khóa kết quả.", 400);
+                throw new CustomException("GROUP_NOT_ONGOING", $"The group in Round {group.RoundNumber} has already ended or results are locked.", 400);
             }
-            throw new CustomException("GROUP_NOT_ONGOING", $"Nhóm thi đấu ở Vòng {group.RoundNumber} hiện không ở trạng thái đang diễn ra (Trạng thái hiện tại: {group.StatusCode}).", 400);
+            throw new CustomException("GROUP_NOT_ONGOING", $"The group in Round {group.RoundNumber} is currently not ongoing (Current status: {group.StatusCode}).", 400);
         }
 
         if (comp.StatusCode == GroupCompetitorStatus.NO_SHOW)
@@ -185,10 +185,10 @@ public class VerifyJudgeStationUseCase : IVerifyJudgeStationByStationUseCase
                 bool isDnfStopped = CutoffEvaluator.IsDnfStopped(ev.SolveCount, resultsList);
                 if (isDnfStopped)
                 {
-                    throw new CustomException("DNF_LIMIT_REACHED", "Thí sinh đã dừng thi đấu do đạt số lượt DNF tối đa làm DNF kết quả Average.", 400);
+                    throw new CustomException("DNF_LIMIT_REACHED", "The competitor was stopped because they reached the maximum DNF count leading to a DNF average.", 400);
                 }
-                var cutoffDisplay = ev.CutoffTimeMs.HasValue ? $"{ev.CutoffTimeMs.Value / 1000.0:0.##}s" : "mốc quy định";
-                throw new CustomException("CUTOFF_NOT_PASSED", $"Thí sinh đã dừng thi đấu do không đạt mốc Cutoff Time ({cutoffDisplay}).", 400);
+                var cutoffDisplay = ev.CutoffTimeMs.HasValue ? $"{ev.CutoffTimeMs.Value / 1000.0:0.##}s" : "required cutoff";
+                throw new CustomException("CUTOFF_NOT_PASSED", $"The competitor was stopped because they did not pass the Cutoff Time ({cutoffDisplay}).", 400);
             }
             throw new CustomException("COMPETITOR_COMPLETED", "This competitor has already completed all solves for this round.", 400);
         }

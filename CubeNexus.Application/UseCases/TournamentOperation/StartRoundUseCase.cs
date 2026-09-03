@@ -113,7 +113,7 @@ public class StartRoundUseCase : IStartRoundUseCase
         {
             if (tournament.StatusCode != "CHECKING_IN")
             {
-                throw new CustomException("INVALID_TOURNAMENT_STATE", "Không thể bắt đầu lượt thi vì giải đấu chưa ở trạng thái CHECKING_IN.", 400);
+                throw new CustomException("INVALID_TOURNAMENT_STATE", "Cannot start round because the tournament is not in CHECKING_IN status.", 400);
             }
             tournament.StatusCode = "ONGOING";
             _unitOfWork.Tournaments.Update(tournament);

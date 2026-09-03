@@ -81,14 +81,14 @@ public class CheckInRegistrationByQrUseCase : ICheckInRegistrationByQrUseCase
                     tj => tj.TournamentId == registration.TournamentId && tj.UserId == judgeUserId.Value);
                 if (!isAssigned)
                 {
-                    throw new CustomException("JUDGE_NOT_ASSIGNED_TO_TOURNAMENT", "Trọng tài không có quyền điểm danh thí sinh cho giải đấu này.", 403);
+                    throw new CustomException("JUDGE_NOT_ASSIGNED_TO_TOURNAMENT", "The judge is not authorized to check in competitors for this tournament.", 403);
                 }
             }
         }
 
         if (registration.Tournament.StatusCode != "CHECKING_IN" && registration.Tournament.StatusCode != "ONGOING")
         {
-            throw new CustomException("INVALID_TOURNAMENT_STATE", "Chỉ được phép check-in khi giải đấu đang ở trạng thái CHECKING_IN hoặc ONGOING.", 400);
+            throw new CustomException("INVALID_TOURNAMENT_STATE", "Check-in is only allowed when tournament status is CHECKING_IN or ONGOING.", 400);
         }
 
         if (registration.StatusCode == "CANCELLED")

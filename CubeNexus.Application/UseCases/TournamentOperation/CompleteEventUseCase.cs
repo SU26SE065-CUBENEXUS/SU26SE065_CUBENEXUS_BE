@@ -67,7 +67,7 @@ public class CompleteEventUseCase : ICompleteEventUseCase
         {
             throw new CustomException(
                 "UNCOMPLETED_ROUNDS_REMAINING",
-                $"Không thể hoàn thành môn thi! Môn thi này được cấu hình {configuredRounds} vòng đấu nhưng hiện tại mới thực hiện xong Vòng {finalRoundNumber}. Vui lòng bấm 'Advance Round' để tuyển chọn thí sinh thi tiếp Vòng {finalRoundNumber + 1}.",
+                $"Cannot complete event! This event is configured for {configuredRounds} round(s) but has only completed Round {finalRoundNumber}. Please advance competitors to Round {finalRoundNumber + 1}.",
                 409
             );
         }

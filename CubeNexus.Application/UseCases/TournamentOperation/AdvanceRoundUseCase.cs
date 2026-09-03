@@ -134,10 +134,10 @@ public class AdvanceRoundUseCase : IAdvanceRoundUseCase
 
         int totalAdvanced = advancedOffRegs.Count;
         if (dto.CompetitorsPerGroup <= 0)
-            throw new CustomException("INVALID_GROUP_SIZE", "Số thí sinh trong 1 nhóm phải lớn hơn 0.", 400);
+            throw new CustomException("INVALID_GROUP_SIZE", "Competitors per group must be greater than 0.", 400);
 
         if (dto.CompetitorsPerGroup > totalAdvanced)
-            throw new CustomException("INVALID_GROUP_SIZE", $"Số thí sinh trong 1 nhóm ({dto.CompetitorsPerGroup}) không được lớn hơn tổng số thí sinh được đi tiếp ({totalAdvanced}).", 400);
+            throw new CustomException("INVALID_GROUP_SIZE", $"Competitors per group ({dto.CompetitorsPerGroup}) cannot be greater than the total number of advancing competitors ({totalAdvanced}).", 400);
 
         // Check assigned judges/stations for tournament
         var assignedJudges = await _unitOfWork.TournamentJudges.FindAsync(
@@ -148,7 +148,7 @@ public class AdvanceRoundUseCase : IAdvanceRoundUseCase
         {
             throw new CustomException(
                 "NO_JUDGES_OR_STATIONS_ASSIGNED",
-                "Chưa phân công trọng tài và bàn thi đấu cho giải đấu! Vui lòng thực hiện 'Phân công Trọng tài & Bàn thi' trước khi thăng hạng thí sinh.",
+                "No judges or stations assigned for this tournament! Please assign judges and stations before advancing competitors.",
                 400
             );
         }
@@ -157,7 +157,7 @@ public class AdvanceRoundUseCase : IAdvanceRoundUseCase
         int finalStationCount = dto.StationCount > 0 ? dto.StationCount : detectedStationCount;
 
         if (dto.CompetitorsPerGroup <= 0)
-            throw new CustomException("INVALID_GROUP_SIZE", "Số thí sinh trong 1 nhóm phải lớn hơn 0.", 400);
+            throw new CustomException("INVALID_GROUP_SIZE", "Competitors per group must be greater than 0.", 400);
 
         // Generate Groups
         var assignments = _groupAssignmentService.AssignGroups(
