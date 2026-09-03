@@ -24,6 +24,10 @@ public static class OnlineArenaFlowHelpers
     /// checklistPassed: camera + webRtc + timer + scrambleCheck == PASSED.
     /// RecordingStarted is NOT part of ROOM_SETUP checklist — it belongs to COUNTDOWN.
     /// KHÔNG bao gồm playerReady (auto-set khi checklist hoàn thành).
+    ///
+    /// Lưu ý setup-timeout cooldown: không dùng checklist full để phạt.
+    /// Nếu còn người chưa TimerReady thì chỉ cooldown người chưa xong mobile-timer
+    /// (xem ApplySetupTimeoutUseCase.ResolveSetupTimeoutCulprits).
     /// </summary>
     public static bool IsChecklistPassed(OnlineMatch match, bool isPlayer1)
         => isPlayer1
@@ -126,10 +130,10 @@ public static class OnlineArenaFlowHelpers
     public static TimeSpan GetCooldownDuration(int timeoutCount)
         => timeoutCount switch
         {
-            1 => TimeSpan.FromSeconds(60),
-            2 => TimeSpan.FromMinutes(2),
-            3 => TimeSpan.FromMinutes(5),
-            _ => TimeSpan.FromMinutes(10)
+            1 => TimeSpan.FromSeconds(10),
+            2 => TimeSpan.FromMinutes(1),
+            3 => TimeSpan.FromMinutes(2),
+            _ => TimeSpan.FromMinutes(5)
         };
 
     // ===================================================================
